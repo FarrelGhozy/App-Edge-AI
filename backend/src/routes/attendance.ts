@@ -1,0 +1,38 @@
+import { Elysia } from "elysia";
+import { scanSchema, batchSyncSchema, recordScan, listAttendance } from "../services/attendance";
+import prisma from "../services/prisma";
+
+export const attendanceRoutes = new Elysia()
+  .post("/api/attendance/scan", async ({ body }) => {
+    const student = await prisma.student.findUnique({ where: { id: body.studentId } });
+    if (!student) {
+      return new Response(JSON.stringify({ success: false, error: "Student not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const log = await recordScan({
+      studentId: body.studentId,
+      studentName: student.name,
+      action: body.action,
+      confidenceScore: body.confidenceScore,
+      isViolation: body.isViolation,
+      violationType: body.violationType,
+      deviceId: body.deviceId,
+      photoCapture: body.photoCapture,
+      timestamp: body.timestamp
+    });
+
+    return { success: true, data: log };
+  }, { body: scanSchema })
+  .get("/api/attendance", async ({ query }) => {
+    const params = {
+      page: query.page ? parseInt(query.page as string) : 1,
+      pageSize: query.pageSize ? parseInt(query.pageSize as string) : 20,
+      studentId: query.studentId as string | undefined,
+      startDate: query.startDate as string | undefined,
+      endDate: query.endDate as string | undefined
+    };
+    return await listAttendance(params);
+  });

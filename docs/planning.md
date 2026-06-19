@@ -23,7 +23,7 @@
 14. [UI Screen Map](#14-ui-screen-map)
 15. [Hardware Requirement](#15-hardware-requirement)
 16. [Phase / Milestone Pengembangan](#16-phase--milestone-pengembangan)
-17. [Open Questions](#17-open-questions)
+17. [Keputusan Final](#17-keputusan-final)
 
 ---
 

@@ -1,0 +1,2 @@
+-keep class com.facegate.core.data.model.** { *; }
+-keep class com.facegate.core.data.remote.dto.** { *; }

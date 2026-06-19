@@ -1,0 +1,7 @@
+tunnel: facegate-tunnel
+credentials-file: /home/fazy/.cloudflared/facegate-tunnel.json
+
+ingress:
+  - hostname: facegate.utc.web.id
+    service: http://localhost:8150
+  - service: http_status:404

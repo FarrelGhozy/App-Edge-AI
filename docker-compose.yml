@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: facegate-db
+    restart: always
+    environment:
+      POSTGRES_DB: facegate
+      POSTGRES_USER: facegate
+      POSTGRES_PASSWORD: facegate_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U facegate"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: facegate-api
+    restart: always
+    ports:
+      - "8150:8150"
+    environment:
+      DATABASE_URL: "postgresql://facegate:facegate_pass@postgres:5432/facegate?schema=public"
+      JWT_SECRET: "facegate-jwt-secret-change-in-production"
+      PORT: "8150"
+      NODE_ENV: "production"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
