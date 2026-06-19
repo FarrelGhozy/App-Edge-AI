@@ -30,6 +30,12 @@ services:
       JWT_SECRET: "facegate-jwt-secret-change-in-production"
       PORT: "8150"
       NODE_ENV: "production"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8150/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy

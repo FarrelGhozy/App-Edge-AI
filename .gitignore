@@ -22,3 +22,7 @@ backend/.env
 # Docker
 backend/dist/
 backend/*.tsbuildinfo
+
+# Environment
+backend/.env
+**/.env
