@@ -15,9 +15,9 @@
 6. [API Endpoints](#6-api-endpoints)
 7. [Alur Data Offline-First](#7-alur-data-offline-first)
 8. [Rule Engine: Aturan & Pembatasan](#8-rule-engine-aturan--pembatasan)
-9. [Sistem Check-In / Check-Out](#9-sistem-check-in--check-out)
+9. [Sistem Scan Toggle (Keluar / Kembali)](#9-sistem-scan-toggle-keluar--kembali)
 10. [Sistem Pelanggaran](#10-sistem-pelanggaran)
-11. [Sistem Izin & Kuota](#11-sistem-izin--kuota)
+11. [Sistem Izin: Harian & Pengajuan](#11-sistem-izin-harian--pengajuan)
 12. [Laporan & Rekapan](#12-laporan--rekapan)
 13. [Android Module Breakdown](#13-android-module-breakdown)
 14. [UI Screen Map](#14-ui-screen-map)
@@ -30,7 +30,7 @@
 ## 1. Ringkasan Proyek
 
 ### 1.1 Visi
-Sistem absensi kampus **tanpa kartu**, **tanpa internet saat operasional**, menggunakan pengenalan wajah di *edge device* (HP/Tablet Android) dengan sistem **check-in/check-out dua arah** dan deteksi pelanggaran otomatis.
+Sistem absensi kampus **tanpa kartu**, **tanpa internet saat operasional**, berbasis pengenalan wajah di *edge device* dengan sistem **scan toggle** (keluar/kembali) dan **sync on-demand** agar tidak membebani server.
 
 ### 1.2 Pengguna
 | Peran | Perangkat | Jumlah |
@@ -43,9 +43,9 @@ Sistem absensi kampus **tanpa kartu**, **tanpa internet saat operasional**, meng
 ### 1.3 Aplikasi
 | Aplikasi | Perangkat | Fungsi Utama |
 |---|---|---|
-| **Kiosk Scanner** | Tablet/HP statis di gerbang | Scan wajah **masuk & keluar**, catat timestamp, verifikasi offline |
-| **Admin App** | HP pegangan admin | Registrasi wajah, approve izin, monitoring, atur rules, lihat rekap + pelanggaran |
-| **Backend API** | Server (Docker) | Master data, sync, rule engine, generate laporan, audit log |
+| **Kiosk Scanner** | Tablet/HP statis di gerbang | Scan wajah toggle keluar/kembali, verifikasi offline, simpan log |
+| **Admin App** | HP pegangan admin | Registrasi wajah, atur izin harian & pengajuan, monitoring, rekap, trigger sync |
+| **Backend API** | Server (Docker) | Master data, rule engine, violation detector, laporan |
 
 ---
 
@@ -53,90 +53,83 @@ Sistem absensi kampus **tanpa kartu**, **tanpa internet saat operasional**, meng
 
 ```
 FaceGateApp/
-├── android/                          # Root Gradle — semua module Android
-│   ├── core/                         # :core — shared library (Android Library)
-│   │   ├── src/main/kotlin/.../
-│   │   │   ├── face/                 # TFLite wrapper (ekstraksi vektor)
-│   │   │   ├── network/             # Retrofit API client + DTO
-│   │   │   ├── database/            # Room DAOs + entities
-│   │   │   ├── sync/                # WorkManager sync logic
+├── android/
+│   ├── core/                         # :core — shared library
+│   │   ├── src/main/kotlin/.../core/
+│   │   │   ├── face/                 # TFLite wrapper
+│   │   │   ├── network/             # Retrofit
+│   │   │   ├── database/            # Room
+│   │   │   ├── sync/                # WorkManager sync
 │   │   │   └── model/               # Domain model
 │   │   └── build.gradle.kts
 │   │
-│   ├── kiosk-scanner/                # :kiosk-scanner — aplikasi scanner
+│   ├── kiosk-scanner/                # :kiosk-scanner
 │   │   ├── src/main/
-│   │   │   ├── java/.../
-│   │   │   │   ├── camera/           # CameraX logic
-│   │   │   │   ├── matching/         # Brute-force matching di RAM
-│   │   │   │   ├── ui/              # Compose UI
-│   │   │   │   └── service/         # Foreground service
+│   │   │   ├── java/.../scanner/
+│   │   │   │   ├── camera/
+│   │   │   │   ├── matching/
+│   │   │   │   ├── toggle/          # Toggle state management
+│   │   │   │   ├── rule/
+│   │   │   │   ├── ui/
+│   │   │   │   └── service/
 │   │   │   └── res/
 │   │   └── build.gradle.kts
 │   │
-│   ├── admin-app/                    # :admin-app — aplikasi admin
+│   ├── admin-app/                    # :admin-app
 │   │   ├── src/main/
-│   │   │   ├── java/.../
-│   │   │   │   ├── auth/            # Login admin
-│   │   │   │   ├── student/         # Manajemen mahasiswa
-│   │   │   │   ├── register/        # Registrasi wajah
-│   │   │   │   ├── permit/          # Approval izin
-│   │   │   │   ├── attendance/      # Monitoring absensi
-│   │   │   │   ├── checkinout/      # Rekap check-in/out
-│   │   │   │   ├── rules/           # Aturan & pembatasan
-│   │   │   │   ├── schedule/        # Jadwal kuliah
-│   │   │   │   ├── violation/       # Pelanggaran
-│   │   │   │   ├── report/          # Laporan & rekap
-│   │   │   │   ├── device/          # Manajemen kiosk
-│   │   │   │   ├── import/          # Import Excel/CSV
-│   │   │   │   └── ui/             # Komponen shared UI
+│   │   │   ├── java/.../admin/
+│   │   │   │   ├── auth/
+│   │   │   │   ├── dashboard/
+│   │   │   │   ├── student/
+│   │   │   │   ├── register/
+│   │   │   │   ├── permit/          # Izin harian + pengajuan
+│   │   │   │   ├── monitor/         # Monitoring toggle status
+│   │   │   │   ├── rules/
+│   │   │   │   ├── violation/
+│   │   │   │   ├── report/
+│   │   │   │   ├── sync/            # Trigger sync manual
+│   │   │   │   ├── device/
+│   │   │   │   └── import/
 │   │   │   └── res/
 │   │   └── build.gradle.kts
 │   │
-│   ├── build.gradle.kts              # Root build (version catalog)
+│   ├── build.gradle.kts
 │   ├── settings.gradle.kts
-│   └── gradle/
-│       └── libs.versions.toml        # Version catalog
+│   └── gradle/libs.versions.toml
 │
-├── backend/                          # Node.js (Bun) backend
+├── backend/
 │   ├── src/
-│   │   ├── index.ts                  # Entry point
-│   │   ├── routes/                   # Route handlers
-│   │   ├── controllers/              # Business logic
-│   │   ├── services/                 # Service layer
-│   │   │   ├── rule-engine.ts        # Rule/filter evaluator
-│   │   │   ├── violation-detector.ts # Deteksi pelanggaran
-│   │   │   ├── report-generator.ts   # Generate laporan
-│   │   │   └── scheduler.ts          # Jadwal task background
-│   │   ├── middleware/               # Auth, validation
-│   │   └── utils/                    # Helpers
+│   │   ├── index.ts
+│   │   ├── routes/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   │   ├── rule-engine.ts
+│   │   │   ├── violation-detector.ts
+│   │   │   ├── report-generator.ts
+│   │   │   └── sync-service.ts      # Kelola sync request
+│   │   ├── middleware/
+│   │   └── utils/
 │   ├── prisma/
-│   │   ├── schema.prisma             # Database schema
-│   │   └── seed.ts                   # Data awal
+│   │   ├── schema.prisma
+│   │   └── seed.ts
 │   ├── docker/
 │   │   └── Dockerfile
 │   ├── package.json
 │   └── tsconfig.json
 │
-├── docker-compose.yml                # PostgreSQL + pgvector + backend
+├── docker-compose.yml
 ├── docs/
-│   ├── planning.md                   # ← file ini
-│   └── api-spec.md                   # Spesifikasi API detail
+│   ├── planning.md
+│   └── api-spec.md
 └── README.md
 ```
 
-### 2.1 Dependency Antar Module Android
+### 2.1 Dependency
 
 ```
 :kiosk-scanner ──→ :core
 :admin-app     ──→ :core
 ```
-
-Semua module Android bergantung ke `:core`. `:core` berisi:
-- TFLite face embedding
-- Room database (entities + DAO)
-- Retrofit API client
-- Sync worker (WorkManager)
-- Domain model
 
 ---
 
@@ -144,134 +137,146 @@ Semua module Android bergantung ke `:core`. `:core` berisi:
 
 ### 3.1 Android
 
-| Komponen | Pustaka | Versi | Catatan |
-|---|---|---|---|
-| Bahasa | Kotlin | 2.0.x | |
-| UI | Jetpack Compose + Material 3 | | Bukan XML |
-| Kamera | CameraX | 1.4.x | lifecycle-aware |
-| Face Embedding | TensorFlow Lite (MobileFaceNet) | | Model .tflite |
-| Database Lokal | Room | 2.6.x | SQLite |
-| Background Sync | WorkManager | 2.9.x | Periodic sync + opportunistic |
-| Networking | Retrofit + OkHttp + Kotlinx Serialization | | |
-| DI | Hilt | 2.50+ | |
-| Coroutines | Kotlinx Coroutines | 1.8.x | |
-| Vector Storage | FloatArray di RAM | | 10.000 vektor × 128-d = ~5-10 MB |
-| Excel/CSV | Apache POI / OpenCSV | | Untuk import/export |
-| PDF Report | iText / Android PDF API | | Untuk cetak laporan |
-| Minimum SDK | **Android 12 (API 31)** | | |
+| Komponen | Pustaka | Versi |
+|---|---|---|
+| Bahasa | Kotlin | 2.0.x |
+| UI | Jetpack Compose + Material 3 | |
+| Kamera | CameraX | 1.4.x |
+| Face Embedding | TensorFlow Lite (MobileFaceNet) | |
+| Database Lokal | Room | 2.6.x |
+| Background Sync | WorkManager | 2.9.x |
+| Networking | Retrofit + OkHttp + Kotlinx Serialization | |
+| DI | Hilt | 2.50+ |
+| Coroutines | Kotlinx Coroutines | 1.8.x |
+| Vector Storage | FloatArray di RAM | |
+| Excel/CSV | Apache POI / OpenCSV | |
+| PDF | iText / Android PDF API | |
+| Min SDK | **Android 12 (API 31)** | |
 
 ### 3.2 Backend
 
-| Komponen | Pustaka | Catatan |
-|---|---|---|
-| Runtime | Bun | Lebih cepat dari Node.js biasa |
-| Framework | Elysia / Hono | Ringan, TypeScript-native |
-| ORM | Prisma | Type-safe database client |
-| Database | PostgreSQL + pgvector | Penyimpanan vektor wajah master |
-| Auth | JWT (bcrypt) | |
-| Validation | Zod | Request validation |
-| CSV Parsing | PapaParse | Untuk import data |
-| PDF Generation | Puppeteer / PDFKit | Untuk export laporan |
-| Container | Docker + docker-compose | |
+| Komponen | Pustaka |
+|---|---|
+| Runtime | Bun |
+| Framework | Elysia / Hono |
+| ORM | Prisma |
+| Database | PostgreSQL + pgvector |
+| Auth | JWT (bcrypt) |
+| Validation | Zod |
+| CSV | PapaParse |
+| PDF | PDFKit |
+| Container | Docker + docker-compose |
 
-### 3.3 AI / Face Recognition Pipeline
+### 3.3 AI Pipeline
 
 ```
-[CameraX frame] → [TFLite: Face Detection] → [TFLite: Face Embedding]
-     ↓                                               ↓
-  Crop face ROI                              Vector 128-d FloatArray
-     ↓                                               ↓
-  [TFLite: Liveness Detection]               [Brute-force compare]
-  (blink detection / motion)                 (cosine similarity) 
-                                               ↓
-                                          [Match ≥ threshold?]
-                                               ↓
-                                     YES → Catat absensi + nama
-                                     NO  → Tampilkan "wajah tidak dikenal"
-                                               ↓
-                                     Tentukan jenis scan: MASUK atau KELUAR
-                                     (berdasarkan arah / session terakhir)
-                                               ↓
-                                     Cek rule engine: apakah boleh keluar?
-                                     Jika tidak → flag sebagai pelanggaran
+[CameraX frame] → [Face Detection] → [Face Embedding 128-d]
+     ↓                                    ↓
+  Liveness Check                    Brute-force match di RAM
+     ↓                                    ↓
+  Anti-spoofing                    [Match ≥ threshold?]
+                                        ↓
+                                  YES → Dapatkan identitas
+                                  NO  → Wajah tidak dikenal
+                                        ↓
+                                  Tentukan aksi toggle:
+                                  Jika sebelumnya "di_kampus" → "keluar"
+                                  Jika sebelumnya "di_luar"   → "kembali"
 ```
-
-- **Model**: MobileFaceNet .tflite (128-d embedding)
-- **Threshold**: default 0.6 (bisa di-tuning)
-- **Liveness**: model tambahan deteksi kedipan/gerakan (anti-spoofing)
-- **Kecepatan target**: < 50ms per face (deteksi + embedding + matching)
 
 ---
 
 ## 4. Arsitektur Sistem
 
 ```
-                            ┌─────────────────────────────┐
-                            │    PostgreSQL + pgvector     │
-                            │      (Master Data)          │
-                            └──────────┬──────────────────┘
-                                       │
-                            ┌──────────┴──────────────────┐
-                            │   Backend API (Bun)         │
-                            │   - CRUD semua entity       │
-                            │   - Rule Engine             │
-                            │   - Violation Detector      │
-                            │   - Report Generator        │
-                            │   - Sync manager            │
-                            └──────────┬──────────────────┘
-                                       │
-              ┌────────────────────────┼────────────────────────┐
-              │                        │                        │
-   ┌──────────▼──────────┐   ┌─────────▼──────────┐   ┌───────▼────────┐
-   │  Kiosk Scanner App   │   │   Admin App        │   │  Web Admin     │
-   │  (Android Tablet)    │   │   (Android HP)     │   │  (Opsional)    │
-   │                      │   │                    │   │                │
-   │  Offline:            │   │  Online:           │   │  Full fitur    │
-   │  - Scan wajah        │   │  - Dashboard       │   │  admin +       │
-   │  - Check-in/out      │   │  - Manajemen       │   │  laporan       │
-   │  - Match di RAM      │   │    mahasiswa       │   │                │
-   │  - Simpan log        │   │  - Registrasi      │   │                │
-   │  - Verifikasi        │   │    wajah           │   │                │
-   │    aturan (cache)    │   │  - Approve izin    │   │                │
-   │                      │   │  - Atur rules      │   │                │
-   │  Online (sync):      │   │  - Jadwal kuliah   │   │                │
-   │  - Download vektor   │   │  - Lihat rekap     │   │                │
-   │  - Upload log        │   │  - Export laporan  │   │                │
-   │  - Download rules    │   │  - Import data     │   │                │
-   └──────────────────────┘   └────────────────────┘   └────────────────┘
+┌─────────────────────────────────────┐
+│       PostgreSQL + pgvector         │
+│         (Master Data)               │
+└────────────┬────────────────────────┘
+             │
+┌────────────▼────────────────────────┐
+│     Backend API (Bun)               │
+│  - CRUD master data                 │
+│  - Rule engine                      │
+│  - Violation detector               │
+│  - Report generator                 │
+│  - Sync request manager             │
+└────────────┬────────────────────────┘
+             │
+      ┌──────┴──────┐
+      │             │
+┌─────▼─────┐ ┌─────▼──────┐
+│ Kiosk     │ │ Admin App  │
+│ Scanner   │ │ (HP Admin) │
+│ (Tablet)  │ │            │
+│           │ │ Online:    │
+│ Offline:  │ │ - Dashboard│
+│ - Scan    │ │ - Atur izin│
+│   toggle  │ │ - Trigger  │
+│ - Match   │ │   sync     │
+│   RAM     │ │ - Rekap    │
+│ - Simpan  │ │ - Approval │
+│   log     │ │   pengajuan│
+│           │ │   izin     │
+│ Online:   │ │            │
+│ - Sync    │ │            │
+│   (saat   │ │            │
+│   diminta │ │            │
+│   admin)  │ │            │
+└───────────┘ └────────────┘
 ```
 
-### 4.1 Alur Tengah Malam (Background Sync)
+### 4.1 Sync Tengah Malam (Otomatis)
 
 ```
-WorkManager (setiap 00:00)
+⏰ 00:00 WIB — WorkManager periodic task
        │
        ├── Cek koneksi internet
-       │      └── Tidak ada → coba lagi 30 menit kemudian
+       │      └── Tidak ada → retry 30 menit kemudian
        │
-       ├── GET /api/sync/faces?since=<timestamp>
-       │      └── Response: daftar {id, nim, vector[], updated_at}
+       ├── POST /api/sync/attendance (upload log offline)
+       │      └── Kirim semua log yang isSynced = false
+       │
+       ├── GET /api/sync/faces?since=<lastSync>
+       │      └── Download face vectors baru/update
        │
        ├── GET /api/sync/rules
-       │      └── Download all active campus rules (cache lokal)
+       │      └── Download aturan aktif terbaru
        │
-       ├── Update Room Database
-       │      └── INSERT OR REPLACE face_vectors, rules
+       ├── Update Room database + load ulang RAM
        │
-       ├── Load semua vektor ke RAM
-       │      └── In-memory FloatArray[10000][128]
-       │
-       └── POST /api/sync/attendance (batch upload log offline)
-              └── Also upload checkin/out + violation logs
-              └── Response: {synced_count, failed_ids}
+       └── POST /api/sync/complete (konfirmasi selesai)
 ```
 
-### 4.2 Background Opportunistic Sync
+Sync tengah malam adalah **default otomatis**. Tidak ada sync otomatis di luar jam itu untuk menjaga server tidak kebanjiran request.
 
-Selain sync tengah malam, kiosk akan sync otomatis saat:
-- Koneksi internet terdeteksi stabil (WorkManager + NetworkCallback)
-- Setelah scan berhasil (upload log langsung jika ada internet)
-- Setiap 30 menit jika ada data antrean
+### 4.2 Sync Manual (On-Demand dari Admin)
+
+```
+Admin App                          Server                       Kiosk Scanner
+   │                                │                              │
+   │── [Tombol "Sync Sekarang"] ──▶ │                              │
+   │                                │── store syncRequested=true  │
+   │                                │   untuk device ini          │
+   │                                │                              │
+   │                                │◀── poll tiap 10 menit ──────│
+   │                                │    GET /api/sync/requested  │
+   │                                │── response: true ──────────▶│
+   │                                │                              │
+   │                                │                              │── trigger sync:
+   │                                │                              │   1. Upload attendance logs
+   │                                │                              │   2. Download faces + rules
+   │                                │                              │   3. Update RAM
+   │                                │                              │
+   │                                │◀── POST /api/sync/complete ─│
+   │                                │── set syncRequested=false   │
+   │◀─ Notifikasi "Sync selesai" ──│                              │
+   │                                │                              │
+```
+
+**Polling**: Kiosk mengecek `GET /api/sync/requested` setiap **10 menit** saat ada internet. Request ini sangat ringan (return boolean + timestamp, tanpa transfer data besar). Jika `syncRequested = true`, kiosk langsung menjalankan sync penuh.
+
+**Saat offline**: Jika kiosk tidak punya internet, log menumpuk di lokal. Saat internet kembali, WorkManager otomatis jalan (NetworkType.CONNECTED constraint), kiosk cek flag syncRequested. Jika admin sudah meminta sync, langsung proses. Jika tidak, kiosk tetap upload log yang tertunda.
 
 ---
 
@@ -287,7 +292,7 @@ model Student {
   nim             String   @unique
   name            String
   studyProgram    String?
-  academicYear    Int?     // angkatan (2023, 2024, ...)
+  academicYear    Int?
   phone           String?
   email           String?
   isActive        Boolean  @default(true)
@@ -296,7 +301,6 @@ model Student {
 
   faceVectors      FaceVector[]
   attendanceLogs   AttendanceLog[]
-  checkInOuts      CheckInOut[]
   permits          Permit[]
   violations       Violation[]
   courseSchedules  CourseSchedule[]
@@ -306,11 +310,10 @@ model Student {
 model FaceVector {
   id        String   @id @default(cuid())
   studentId String
-  vector    Unsupported("vector(128)")? // pgvector extension
+  vector    Unsupported("vector(128)")?
   createdAt DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id])
-
   @@index([studentId])
 }
 
@@ -328,59 +331,54 @@ model Admin {
 }
 
 
-// ==================== ABSENSI & CHECK-IN/OUT ====================
+// ==================== ABSENSI (SCAN TOGGLE) ====================
 
+// Setiap scan wajah = satu baris AttendanceLog.
+// action = "keluar" | "kembali"
+// Untuk cek status saat ini: ambil log terakhir hari ini.
+//   - Jika terakhir "keluar" → saat ini DI LUAR KAMPUS
+//   - Jika terakhir "kembali" atau tidak ada log → DI KAMPUS
 model AttendanceLog {
   id              String   @id @default(cuid())
   studentId       String
-  type            String   // "check_in" | "check_out" | "auto"
+  action          String   // "keluar" | "kembali"
   timestamp       DateTime @default(now())
   confidenceScore Float?
-  isSynced        Boolean  @default(true) // false = dari kiosk offline
+  isViolation     Boolean  @default(false) // flag jika melanggar aturan
+  violationId     String?  // terkait pelanggaran jika ada
+  isSynced        Boolean  @default(true)
   deviceId        String?
-  photoCapture    String?  // base64 / URL foto saat scan (untuk audit)
+  photoCapture    String?  // base64 foto saat scan (audit)
   createdAt       DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id])
+  violation Violation? @relation(fields: [violationId], references: [id])
 
-  @@index([timestamp])
   @@index([studentId, timestamp])
-}
-
-model CheckInOut {
-  id          String   @id @default(cuid())
-  studentId   String
-  checkInId   String?  // AttendanceLog.id untuk check-in
-  checkOutId  String?  // AttendanceLog.id untuk check-out
-  checkIn     DateTime
-  checkOut    DateTime?
-  duration    Int?     // durasi di luar kampus (menit), null = masih di luar
-  isViolation Boolean  @default(false) // apakah check-out ini melanggar aturan
-  deviceId    String?
-  createdAt   DateTime @default(now())
-
-  student Student @relation(fields: [studentId], references: [id])
-
-  @@index([studentId, checkIn])
-  @@index([checkIn, checkOut])
+  @@index([timestamp])
 }
 
 
 // ==================== PERIZINAN ====================
 
+// Dua jenis izin:
+//   1. izin_harian    → auto-approved, hanya 1 hari, tanpa approval
+//   2. pengajuan_izin → butuh approval admin, bisa multi-hari
 model Permit {
   id            String   @id @default(cuid())
   studentId     String
-  type          String   // "sakit" | "dispensasi" | "organisasi" | "keluarga" | "lainnya"
+  type          String   // "izin_harian" | "pengajuan_izin"
   reason        String
   startDate     DateTime // tanggal mulai
-  endDate       DateTime // tanggal selesai
-  startTime     String?  // "08:00" format HH:mm (null = full day)
-  endTime       String?  // "16:00" format HH:mm
-  status        String   @default("pending") // pending | approved | rejected
-  approvedBy    String?  // adminId
+  endDate       DateTime // tanggal selesai (bisa sama dgn startDate)
+  startTime     String?  // "08:00" (null = full day)
+  endTime       String?  // "16:00"
+  status        String   // "approved" | "pending" | "rejected"
+  // izin_harian → status langsung "approved"
+  // pengajuan_izin → status default "pending", perlu approve admin
+  approvedBy    String?  // adminId (null untuk izin_harian)
   rejectReason  String?
-  attachmentUrl String?  // foto surat sakit / surat izin
+  attachmentUrl String?  // foto surat (untuk pengajuan_izin)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -397,12 +395,11 @@ model PermitQuota {
   month       Int      // 1-12
   year        Int
   permitsUsed Int      @default(0)
-  maxPermits  Int      @default(5) // batas izin per bulan
+  maxPermits  Int      @default(10) // quota izin_harian per bulan
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   student Student @relation(fields: [studentId], references: [id])
-
   @@unique([studentId, month, year])
 }
 
@@ -411,17 +408,17 @@ model PermitQuota {
 
 model CampusRule {
   id              String   @id @default(cuid())
-  name            String   // "Jam Kuliah Pagi Senin"
+  name            String
   ruleType        String   // "restricted_hours" | "operational_hours" | "permit_limit"
-  dayOfWeek       Int?     // 0=Minggu, 1=Senin ... 6=Sabtu | null = berlaku setiap hari
-  startTime       String   // "08:00" format HH:mm
-  endTime         String   // "16:00" format HH:mm
-  isRestricted    Boolean  // true = tidak boleh keluar, false = boleh keluar
+  dayOfWeek       Int?     // 0=Minggu ... 6=Sabtu | null = tiap hari
+  startTime       String   // "08:00"
+  endTime         String   // "16:00"
+  isRestricted    Boolean  // true = tidak boleh keluar
   appliesToAll    Boolean  @default(true)
-  studyProgram    String?  // null = all, specific = filter prodi
-  academicYear    Int?     // null = all, specific = filter angkatan
+  studyProgram    String?  // filter prodi
+  academicYear    Int?     // filter angkatan
   description     String?
-  priority        Int      @default(0) // makin tinggi = makin prioritas
+  priority        Int      @default(0)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -431,7 +428,7 @@ model CampusRule {
 
 model GlobalSetting {
   id          String   @id @default(cuid())
-  key         String   @unique // "max_permit_hours", "grace_period_minutes", dll
+  key         String   @unique
   value       String
   description String?
   updatedAt   DateTime @updatedAt
@@ -443,17 +440,16 @@ model GlobalSetting {
 model CourseSchedule {
   id            String   @id @default(cuid())
   studentId     String
-  courseName    String   // nama mata kuliah
+  courseName    String
   dayOfWeek     Int      // 0=Minggu ... 6=Sabtu
-  startTime     String   // "08:00" format HH:mm
-  endTime       String   // "10:00" format HH:mm
+  startTime     String   // "08:00"
+  endTime       String   // "10:00"
   room          String?
   lecturer      String?
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id])
-
   @@index([studentId, dayOfWeek])
 }
 
@@ -461,34 +457,33 @@ model CourseSchedule {
 // ==================== PELANGGARAN ====================
 
 model Violation {
-  id            String   @id @default(cuid())
-  studentId     String
-  type          String   // "keluar_jam_kuliah" | "keluar_jam_terlarang" | "keluar_tanpa_checkin" | "tidak_kembali"
-  description   String
-  timestamp     DateTime
-  relatedRuleId  String? // CampusRule.id yang dilanggar
-  relatedPermitId String? // Permit.id jika ada izin terkait
-  isResolved    Boolean  @default(false)
-  resolvedBy    String?  // adminId
-  resolvedAt    DateTime?
-  notes         String?
-  createdAt     DateTime @default(now())
+  id              String   @id @default(cuid())
+  studentId       String
+  type            String   // "keluar_jam_terlarang" | "keluar_jam_kuliah" | "tidak_kembali" | "alpha"
+  description     String
+  timestamp       DateTime
+  relatedRuleId   String?
+  relatedPermitId String?
+  relatedLogId    String?  // AttendanceLog.id
+  isResolved      Boolean  @default(false)
+  resolvedBy      String?
+  resolvedAt      DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
 
   student Student @relation(fields: [studentId], references: [id])
-
   @@index([studentId])
   @@index([timestamp])
-  @@index([type])
 }
 
 
-// ==================== DEVICE & SYNC ====================
+// ==================== SYNC & DEVICE ====================
 
 model Device {
   id           String   @id @default(cuid())
-  name         String   // "Gerbang Utama", "Gerbang Belakang"
-  deviceId     String   @unique // Android device ID
-  location     String?  // posisi gerbang
+  name         String
+  deviceId     String   @unique
+  location     String?
   ipAddress    String?
   isActive     Boolean  @default(true)
   lastPingAt   DateTime?
@@ -498,12 +493,22 @@ model Device {
   updatedAt    DateTime @updatedAt
 }
 
+model SyncRequest {
+  id          String   @id @default(cuid())
+  deviceId    String
+  requestedAt DateTime @default(now())
+  isProcessed Boolean  @default(false)
+  processedAt DateTime?
+  requestedBy String?  // adminId yang trigger
+}
+
 model SyncLog {
   id         String   @id @default(cuid())
   deviceId   String
+  syncType   String   // "midnight" | "manual" | "reconnect"
   lastSyncAt DateTime
   status     String   // success | partial | failed
-  logsCount  Int      @default(0) // jumlah log yang di-sync
+  logsCount  Int      @default(0)
   notes      String?
   createdAt  DateTime @default(now())
 
@@ -516,17 +521,15 @@ model SyncLog {
 model AuditLog {
   id          String   @id @default(cuid())
   adminId     String?
-  action      String   // "create_student" | "approve_permit" | "import_csv" | "resolve_violation"
-  entityType  String   // "Student" | "Permit" | "CampusRule" | dll
+  action      String
+  entityType  String
   entityId    String?
   details     String?  // JSON
   ipAddress   String?
   createdAt   DateTime @default(now())
 
   admin Admin @relation(fields: [adminId], references: [id])
-
   @@index([createdAt])
-  @@index([adminId])
 }
 
 model ImportBatch {
@@ -535,66 +538,59 @@ model ImportBatch {
   totalRows   Int
   successRows Int
   failedRows  Int
-  errors      String?  // JSON array
-  importedBy  String?  // adminId
+  errors      String?
+  importedBy  String?
   createdAt   DateTime @default(now())
 }
 
 model Notification {
   id          String   @id @default(cuid())
-  adminId     String?  // null = broadcast ke semua admin
-  type        String   // "violation" | "permit_pending" | "sync_failed" | "device_offline"
+  adminId     String?  // null = broadcast
+  type        String   // "violation" | "permit_pending" | "sync_done" | "device_offline"
   title       String
   message     String
   isRead      Boolean  @default(false)
-  isDismissed Boolean  @default(false)
-  linkTo      String?  // deep link / entity ID
+  linkTo      String?
   createdAt   DateTime @default(now())
 
   @@index([adminId, isRead])
 }
 ```
 
-### 5.2 Room Database (Android — Local Cache)
-
-Tabel di SQLite lokal:
+### 5.2 Room Database (Local Cache)
 
 | Entity | Catatan |
 |---|---|
 | `StudentEntity` | Cache data mahasiswa |
-| `FaceVectorEntity` | Vektor wajah (Blob/byte array via TypeConverter) |
-| `AttendanceLogEntity` | Log absensi lokal (isSynced = false jika belum dikirim) |
-| `CheckInOutEntity` | Cache sesi check-in/out |
-| `PermitEntity` | Cache izin (untuk admin app) |
-| `CampusRuleEntity` | Cache aturan untuk verifikasi offline |
-| `CourseScheduleEntity` | Cache jadwal kuliah |
-| `GlobalSettingEntity` | Cache pengaturan global |
-| `SyncMetadata` | Tracking kapan terakhir sync |
+| `FaceVectorEntity` | Vektor wajah (Blob via TypeConverter) |
+| `AttendanceLogEntity` | Log scan lokal (isSynced = false = belum dikirim) |
+| `PermitEntity` | Cache izin (harian + pengajuan) |
+| `CampusRuleEntity` | Aturan untuk verifikasi offline |
+| `CourseScheduleEntity` | Jadwal kuliah |
+| `GlobalSettingEntity` | Pengaturan global |
+| `SyncMetadata` | Tracking sync terakhir |
 
-> **Catatan**: Room tidak support `FloatArray`. Vektor 128-d disimpan sebagai `Blob` dan dikonversi via TypeConverter.
-
-### 5.3 In-Memory Structure (Kiosk Scanner)
+### 5.3 In-Memory (Kiosk Scanner)
 
 ```kotlin
-// Di-load saat app start, di-refresh setiap sync malam
 data class FaceIndex(
     val embeddings: Map<String, FloatArray>,  // studentId → vector
-    val studentMap: Map<String, StudentBrief> // studentId → nama/NIM
+    val studentMap: Map<String, StudentBrief>
 )
 
 data class StudentBrief(
-    val id: String,
-    val nim: String,
-    val name: String,
-    val studyProgram: String?
+    val id: String, val nim: String, val name: String
 )
 
-// Cache aturan untuk verifikasi offline
-data class RuleCache(
-    val restrictedHours: List<CampusRule>,    // jam terlarang
-    val operationalHours: List<CampusRule>,   // jam operasional
-    val globalSettings: Map<String, String>   // settings
+// State toggle per mahasiswa hari ini
+data class ToggleState(
+    val studentId: String,
+    val currentState: State, // DI_KAMPUS atau DI_LUAR
+    val lastAction: String?, // "keluar" atau "kembali"
+    val scanCount: Int
 )
+
+enum class State { DI_KAMPUS, DI_LUAR }
 ```
 
 ---
@@ -602,205 +598,267 @@ data class RuleCache(
 ## 6. API Endpoints
 
 ### 6.1 Auth
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| POST | `/api/auth/login` | Login admin → JWT |
-| POST | `/api/auth/refresh` | Refresh token |
+| Method | Endpoint |
+|---|---|
+| POST | `/api/auth/login` |
+| POST | `/api/auth/refresh` |
 
 ### 6.2 Student
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/students` | List mahasiswa (pagination + search + filter prodi/angkatan) |
-| GET | `/api/students/:id` | Detail mahasiswa + status terkini |
-| POST | `/api/students` | Tambah mahasiswa |
-| PUT | `/api/students/:id` | Update data mahasiswa |
-| DELETE | `/api/students/:id` | Soft delete (nonaktifkan) |
-| POST | `/api/students/:id/face` | Upload vektor wajah baru |
-| POST | `/api/students/import` | Import bulk dari CSV/Excel |
-| GET | `/api/students/:id/schedules` | Jadwal kuliah mahasiswa |
-| GET | `/api/students/:id/permits` | Riwayat izin mahasiswa |
-| GET | `/api/students/:id/violations` | Riwayat pelanggaran mahasiswa |
-| GET | `/api/students/:id/today` | Status hari ini (check-in, check-out, izin) |
+| Method | Endpoint |
+|---|---|
+| GET | `/api/students` |
+| GET | `/api/students/:id` |
+| POST | `/api/students` |
+| PUT | `/api/students/:id` |
+| DELETE | `/api/students/:id` |
+| POST | `/api/students/:id/face` |
+| POST | `/api/students/import` |
+| GET | `/api/students/:id/schedules` |
+| GET | `/api/students/:id/permits` |
+| GET | `/api/students/:id/violations` |
+| GET | `/api/students/:id/status` | Status terkini: di kampus/luar |
 
-### 6.3 Attendance / Check-In-Out
+### 6.3 Attendance (Scan Toggle)
 | Method | Endpoint | Deskripsi |
 |---|---|---|
-| POST | `/api/attendance` | Catat kehadiran (dari kiosk) |
-| POST | `/api/attendance/checkin` | Check-in mahasiswa masuk kampus |
-| POST | `/api/attendance/checkout` | Check-out mahasiswa keluar kampus |
-| GET | `/api/attendance` | Riwayat absensi (filter tanggal, prodi, jenis) |
-| GET | `/api/attendance/today` | Ringkasan absensi hari ini |
-| GET | `/api/attendance/statistics` | Statistik per program studi |
-| GET | `/api/checkinout` | Riwayat check-in/out (filter tanggal, student) |
-| GET | `/api/checkinout/active` | Mahasiswa yang sedang di luar kampus (check-in tanpa check-out) |
+| POST | `/api/attendance/scan` | Catat scan toggle (keluar/kembali) |
+| GET | `/api/attendance` | Riwayat scan (filter tgl, prodi, student) |
+| GET | `/api/attendance/today` | Ringkasan hari ini |
+| GET | `/api/attendance/status/:studentId` | Status toggle mahasiswa (di kampus/luar) |
+| GET | `/api/attendance/outside-now` | Semua mahasiswa yg sedang di luar kampus |
+| GET | `/api/attendance/statistics` | Statistik per prodi |
 
-### 6.4 Permit
+### 6.4 Permit (Izin)
 | Method | Endpoint | Deskripsi |
 |---|---|---|
-| POST | `/api/permits` | Buat pengajuan izin |
-| GET | `/api/permits` | List izin (filter status, type, tanggal) |
-| GET | `/api/permits/pending` | Izin pending (perlu approval) |
+| POST | `/api/permits` | Buat izin (harian auto-approved, pengajuan pending) |
+| GET | `/api/permits` | List izin (filter type, status, tgl) |
 | GET | `/api/permits/:id` | Detail izin |
-| PUT | `/api/permits/:id/approve` | Approve izin |
-| PUT | `/api/permits/:id/reject` | Reject izin (dengan alasan) |
-| GET | `/api/permits/quota/:studentId` | Cek kuota izin mahasiswa |
+| GET | `/api/permits/pending` | Pengajuan izin yang pending |
+| PUT | `/api/permits/:id/approve` | Approve pengajuan_izin |
+| PUT | `/api/permits/:id/reject` | Reject pengajuan_izin |
+| GET | `/api/permits/active/:studentId` | Izin aktif mahasiswa hari ini |
+| GET | `/api/permits/quota/:studentId` | Sisa kuota izin harian bulan ini |
 
 ### 6.5 Campus Rules
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/rules` | List semua aturan |
-| POST | `/api/rules` | Buat aturan baru |
-| PUT | `/api/rules/:id` | Update aturan |
-| DELETE | `/api/rules/:id` | Nonaktifkan aturan |
-| GET | `/api/rules/effective?time=...&day=...` | Aturan yang berlaku di waktu tertentu |
-| GET | `/api/settings` | List global settings |
-| PUT | `/api/settings/:key` | Update global setting |
+| Method | Endpoint |
+|---|---|
+| GET | `/api/rules` |
+| POST | `/api/rules` |
+| PUT | `/api/rules/:id` |
+| DELETE | `/api/rules/:id` |
+| GET | `/api/rules/effective?time=&day=` |
+| GET | `/api/settings` |
+| PUT | `/api/settings/:key` |
 
 ### 6.6 Course Schedule
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/schedules` | List semua jadwal (filter prodi, day) |
-| POST | `/api/schedules/batch` | Import jadwal kuliah (CSV/JSON) |
-| PUT | `/api/schedules/:id` | Update jadwal |
-| DELETE | `/api/schedules/:id` | Hapus jadwal |
-| GET | `/api/schedules/student/:studentId` | Jadwal spesifik mahasiswa |
+| Method | Endpoint |
+|---|---|
+| GET | `/api/schedules` |
+| POST | `/api/schedules/batch` |
+| PUT | `/api/schedules/:id` |
+| DELETE | `/api/schedules/:id` |
+| GET | `/api/schedules/student/:studentId` |
 
 ### 6.7 Violation
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/violations` | List pelanggaran (filter tanggal, type, student) |
-| GET | `/api/violations/:id` | Detail pelanggaran |
-| PUT | `/api/violations/:id/resolve` | Tandai selesai (dengan notes) |
-| GET | `/api/violations/statistics` | Statistik pelanggaran (per type, per prodi) |
+| Method | Endpoint |
+|---|---|
+| GET | `/api/violations` |
+| GET | `/api/violations/:id` |
+| PUT | `/api/violations/:id/resolve` |
+| GET | `/api/violations/statistics` |
 
-### 6.8 Report / Laporan
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/reports/daily?date=...` | Rekap harian lengkap |
-| GET | `/api/reports/daily/export?format=csv|pdf` | Export rekap harian |
-| GET | `/api/reports/monthly?month=&year=` | Rekap bulanan |
-| GET | `/api/reports/violations?from=&to=` | Laporan pelanggaran periode |
-| GET | `/api/reports/permits?from=&to=` | Laporan penggunaan izin |
-| GET | `/api/reports/checkinout?date=&prodi=` | Laporan check-in/out detail |
-| GET | `/api/reports/outside-hours?date=` | Mahasiswa keluar di luar jam yang diizinkan |
+### 6.8 Report
+| Method | Endpoint |
+|---|---|
+| GET | `/api/reports/daily?date=` |
+| GET | `/api/reports/daily/export?format=csv|pdf` |
+| GET | `/api/reports/monthly?month=&year=` |
+| GET | `/api/reports/violations?from=&to=` |
+| GET | `/api/reports/permits?from=&to=` |
+| GET | `/api/reports/toggle-history?date=&studentId=` |
+| GET | `/api/reports/outside-hours?date=` | Keluar di luar jam izin |
 
-### 6.9 Sync (khusus Kiosk Scanner)
+### 6.9 Sync (Kiosk Scanner)
 | Method | Endpoint | Deskripsi |
 |---|---|---|
-| GET | `/api/sync/faces` | Download face vectors (with timestamp) |
-| GET | `/api/sync/rules` | Download all active campus rules |
+| GET | `/api/sync/requested` | Cek apakah admin minta sync (polling) |
+| GET | `/api/sync/faces` | Download face vectors |
+| GET | `/api/sync/rules` | Download aturan aktif |
 | GET | `/api/sync/settings` | Download global settings |
-| POST | `/api/sync/attendance` | Batch upload logs (attendance + checkinout + violations) |
-| POST | `/api/sync/ping` | Kiosk heartbeat (battery, status) |
+| POST | `/api/sync/attendance` | Upload batch log scan |
+| POST | `/api/sync/complete` | Konfirmasi sync selesai |
 
-### 6.10 Device
+### 6.10 Sync (Admin)
 | Method | Endpoint | Deskripsi |
 |---|---|---|
-| GET | `/api/devices` | List semua kiosk device |
-| GET | `/api/devices/:id` | Detail device |
-| PUT | `/api/devices/:id` | Update device info |
-| GET | `/api/devices/:id/logs` | Sync history device |
+| POST | `/api/sync/request/:deviceId` | Admin minta sync ke kiosk |
+| GET | `/api/sync/status/:deviceId` | Status sync terakhir |
 
-### 6.11 Dashboard
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/dashboard/summary` | Hari ini: total hadir, di luar, izin, alpha, pelanggaran |
-| GET | `/api/dashboard/weekly` | Grafik absensi 7 hari terakhir |
-| GET | `/api/dashboard/checkinout-summary` | Check-in/out real-time count |
-| GET | `/api/dashboard/violation-summary` | Pelanggaran hari ini |
-| GET | `/api/dashboard/recent-scans` | 20 scan terakhir (real-time feed) |
+### 6.11 Device
+| Method | Endpoint |
+|---|---|
+| GET | `/api/devices` |
+| GET | `/api/devices/:id` |
+| PUT | `/api/devices/:id` |
+| POST | `/api/devices/ping` | Heartbeat kiosk |
 
-### 6.12 Audit
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/audit` | Log aktivitas admin (filter tanggal, admin, action) |
+### 6.12 Dashboard
+| Method | Endpoint |
+|---|---|
+| GET | `/api/dashboard/summary` |
+| GET | `/api/dashboard/weekly` |
+| GET | `/api/dashboard/outside-now` | Jumlah mahasiswa di luar saat ini |
+| GET | `/api/dashboard/violation-summary` |
+| GET | `/api/dashboard/recent-scans` | 20 scan terakhir |
 
-### 6.13 Notification
-| Method | Endpoint | Deskripsi |
-|---|---|---|
-| GET | `/api/notifications` | List notifikasi admin |
-| PUT | `/api/notifications/:id/read` | Tandai sudah dibaca |
+### 6.13 Audit & Notifikasi
+| Method | Endpoint |
+|---|---|
+| GET | `/api/audit` |
+| GET | `/api/notifications` |
+| PUT | `/api/notifications/:id/read` |
 
 ---
 
 ## 7. Alur Data Offline-First
 
-### 7.1 Skenario: Kiosk Check-In (Scan Masuk)
+### 7.1 Skenario: Scan Toggle (100% Offline)
 
 ```
-1. Mahasiswa berdiri di depan kamera kiosk
-2. CameraX capture frame
-3. TFLite detect face → loop jika tidak ada face
-4. TFLite liveness check → jika gagal, minta ulang
-5. TFLite extract embedding (128-d vector)
-6. Compare dengan 10.000 vektor di RAM
-   └── Jika match (≥ threshold):
-       → Tentukan nama + NIM
-       → Cek apakah sudah check-in hari ini?
-           ├── Ya → tampilkan "Sudah check-in jam 07:15"
-           └── Tidak → proses check-in:
-               → Buat CheckInOut record (checkIn = now)
-               → Buat AttendanceLog type "check_in"
-               → Tampilkan "Selamat datang, Andi ✓ 07:15"
-   └── Jika tidak match:
-       → Tampilkan "Wajah tidak dikenal"
-7. Simpan semua log ke Room (isSynced = false)
-8. Background: upload saat internet stabil
+Konsep: Setiap scan = toggle state.
+        Scan ke-1 → "keluar kampus"
+        Scan ke-2 → "kembali ke kampus"
+        Scan ke-3 → "keluar lagi"
+        Dan seterusnya...
+
+State awal hari: ASUMSI DI KAMPUS (sebelum scan pertama)
+
+Contoh Alur:
+═══════════════════════════════════════════════════════════════
+WAKTU: 07.00 — Andi datang ke kampus, scan di kiosk
+═══════════════════════════════════════════════════════════════
+1. CameraX capture + face detection
+2. TFLite liveness check + embedding
+3. Match dengan 10.000 vektor di RAM
+4. Dapat identitas: ANDI (TI, 24001)
+5. Cek state toggle hari ini:
+   → Tidak ada scan sebelumnya → state awal = DI_KAMPUS
+   → Toggle: DI_KAMPUS → KELUAR
+6. Simpan AttendanceLog { action: "keluar", timestamp: 07.00 }
+7. Tampilkan: "☀️ Selamat pagi, Andi! Scan pertama hari ini.
+   Anda tercatat KELUAR kampus pukul 07.00"
+   ✅ = TERCATAT HADIR (minimal 1 scan = hadir)
+
+═══════════════════════════════════════════════════════════════
+WAKTU: 12.30 — Andi kembali ke kampus, scan lagi
+═══════════════════════════════════════════════════════════════
+1. Face match → ANDI
+2. Cek state: sebelumnya "keluar" → saat ini DI_LUAR
+3. Toggle: DI_LUAR → KEMBALI
+4. Hitung durasi di luar: 12.30 - 07.00 = 5j 30m
+5. Cek rule engine:
+   - Jam 12.30 termasuk restricted hours?
+   - Cek izin: apakah Andi punya izin harian yang mencakup jam ini?
+     → Jika ada izin → normal
+     → Jika tidak → cek aturan:
+       - Apakah jam ini restricted? 12.30 termasuk siang (tidak restricted)
+       - Tidak ada violation
+6. Simpan AttendanceLog { action: "kembali", timestamp: 12.30 }
+7. Tampilkan: "🏫 Selamat datang kembali, Andi!
+   Anda di luar selama 5 jam 30 menit"
+
+═══════════════════════════════════════════════════════════════
+WAKTU: 16.00 — Andi pulang, scan lagi
+═══════════════════════════════════════════════════════════════
+1. Face match → ANDI
+2. Cek state: sebelumnya "kembali" → saat ini DI_KAMPUS
+3. Toggle: DI_KAMPUS → KELUAR
+4. Cek rule engine:
+   - Jam 16.00 restricted? (misal aturan: Senin 08.00-12.00)
+   - 16.00 > 12.00 → tidak restricted
+   - Tidak ada violation
+5. Simpan AttendanceLog { action: "keluar", timestamp: 16.00 }
+6. Tampilkan: "👋 Sampai jumpa, Andi! Hati-hati di jalan."
+
+═══════════════════════════════════════════════════════════════
+Total scan Andi hari ini: 3 kali
+Total di luar kampus: 5j 30m + (16.00 - 12.30) = 9 jam
+Status: SUDAH PULANG (scan terakhir = keluar)
+═══════════════════════════════════════════════════════════════
 ```
 
-### 7.2 Skenario: Kiosk Check-Out (Scan Keluar)
+### 7.2 Logika Toggle State
 
 ```
-1. Mahasiswa scan wajah (sama seperti check-in)
-2. Face match success
-3. Cek apakah mahasiswa sudah check-in hari ini?
-   └── Tidak → tampilkan "Anda belum check-in hari ini. Silakan scan di gerbang masuk."
-   └── Ya → proses check-out:
-       → Cari CheckInOut record terakhir (checkOut = null)
-       → Hitung durasi di luar kampus
-       → Cek Rule Engine (lokal):
-           ├── Apakah jam ini termasuk restricted hours?
-           │   ├── Ya → apakah ada izin yang aktif?
-           │   │   ├── Ada izin → check-out NORMAL
-           │   │   └── Tidak ada izin → flag isViolation = true
-           │   └── Tidak → check-out NORMAL
-       → Update CheckInOut (checkOut = now, duration, isViolation)
-       → Buat AttendanceLog type "check_out"
-       → Tampilkan "Sampai jumpa, Andi ✓ 16:00"
-         (jika violation: tampilkan peringatan)
-4. Jika violation, simpan juga ViolationRecord ke Room
-5. Upload batch saat sync
+Function determineAction(studentId, today):
+    lastLog = SELECT * FROM AttendanceLog
+              WHERE studentId = ? AND date(timestamp) = today
+              ORDER BY timestamp DESC LIMIT 1
+
+    IF lastLog == null:
+        // Belum scan hari ini → ini scan pertama
+        // Asumsi awal: DI_KAMPUS → aksi = "keluar"
+        return "keluar"
+
+    IF lastLog.action == "keluar":
+        // Sebelumnya keluar → sekarang kembali
+        return "kembali"
+
+    IF lastLog.action == "kembali":
+        // Sebelumnya kembali → sekarang keluar lagi
+        return "keluar"
 ```
 
-### 7.3 Skenario: Auto-Detect Masuk/Keluar
+### 7.3 Aturan Absensi (Alpha / Hadir)
 
-Kiosk bisa menentukan mahasiswa mau masuk atau keluar dengan:
-- **Mode Manual**: Admin set kiosk ke mode "Masuk" atau "Keluar" (tombol di screen)
-- **Mode Otomatis**: Berdasarkan arah mahasiswa (butuh 2 kamera atau sensor jarak)
-- **Mode Hybrid** (default): Jika sudah check-in hari ini dan belum check-out → otomatis anggap "Keluar". Jika belum check-in → "Masuk".
+| Kondisi | Status |
+|---|---|
+| Minimal 1 scan hari ini | ✅ HADIR |
+| Tidak ada scan sama sekali (sampai pukul 10.00) | ❌ ALPHA |
+| Scan terakhir = "keluar" | 🚶 SEDANG DI LUAR |
+| Scan terakhir = "kembali" | 🏫 DI KAMPUS |
+| Punya izin harian aktif hari ini | ✅ IZIN (tetap dianggap hadir) |
 
-### 7.4 Skenario: Admin Registrasi Wajah (Online)
+### 7.4 Skenario: Admin Registrasi Wajah
 
 ```
-1. Admin buka Admin App → pilih mahasiswa (import atau input manual)
-2. Kamera capture wajah (dengan bimbingan framing oval)
-3. TFLite extract embedding (localhost)
-4. Cek kualitas: brightness, blur, face angle
-5. POST /api/students/:id/face { vector: [...] }
+1. Admin buka Admin App → cari/import mahasiswa
+2. Kamera capture wajah + panduan framing oval
+3. TFLite extract embedding lokal
+4. Cek kualitas: brightness, blur, angle
+5. POST /api/students/:id/face
 6. Backend simpan ke PostgreSQL (pgvector)
-7. Malam hari: Kiosk sync → download vektor baru → update RAM
+7. Admin klik "Sync ke Scanner"
+8. Kiosk mendapat flag syncRequested = true
+9. Polling berikutnya: kiosk download vektor baru
 ```
 
-### 7.5 Conflict Resolution
+### 7.5 Skenario: Kiosk Offline / No Internet
+
+```
+1. Kiosk kehilangan internet
+2. Semua scan tetap berjalan 100% normal (offline)
+3. Log menumpuk di Room (isSynced = false)
+4. WorkManager gagal karena NetworkType.CONNECTED tidak terpenuhi
+5. Kiosk cek koneksi setiap 5 menit
+6. Saat internet kembali:
+   → WorkManager auto-jalan
+   → GET /api/sync/requested
+   → Jika true (admin minta sync) → sync penuh
+   → Jika false → upload semua log yang tertunda
+   → Set isSynced = true
+```
+
+### 7.6 Conflict Resolution
 
 | Skenario | Resolusi |
 |---|---|
-| Check-in ganda di hari sama | Backend dedup: update check-in terakhir, tolak yang baru |
-| Check-out tanpa check-in | Anggap sebagai "check-in + check-out" dalam 1 menit (abnormal) |
-| Log absensi duplikat | Dedup berdasarkan `studentId + date_trunc('minute', timestamp)` |
-| Violation sudah ada | Cek uniqueness constraint `studentId + timestamp + type` |
-| Update data mahasiswa bentrok | Last-write-wins (updatedAt) |
-| Sync gagal (server down) | Retry exponential backoff (30s → 5m → 30m) |
+| Scan duplikat (studentId + timestamp sama) | Backend dedup, tolak duplikat |
+| Log sudah terlanjur dikirim (retry) | Ignore duplicate (idempotent key) |
+| Sync gagal di tengah jalan | Batch dikirim partial, lanjut batch berikutnya |
+| Dua kiosk berbeda kirim scan mahasiswa sama | Last-write-wins (timestamp terlambat diabaikan jika sudah ada log lebih baru) |
+| Admin approve izin saat kiosk offline | Flag syncRequested=true, nanti sync saat online |
 
 ---
 
@@ -808,143 +866,104 @@ Kiosk bisa menentukan mahasiswa mau masuk atau keluar dengan:
 
 ### 8.1 Jenis Aturan
 
-Admin bisa mengkonfigurasi berbagai jenis aturan:
-
 | Aturan | Contoh | Efek |
 |---|---|---|
-| **Jam Operasional** | 06:00 - 18:00 | Di luar jam ini, scan tidak valid/tidak diproses |
-| **Jam Terlarang Keluar** | Senin-Kamis 08:00-12:00 | Mahasiswa tidak boleh check-out di jam ini (kecuali ada izin) |
-| **Jam Terlarang per Prodi** | Jumat 08:00-11:00 (Prodi: TI) | Hanya berlaku untuk prodi tertentu |
-| **Jam Terlarang per Angkatan** | 2024: 07:00-16:00 | Hanya untuk angkatan tertentu |
-| **Hari Libur Nasional** | 17 Agustus | Semua aturan libur, scan opsional |
-| **Periode Ujian** | 10-20 Juni 2026 | Aturan khusus selama periode ujian |
+| **Jam Operasional** | 06.00 - 18.00 | Di luar jam ini scan tidak valid |
+| **Jam Terlarang Keluar** | Senin-Kamis 08.00-12.00 | Scan "keluar" di jam ini = violation (kecuali ada izin) |
+| **Jam Terlarang per Prodi** | Jumat 08.00-11.00 (TI) | Filter per prodi |
+| **Jam Terlarang per Angkatan** | 2024: 07.00-16.00 | Filter per angkatan |
+| **Periode Khusus** | 10-20 Juni 2026 | Aturan khusus ujian |
 
-### 8.2 Global Settings yang Bisa Dikonfigurasi
+### 8.2 Global Settings
 
 | Key | Default | Deskripsi |
 |---|---|---|
 | `operational_start` | `06:00` | Jam buka kampus |
 | `operational_end` | `18:00` | Jam tutup kampus |
-| `max_permit_hours_per_day` | `4` | Maks durasi izin per hari (jam) |
-| `max_permit_per_month` | `5` | Maks jumlah izin per bulan |
-| `grace_period_minutes` | `15` | Toleransi keterlambatan scan |
-| `auto_checkout_hour` | `17:00` | Auto check-out jika lupa scan pulang |
-| `violation_threshold` | `3` | Jumlah pelanggaran sebelum notifikasi khusus |
+| `max_permit_hours_per_day` | `8` | Maks durasi izin harian (jam) |
+| `max_daily_permit_per_month` | `10` | Kuota izin harian per bulan |
+| `grace_period_minutes` | `15` | Toleransi keterlambatan |
+| `auto_alpha_hour` | `10:00` | Jam auto-tandai alpha jika belum scan |
+| `violation_threshold` | `3` | Batas pelanggaran sebelum notifikasi khusus |
+| `sync_poll_interval_minutes` | `10` | Interval polling sync request |
 
-### 8.3 Logika Evaluasi Aturan
+### 8.3 Logika Evaluasi (Offline-capable)
 
 ```
-Function canCheckOut(student, time):
-  1. Cek jam operasional:
-     - Jika time < operational_start → TOLAK (kampus belum buka)
-     - Jika time > operational_end → Boleh (pulang lembur)
-  
-  2. Cek apakah ada izin aktif hari ini:
-     - Jika ada izin → CHECK-OUT DIIZINKAN (lewat semua rule)
-  
-  3. Cek restricted hours:
-     - Cari semua CampusRule dengan:
-       dayOfWeek = today && startTime <= time <= endTime && isRestricted = true
-     - Filter: appliesToAll = true ATAU prodi cocok ATAU angkatan cocok
-     - Jika ada yang cocok → CHECK-OUT DITOLAK (flag violation)
-     - Jika tidak ada → CHECK-OUT DIIZINKAN
-  
-  4. Cek jadwal kuliah:
-     - Cari CourseSchedule mahasiswa di hari & jam ini
-     - Jika ada jadwal → CHECK-OUT = VIOLATION (kecuali izin)
+Function canScanOut(student, time, today):
+  1. Cek jam operasional
+     - time < operational_start → TOLAK (tampilkan "kampus belum buka")
+     - time > operational_end → IZINKAN
+
+  2. Cek izin aktif hari ini
+     - Ada izin_harian ATAU pengajuan_izin approved? → IZINKAN (skip aturan)
+
+  3. Cek restricted hours (CampusRule)
+     - dayOfWeek cocok && startTime <= time <= endTime && isRestricted
+     - Filter prodi/angkatan cocok?
+     - Ada yang cocok → VIOLATION (kecuali point 2 terpenuhi)
+
+  4. Cek jadwal kuliah (CourseSchedule)
+     - Ada jadwal di jam ini? → VIOLATION
+
+  5. Jika violation → simpan Violation + flag isViolation di AttendanceLog
+     Tampilkan peringatan di layar kiosk
 ```
-
-### 8.4 UI Konfigurasi Aturan (Admin App)
-
-Admin dapat:
-- **Tambah aturan baru**: Pilih tipe, hari, jam mulai-selesai, filter prodi/angkatan
-- **Atur jam operasional**: Set kapan kampus buka/tutup
-- **Atur batas izin**: Maks jam per hari, maks izin per bulan
-- **Atur periode khusus**: Tanggal-tanggal tertentu dengan aturan berbeda
-- **Aktif/nonaktifkan aturan**: Toggle switch
-- **Lihat aturan yang berlaku**: Preview berdasarkan hari & jam
-
-### 8.5 Kiosk Cache Rules
-
-Kiosk mendownload aturan aktif saat sync malam dan menyimpannya di Room. Saat scan keluar, kiosk bisa mengecek aturan secara offline tanpa perlu internet. Jika aturan berubah di tengah hari, kiosk akan update saat sync opportunistic.
 
 ---
 
-## 9. Sistem Check-In / Check-Out
+## 9. Sistem Scan Toggle (Keluar / Kembali)
 
-### 9.1 Alur Lengkap Check-In/Out
+### 9.1 Konsep Toggle
 
 ```
-WAKTU: 07:15
-─── Mahasiswa scan di gerbang masuk ───
-→ Face match: ANDI (TI, 2024)
-→ Belum ada check-in hari ini
-→ Buat CheckInOut { checkIn: 07:15 }
-→ Status: "DI KAMPUS"
-→ Tampilkan: "Selamat datang, Andi! ✓"
+🏁 STATE AWAL (setiap hari): DI KAMPUS
 
-WAKTU: 10:00
-─── Mahasiswa scan di gerbang keluar ───
-→ Face match: ANDI
-→ Ada check-in aktif (07:15, belum check-out)
-→ Cek rule: jam 10:00 termasuk restricted hours?
-   → Senin 08:00-12:00 = restricted ✓
-   → Cek izin: tidak ada izin hari ini
-   → VIOLATION: "Keluar jam terlarang"
-→ Buat CheckOut { checkOut: 10:00, duration: 165 menit, isViolation: true }
-→ Buat Violation record
-→ Status: "DI LUAR KAMPUS (violation)"
-→ Tampilkan: "⚠️ Andi, Anda keluar di jam terlarang!"
-
-WAKTU: 12:30
-─── Mahasiswa scan di gerbang masuk ───
-→ Face match: ANDI
-→ Ada check-in sebelumnya (complete)
-→ Buat CheckInOut baru { checkIn: 12:30 }
-→ Status: "DI KAMPUS"
-
-WAKTU: 16:30
-─── Mahasiswa scan di gerbang keluar ───
-→ Face match: ANDI
-→ Check-out normal (16:30 tidak restricted)
-→ Buat CheckOut { checkOut: 16:30, duration: 240 menit, isViolation: false }
-→ Status: "SUDAH PULANG"
-→ Tampilkan: "Sampai jumpa, Andi! ✓"
+  Scan ────→ KELUAR ────→ DI LUAR KAMPUS
+                              │
+                         Scan ┘
+                              │
+                              ▼
+                         KEMBALI ──→ DI KAMPUS
+                              │
+                         Scan ┘
+                              │
+                              ▼
+                         KELUAR → DI LUAR (lagi)
+                              │
+                         Dan seterusnya...
 ```
+
+Setiap scan = toggle. Tidak ada logika "ini scan masuk atau keluar". Sistem hanya track state terakhir.
 
 ### 9.2 Status Mahasiswa Real-Time
 
-Admin dapat melihat status mahasiswa kapan saja:
-
 | Status | Arti |
 |---|---|
-| `DI KAMPUS` | Sudah check-in, belum check-out |
-| `DI LUAR KAMPUS` | Sudah check-out, belum check-in lagi |
-| `DI LUAR (IZIN)` | Check-out dengan izin aktif |
-| `DI LUAR (VIOLATION)` | Check-out melanggar aturan |
-| `BELUM MASUK` | Belum check-in hari ini |
-| `ALPHA` | Tidak check-in sama sekali hari ini (setelah jam 10:00) |
-| `LIBUR` | Hari libur / tidak ada jadwal |
+| 🏫 `DI KAMPUS` | Scan terakhir = "kembali" atau belum scan |
+| 🚶 `DI LUAR` | Scan terakhir = "keluar" |
+| 🏠 `SUDAH PULANG` | Scan terakhir = "keluar" setelah jam 15.00 |
+| ✅ `HADIR (IZIN)` | Punya izin harian, tidak perlu scan |
+| ❌ `ALPHA` | Belum scan sampai pukul 10.00 |
+| 🏖️ `LIBUR` | Hari libur nasional |
 
-### 9.3 Auto Check-Out (Force Check-Out)
+### 9.3 Durasi di Luar
 
-Jika mahasiswa lupa scan pulang (check-out), sistem akan:
-1. **Auto check-out pukul 17:00** (configurable via GlobalSetting)
-   - Set checkout = 17:00
-   - Set duration = 0 (tidak valid untuk dihitung)
-   - Flag isAuto = true
-2. **Jika masih di luar pukul 06:00 keesokan hari** tanpa check-in:
-   - Auto complete sesi sebelumnya
-3. **Report**: Admin bisa lihat siapa saja yang auto check-out (lupa scan)
+Setiap toggle dihitung:
+- Saat "keluar" → catat startTime
+- Saat "kembali" → catat endTime, hitung durasi (endTime - startTime)
+- Akumulasi total durasi di luar = jumlah seluruh sesi "keluar→kembali" hari ini
 
-### 9.4 Multiple Scan dalam Sehari
+### 9.4 Edge Cases
 
-Mahasiswa bisa check-in/out berkali-kali dalam sehari:
-- Masuk pagi → check-in 07:00
-- Keluar siang → check-out 12:00 (sesi 1: 5 jam)
-- Masuk siang → check-in 13:00
-- Keluar sore → check-out 17:00 (sesi 2: 4 jam)
-- Total durasi di luar = 5 + 4 = 9 jam (terlacak semua)
+| Skenario | Penanganan |
+|---|---|
+| Scan pertama setelah tengah malam | Anggap state DI_KAMPUS (reset tiap hari) |
+| Scan berulang dalam 1 detik | Debounce 2 detik, abaikan duplikat |
+| Scan di luar jam operasional | Tampilkan pesan "di luar jam operasional" |
+| Scan wajah tidak dikenal | Tampilkan "wajah tidak dikenal" tanpa toggle |
+| Mahasiswa scan di 2 kiosk berbeda | Kedua log tetap masuk. Last-write-wins untuk state |
+| Lupa scan (pulang tanpa scan) | Auto close sesi pukul 18.00 (state jadi SUDAH PULANG) |
 
 ---
 
@@ -952,88 +971,77 @@ Mahasiswa bisa check-in/out berkali-kali dalam sehari:
 
 ### 10.1 Jenis Pelanggaran
 
-| Tipe | Deskripsi | Deteksi |
+| Tipe | Deteksi | Kapan |
 |---|---|---|
-| `keluar_jam_terlarang` | Check-out di jam restricted tanpa izin | Otomatis saat check-out |
-| `keluar_jam_kuliah` | Check-out saat ada jadwal kuliah | Otomatis (cocokkan jadwal) |
-| `tidak_kembali` | Check-out tapi tidak check-in sampai batas waktu | Auto-deteksi pukul 18:00 |
-| `keluar_tanpa_checkin` | Check-out tanpa pernah check-in hari itu | Otomatis saat check-out |
-| `melebihi_batas_izin` | Durasi di luar melebihi izin yang diberikan | Saat check-out + pengecekan permit |
-| `alpha` | Tidak pernah check-in seharian | Auto-deteksi pukul 10:00 |
+| `keluar_jam_terlarang` | Otomatis saat scan "keluar" di restricted hours | Real-time di kiosk |
+| `keluar_jam_kuliah` | Otomatis saat scan "keluar" dan ada jadwal kuliah | Real-time di kiosk |
+| `tidak_kembali` | Scan "keluar" tapi belum "kembali" sampai batas waktu | Auto jam 18.00 |
+| `alpha` | Tidak ada scan sama sekali sampai jam 10.00 | Auto jam 10.00 |
+| `melebihi_batas_izin` | Durasi di luar melebihi izin yang diberikan | Saat scan "kembali" |
 
-### 10.2 Alur Penanganan Pelanggaran
+### 10.2 Alur Penanganan
 
 ```
-1. Violation terdeteksi (otomatis oleh sistem)
-2. Record disimpan ke database
-3. Admin mendapat notifikasi (via Admin App)
-4. Admin buka ViolationScreen → lihat daftar pelanggaran
-5. Admin bisa:
-   - Klik detail: lihat nama, jam, aturan yang dilanggar
-   - "Resolve" dengan notes (misal: "Sudah ditegur")
-   - "Ignore" jika dianggap tidak valid
-6. Mahasiswa dengan >3 pelanggaran (threshold) mendapat status khusus
-7. Rekap pelanggaran masuk ke laporan harian admin
+1. Violation terdeteksi → record + flag AttendanceLog.isViolation = true
+2. Admin dapat notifikasi (badge di Admin App)
+3. Admin buka ViolationScreen
+4. Lihat detail: nama, jam, aturan dilanggar
+5. Tindakan:
+   - "Resolve" + notes ("Sudah ditegur")
+   - "Dismiss" (false positive)
+6. Mahasiswa dengan >3 pelanggaran dapat status khusus
 ```
-
-### 10.3 Tindak Lanjut Pelanggaran
-
-| Tindakan | Deskripsi |
-|---|---|
-| `Resolved - Warning` | Pelanggaran dicatat, sudah diberi peringatan |
-| `Resolved - Sanksi` | Pelanggaran berat, ada sanksi akademik |
-| `Dismissed` | False positive (salah deteksi) |
-| `Unresolved` | Belum ditindaklanjuti |
 
 ---
 
-## 11. Sistem Izin & Kuota
+## 11. Sistem Izin: Harian & Pengajuan
 
-### 11.1 Tipe Izin
+### 11.1 Dua Jenis Izin
 
-| Tipe | Deskripsi | Perlu Dokumen |
+| | Izin Harian | Pengajuan Izin |
 |---|---|---|
-| `sakit` | Izin sakit | Surat dokter (opsional) |
-| `dispensasi` | Dispensasi akademik | Surat resmi |
-| `organisasi` | Kegiatan organisasi/UKM | Surat tugas |
-| `keluarga` | Urusan keluarga | - |
-| `lainnya` | Alasan lain | - |
+| **Kode** | `izin_harian` | `pengajuan_izin` |
+| **Approval** | ✅ Auto-approved | ⏳ Perlu approve admin |
+| **Durasi** | Maks 1 hari | Multi-hari (2+ hari) |
+| **Jam** | Bisa set jam (misal 10.00-12.00) | Bisa set jam |
+| **Kuota** | 10× per bulan (configurable) | Tidak ada kuota |
+| **Dibuat oleh** | Admin (atas permintaan mahasiswa) | Admin |
+| **Lampiran** | Opsional | Disarankan (surat) |
+| **Status awal** | Langsung "approved" | "pending" |
 
-### 11.2 Alur Pengajuan & Approval Izin
+### 11.2 Alur Izin Harian
 
 ```
-1. Admin input izin untuk mahasiswa (via Admin App)
-   Atau mahasiswa mengajukan via admin (admin sebagai perantara)
-2. Pilih tipe izin, tanggal, jam (start-end), alasan
-3. Upload lampiran (foto surat, dll) — opsional
-4. Cek kuota: sudah berapa izin bulan ini?
-   ├── Masih ada kuota → lanjut
-   └── Kuota penuh → peringatan, butuh approve superadmin
-5. Status: PENDING
-6. Admin lain (atau superadmin) approve/reject
-7. Jika approved → izin aktif
-8. Saat mahasiswa check-out di jam restricted:
-   Sistem cek apakah ada izin yang mencakup jam ini
-   ├── Ada izin valid → check-out normal (tidak kena violation)
-   └── Tidak ada → violation
+1. Mahasiswa minta izin ke admin (datang langsung / chat)
+2. Admin buka Admin App → PermitFormScreen
+3. Pilih "Izin Harian", pilih mahasiswa, isi alasan, jam
+4. Simpan → langsung active (auto-approved)
+5. Kuota bulanan berkurang 1
+6. Saat mahasiswa scan "keluar" di jam restricted:
+   Sistem cek izin harian → ada izin → TIDAK kena violation
+7. Selesai
 ```
 
-### 11.3 Aturan Durasi Izin
+### 11.3 Alur Pengajuan Izin (Multi-Hari)
 
-| Pengaturan | Default | Dapat Diubah Admin |
-|---|---|---|
-| Maks durasi per izin | 4 jam | Ya (global setting) |
-| Maks izin per bulan | 5 kali | Ya (global setting) |
-| Maks izin berturut-turut | 3 hari | Ya (global setting) |
-| Minimal waktu pengajuan | H-1 | Ya (global setting) |
+```
+1. Mahasiswa ajukan izin (via admin, dengan surat/bukti)
+2. Admin buat "Pengajuan Izin" dengan lampiran
+3. Status: PENDING
+4. Admin lain / superadmin approve atau reject
+5. Jika approved → izin aktif untuk tanggal yang diajukan
+6. Mahasiswa bisa keluar-masuk bebas di tanggal tersebut
+   tanpa kena violation (untuk jam yang tercakup)
+7. Jika reject → admin beri alasan
+```
 
-### 11.4 Kuota Izin per Mahasiswa
+### 11.4 Kuota Izin Harian
 
-Admin bisa melihat dan mengatur kuota per mahasiswa:
-- **Default**: 5 izin/bulan (dari global setting)
-- **Override per mahasiswa**: Admin bisa set kuota khusus (misal: mahasiswa sakit kronis dapat 10 izin/bulan)
-- **Reset**: Kuota reset setiap awal bulan
-- **Sisa kuota**: Tampil di detail mahasiswa
+- Default: 10 izin harian per bulan per mahasiswa
+- Bisa diubah via GlobalSettings
+- Admin bisa lihat sisa kuota di StudentDetailScreen
+- Reset otomatis tiap awal bulan
+- Kuota khusus bisa di-set per mahasiswa (Override)
 
 ---
 
@@ -1041,259 +1049,208 @@ Admin bisa melihat dan mengatur kuota per mahasiswa:
 
 ### 12.1 Jenis Laporan
 
-#### A. Rekap Harian (Daily Report)
+#### A. Rekap Harian Scan Toggle
 ```
-Rekapan Harian - Senin, 20 Juni 2026
-Prodi: Teknik Informatika | Angkatan: 2024
+Rekapan Harian - Senin, 20 Juni 2026 - TI
 
-┌─────┬──────────┬──────┬─────────┬──────────┬──────────┬──────────────────────┐
-│ No  │ Nama     │ NIM  │ Masuk   │ Keluar   │ Durasi   │ Status               │
-├─────┼──────────┼──────┼─────────┼──────────┼──────────┼──────────────────────┤
-│  1  │ Andi     │ 24001│ 07:15   │ 10:00*   │ 2j 45m   │ ⚠️ Violasi: keluar   │
-│     │          │      │ 12:30   │ 16:30    │          │ jam terlarang        │
-│  2  │ Budi     │ 24002│ 08:00   │ 09:00    │ 1j 0m    │ ✅ Izin Dispensasi    │
-│     │          │      │ 12:30   │ 16:45    │          │                      │
-│  3  │ Cici     │ 24003│ -       │ -        │ -        │ ❌ Alpha              │
-│  4  │ Dedi     │ 24004│ 07:30   │ 16:00    │ -        │ ✅ Normal             │
-│  5  │ Eko      │ 24005│ 08:15   │ -        │ -        │ 🔴 Di luar (violasi) │
-└─────┴──────────┴──────┴─────────┴──────────┴──────────┴──────────────────────┘
-* = tercatat sebagai pelanggaran
+No  Nama      NIM    Scan1      Scan2      Scan3      Durasi Luar    Status
+―   ────      ───    ─────      ─────      ─────      ──────────    ──────
+1   Andi      24001  07.00 klr  12.30 kmb  16.00 klr  5j 30m + 3j   🚶 Di luar
+2   Budi      24002  08.00 klr  09.00 kmb  12.30 klr  1j + 4j       🏫 Di kampus
+                                      (izin)      16.45 kmb
+3   Cici      24003  -          -          -          -              ❌ Alpha
+4   Dedi      24004  07.30 klr  16.00 kmb  -          8j 30m        🏫 Di kampus
+5   Eko       24005  08.15 klr  -          -          -              ⚠ Di luar (violasi)
 
 Ringkasan:
-  Hadir   : 4 dari 5 mahasiswa
-  Alpha   : 1 mahasiswa
-  Izin    : 1 mahasiswa
-  Violasi : 2 mahasiswa
+  Hadir   : 4/5  |  Alpha   : 1
+  Izin    : 1    |  Violasi : 1
+  Di luar : 2    |  Di kampus: 2
 ```
 
-#### B. Laporan Violasi / Keluar di Luar Jam yang Diizinkan
+#### B. Laporan Keluar di Luar Jam Izin
 ```
-Laporan Pelanggaran - Periode: 17-21 Juni 2026
+Laporan Keluar di Luar Jam Izin
+Periode: 17-21 Juni 2026
 
-┌─────┬──────────┬──────────┬──────────┬──────────────────┬──────────────┐
-│ No  │ Nama     │ NIM      │ Tanggal  │ Jam Keluar       │ Status       │
-├─────┼──────────┼──────────┼──────────┼──────────────────┼──────────────┤
-│  1  │ Andi     │ 24001    │ 20 Jun   │ 10:00 - 12:30    │ Belum ditindak│
-│  2  │ Farah    │ 24015    │ 19 Jun   │ 09:30 - 11:00    │ Sudah ditegur│
-│  3  │ Gilang   │ 24022    │ 17 Jun   │ 14:00 - 16:00    │ Belum ditindak│
-└─────┴──────────┴──────────┴──────────┴──────────────────┴──────────────┘
-
-Total pelanggaran: 3
-Rata-rata per hari: 1
+No  Nama      NIM      Tgl      Jam Keluar  Jam Kembali  Durasi    Status
+―   ────      ───      ───      ──────────  ───────────  ──────    ──────
+1   Andi      24001    20 Jun   10.00       12.30        2j 30m    ⚠ Violasi
+2   Farah     24015    19 Jun   09.30       11.00        1j 30m    ✅ Selesai
+3   Gilang    24022    17 Jun   14.00       16.00        2j 0m     ❌ Belum
 ```
 
-#### C. Laporan Check-In/Out Detail
+#### C. Status Mahasiswa Saat Ini (Real-Time)
 ```
-Laporan Check-In/Out - 20 Juni 2026 - Prodi: Teknik Informatika
+Mahasiswa Sedang Di Luar Kampus - 20 Jun 2026 14:30
 
-┌─────┬──────────┬──────┬──────────┬───────────────────────────────────┐
-│ No  │ Nama     │ NIM  │ Sesi     │ Kegiatan                         │
-├─────┼──────────┼──────┼──────────┼───────────────────────────────────┤
-│  1  │ Andi     │ 24001│ 1        │ 07:15 masuk → 10:00 keluar       │
-│     │          │      │          │ (2j 45m di luar - VIOLASI)       │
-│     │          │      │ 2        │ 12:30 masuk → 16:30 keluar       │
-│     │          │      │          │ (4j 0m di kampus)                │
-│  2  │ Budi     │ 24002│ 1        │ 08:00 masuk → 09:00 keluar (izin)│
-│     │          │      │          │ (1j 0m di luar - DISPENSASI)     │
-│     │          │      │ 2        │ 12:30 masuk → 16:45 keluar       │
-└─────┴──────────┴──────┴──────────┴───────────────────────────────────┘
+No  Nama      NIM      Keluar Jam  Durasi      Izin?      Status
+―   ────      ───      ──────────  ───────     ─────      ──────
+1   Andi      24001    10.00       4j 30m      Tidak      ⚠ Violasi
+2   Budi      24002    12.30       2j 0m       Izin       ✅ Normal
+3   Dewi      24010    13.00       1j 30m      Tidak      ✅ Normal (boleh)
 ```
 
-#### D. Rekap Kehadiran per Program Studi
+#### D. Rekap Bulanan per Prodi
 ```
-Rekap Bulanan - Juni 2026 - per Program Studi
+Rekap Juni 2026 - per Program Studi
 
-┌──────────────────┬────────┬────────┬────────┬──────────┬──────────────┐
-│ Program Studi    │ Hadir  │ Alpha  │ Izin   │ Violasi  │ Total Mhs   │
-├──────────────────┼────────┼────────┼────────┼──────────┼──────────────┤
-│ TI               │ 92%    │ 3%     │ 4%     │ 1%       │ 250          │
-│ SI               │ 88%    │ 5%     │ 5%     │ 2%       │ 180          │
-│ DK               │ 95%    │ 2%     │ 2%     │ 1%       │ 120          │
-│ MI               │ 85%    │ 7%     │ 6%     │ 2%       │ 100          │
-└──────────────────┴────────┴────────┴────────┴──────────┴──────────────┘
+Prodi     Hadir   Alpha   Izin   Violasi   Jumlah
+────      ─────   ─────   ────   ───────   ──────
+TI        92%     3%      4%     1%        250
+SI        88%     5%      5%     2%        180
+DK        95%     2%      2%     1%        120
+MI        85%     7%      6%     2%        100
 ```
 
-### 12.2 Export Laporan
-
-| Format | Fitur |
+### 12.2 Export
+| Format | Keterangan |
 |---|---|
-| **CSV** | Bisa dibuka di Excel/Google Sheets |
-| **PDF** | Siap cetak, dengan kop surat kampus |
-| **In-App Preview** | Lihat langsung di Admin App sebelum export |
+| CSV | Buka di Excel/Spreadsheet |
+| PDF | Siap cetak |
+| In-App | Preview langsung di Admin App |
 
-### 12.3 Filter Laporan
-
-Semua laporan bisa difilter berdasarkan:
-- Rentang tanggal (dari - sampai)
+### 12.3 Filter
+- Tanggal (from - to)
 - Program studi
 - Angkatan
-- Status kehadiran (hadir, alpha, izin)
+- Status (hadir, alpha, izin)
 - Tipe pelanggaran
-- Per mahasiswa (cari NIM/nama)
+- NIM / Nama mahasiswa
 
 ---
 
 ## 13. Android Module Breakdown
 
-### 13.1 `:core` (Shared Library)
+### 13.1 `:core`
 
 ```
-core/
-├── src/main/kotlin/.../core/
-│   ├── di/                           # Hilt modules
-│   │   ├── NetworkModule.kt
-│   │   ├── DatabaseModule.kt
-│   │   └── FaceModule.kt
-│   │
-│   ├── face/
-│   │   ├── FaceDetector.kt           # TFLite face detection
-│   │   ├── FaceEmbedder.kt           # TFLite embedding extraction
-│   │   ├── FaceMatcher.kt            # Cosine similarity brute-force
-│   │   ├── LivenessDetector.kt       # Blink / motion detection
-│   │   └── FaceIndex.kt              # In-memory index (data class)
-│   │
-│   ├── database/
-│   │   ├── AppDatabase.kt            # Room database
-│   │   ├── entity/                   # Room entities
-│   │   ├── dao/                      # DAOs
-│   │   └── converter/                # TypeConverters (FloatArray ↔ Blob)
-│   │
-│   ├── network/
-│   │   ├── ApiClient.kt              # Retrofit instance
-│   │   ├── ApiService.kt             # Interface endpoints
-│   │   ├── dto/                      # Data transfer objects
-│   │   └── interceptor/              # Auth interceptor (JWT)
-│   │
-│   ├── sync/
-│   │   ├── FaceSyncWorker.kt         # WorkManager: download vectors
-│   │   ├── AttendanceSyncWorker.kt   # WorkManager: upload logs
-│   │   ├── RulesSyncWorker.kt        # WorkManager: download rules
-│   │   └── SyncManager.kt            # Orchestrator
-│   │
-│   └── model/
-│       ├── Student.kt
-│       ├── Attendance.kt
-│       ├── CheckInOut.kt
-│       ├── Permit.kt
-│       ├── CampusRule.kt
-│       ├── Violation.kt
-│       └── CourseSchedule.kt
+core/src/main/kotlin/.../core/
+├── di/
+│   ├── NetworkModule.kt
+│   ├── DatabaseModule.kt
+│   └── FaceModule.kt
+├── face/
+│   ├── FaceDetector.kt
+│   ├── FaceEmbedder.kt
+│   ├── FaceMatcher.kt
+│   ├── LivenessDetector.kt
+│   └── FaceIndex.kt
+├── database/
+│   ├── AppDatabase.kt
+│   ├── entity/
+│   ├── dao/
+│   └── converter/
+├── network/
+│   ├── ApiClient.kt
+│   ├── ApiService.kt
+│   ├── dto/
+│   └── interceptor/
+├── sync/
+│   ├── FaceSyncWorker.kt
+│   ├── AttendanceSyncWorker.kt
+│   ├── SyncPoller.kt         # Polling sync request
+│   └── SyncManager.kt
+└── model/
+    ├── Student.kt
+    ├── AttendanceLog.kt
+    ├── Permit.kt
+    ├── CampusRule.kt
+    ├── Violation.kt
+    └── CourseSchedule.kt
 ```
 
-### 13.2 `:kiosk-scanner` (Aplikasi Scanner)
+### 13.2 `:kiosk-scanner`
 
 ```
-kiosk-scanner/
-├── src/main/kotlin/.../scanner/
-│   ├── ScannerApp.kt                 # Application class + Hilt
-│   ├── MainActivity.kt
-│   │
-│   ├── camera/
-│   │   ├── CameraManager.kt          # CameraX lifecycle wrapper
-│   │   ├── FrameAnalyzer.kt          # ImageAnalysis.Analyzer
-│   │   └── PreviewView.kt            # Compose wrapper
-│   │
-│   ├── matching/
-│   │   ├── MatchEngine.kt            # Orchestrator: detect → embed → match
-│   │   ├── MatchResult.kt            # Sealed class (matched / unknown / error)
-│   │   └── ScanTypeDetector.kt       # Deteksi masuk/keluar berdasarkan state
-│   │
-│   ├── rule/
-│   │   ├── RuleChecker.kt            # Evaluasi aturan offline
-│   │   └── RuleCache.kt              # Cache aturan dari sync
-│   │
-│   ├── scanner_state/
-│   │   ├── ScannerState.kt           # State machine (idle, scanning, processing)
-│   │   └── SessionManager.kt         # Track siapa yang sudah check-in hari ini
-│   │
-│   ├── ui/
-│   │   ├── ScannerScreen.kt          # Main scanner composable
-│   │   ├── ResultOverlay.kt          # Overlay nama + status
-│   │   ├── ModeToggle.kt             # Tombol ganti mode masuk/keluar
-│   │   └── StatusBar.kt              # Sync status, clock, mode
-│   │
-│   └── service/
-│       └── KioskForegroundService.kt # Keep app alive + prevent sleep
+kiosk-scanner/src/main/kotlin/.../scanner/
+├── ScannerApp.kt
+├── MainActivity.kt
+├── camera/
+│   ├── CameraManager.kt
+│   ├── FrameAnalyzer.kt
+│   └── PreviewView.kt
+├── matching/
+│   ├── MatchEngine.kt
+│   └── MatchResult.kt
+├── toggle/
+│   ├── ToggleEngine.kt        # Logic determine keluar/kembali
+│   ├── ToggleState.kt         # State management per-student
+│   └── SessionTracker.kt      # Track durasi di luar
+├── rule/
+│   ├── RuleChecker.kt
+│   └── RuleCache.kt
+├── ui/
+│   ├── ScannerScreen.kt
+│   ├── ResultOverlay.kt
+│   └── StatusBar.kt
+└── service/
+    └── KioskForegroundService.kt
 ```
 
-### 13.3 `:admin-app` (Aplikasi Admin)
+### 13.3 `:admin-app`
 
 ```
-admin-app/
-├── src/main/kotlin/.../admin/
-│   ├── AdminApp.kt                   # Application class + Hilt
-│   ├── MainActivity.kt               # Navigation host
-│   │
-│   ├── auth/
-│   │   ├── LoginScreen.kt
-│   │   └── AuthViewModel.kt
-│   │
-│   ├── dashboard/
-│   │   ├── DashboardScreen.kt
-│   │   ├── DashboardViewModel.kt
-│   │   └── components/
-│   │       ├── StatCard.kt
-│   │       ├── RecentScansList.kt
-│   │       └── ViolationAlert.kt
-│   │
-│   ├── student/
-│   │   ├── StudentListScreen.kt
-│   │   ├── StudentDetailScreen.kt
-│   │   ├── StudentFormScreen.kt
-│   │   └── StudentViewModel.kt
-│   │
-│   ├── register/
-│   │   ├── FaceRegisterScreen.kt     # Kamera + panduan framing
-│   │   └── RegisterViewModel.kt
-│   │
-│   ├── permit/
-│   │   ├── PermitListScreen.kt
-│   │   ├── PermitDetailScreen.kt
-│   │   ├── PermitFormScreen.kt       # Buat izin baru
-│   │   └── PermitViewModel.kt
-│   │
-│   ├── rules/
-│   │   ├── RulesListScreen.kt
-│   │   ├── RuleFormScreen.kt         # Tambah/edit aturan
-│   │   ├── GlobalSettingsScreen.kt   # Atur global settings
-│   │   └── RulesViewModel.kt
-│   │
-│   ├── schedule/
-│   │   ├── ScheduleListScreen.kt
-│   │   ├── ScheduleImportScreen.kt   # Import jadwal CSV
-│   │   └── ScheduleViewModel.kt
-│   │
-│   ├── checkinout/
-│   │   ├── CheckInOutScreen.kt       # Rekap check-in/out hari ini
-│   │   ├── ActiveOutsideScreen.kt    # Mahasiswa yang sedang di luar
-│   │   └── CheckInOutViewModel.kt
-│   │
-│   ├── violation/
-│   │   ├── ViolationListScreen.kt
-│   │   ├── ViolationDetailScreen.kt
-│   │   └── ViolationViewModel.kt
-│   │
-│   ├── report/
-│   │   ├── ReportScreen.kt           # Pilih jenis laporan + filter
-│   │   ├── DailyReportScreen.kt
-│   │   ├── ViolationReportScreen.kt
-│   │   ├── AttendanceReportScreen.kt
-│   │   ├── ReportPreviewScreen.kt    # Preview sebelum export
-│   │   └── ReportViewModel.kt
-│   │
-│   ├── device/
-│   │   ├── DeviceListScreen.kt
-│   │   ├── DeviceDetailScreen.kt
-│   │   └── DeviceViewModel.kt
-│   │
-│   ├── notification/
-│   │   ├── NotificationScreen.kt
-│   │   └── NotificationViewModel.kt
-│   │
-│   └── import/
-│       ├── ImportScreen.kt           # Import CSV/Excel mahasiswa
-│       ├── ImportPreviewScreen.kt    # Preview data sebelum import
-│       └── ImportViewModel.kt
+admin-app/src/main/kotlin/.../admin/
+├── AdminApp.kt
+├── MainActivity.kt
+├── auth/
+│   ├── LoginScreen.kt
+│   └── AuthViewModel.kt
+├── dashboard/
+│   ├── DashboardScreen.kt
+│   ├── DashboardViewModel.kt
+│   └── components/
+│       ├── StatCard.kt
+│       ├── RecentScansList.kt
+│       └── ViolationAlert.kt
+├── student/
+│   ├── StudentListScreen.kt
+│   ├── StudentDetailScreen.kt
+│   ├── StudentFormScreen.kt
+│   └── StudentViewModel.kt
+├── register/
+│   ├── FaceRegisterScreen.kt
+│   └── RegisterViewModel.kt
+├── permit/                              # Izin Harian + Pengajuan
+│   ├── PermitListScreen.kt
+│   ├── PermitDetailScreen.kt
+│   ├── PermitFormScreen.kt              # Pilih jenis: harian/pengajuan
+│   ├── PendingApprovalScreen.kt         # Pengajuan pending
+│   └── PermitViewModel.kt
+├── monitor/                             # Monitoring toggle status
+│   ├── ToggleStatusScreen.kt            # Status real-time semua mhs
+│   ├── OutsideNowScreen.kt              # Yg sedang di luar
+│   └── MonitorViewModel.kt
+├── rules/
+│   ├── RulesListScreen.kt
+│   ├── RuleFormScreen.kt
+│   ├── GlobalSettingsScreen.kt
+│   └── RulesViewModel.kt
+├── violation/
+│   ├── ViolationListScreen.kt
+│   ├── ViolationDetailScreen.kt
+│   └── ViolationViewModel.kt
+├── report/
+│   ├── ReportScreen.kt
+│   ├── DailyReportScreen.kt
+│   ├── ViolationReportScreen.kt
+│   ├── OutsideHoursReportScreen.kt      # Laporan keluar di luar jam izin
+│   ├── ReportPreviewScreen.kt
+│   └── ReportViewModel.kt
+├── sync/
+│   ├── SyncScreen.kt                    # Tombol sync manual + status
+│   └── SyncViewModel.kt
+├── device/
+│   ├── DeviceListScreen.kt
+│   ├── DeviceDetailScreen.kt
+│   └── DeviceViewModel.kt
+├── notification/
+│   ├── NotificationScreen.kt
+│   └── NotificationViewModel.kt
+└── import/
+    ├── ImportScreen.kt
+    └── ImportViewModel.kt
 ```
 
 ---
@@ -1304,199 +1261,160 @@ admin-app/
 
 | Screen | Deskripsi |
 |---|---|
-| `ScannerScreen` | Layar penuh kamera, overlay tipis. Otomatis scan. Indikator mode (Masuk/Keluar) di atas. Hasil scan muncul sebagai overlay animasi. |
-| `ResultOverlay` | Animasi hasil scan. Hijau = sukses, Merah = tidak dikenal, Kuning = peringatan (violation/sudah check-in). Menampilkan nama, NIM, jam. |
-
-**Mode Toggle Screen** (opsional):
-| Screen | Deskripsi |
-|---|---|
-| `ModeSelector` | Layar admin (butuh PIN) untuk ganti mode scanner antara "Check-In" / "Check-Out" / "Auto". |
+| `ScannerScreen` | Fullscreen kamera, auto-scan. Tidak ada tombol. Indikator: jam, status koneksi, mode kiosk. |
+| `ResultOverlay` | Animasi hasil. Hijau = scan sukses + nama mahasiswa + aksi (keluar/kembali). Merah = tidak dikenal. Kuning = violation warning. |
 
 ### 14.2 Admin App
 
 | Screen | Deskripsi |
 |---|---|
-| `LoginScreen` | Username + password admin |
-| `DashboardScreen` | Statistik real-time: total hadir, di luar, izin, alpha, pelanggaran hari ini + feed scan terakhir |
-| `StudentListScreen` | Search + filter (prodi, angkatan) + pull-to-refresh |
-| `StudentDetailScreen` | Data diri + status terkini (di kampus/luar) + tabel riwayat check-in/out + pelanggaran |
-| `StudentFormScreen` | Tambah/edit data mahasiswa |
-| `FaceRegisterScreen` | Kamera dengan panduan oval untuk foto wajah |
-| `PermitListScreen` | Tab: Pending, Approved, Rejected, All |
-| `PermitDetailScreen` | Detail izin + tombol approve/reject + alasan reject |
-| `PermitFormScreen` | Buat izin baru: pilih mahasiswa, tipe, tanggal, jam, alasan, upload lampiran |
-| `RulesListScreen` | Daftar aturan aktif/nonaktif + toggle |
-| `RuleFormScreen` | Tambah/edit aturan: nama, hari, jam, filter prodi/angkatan, tipe |
-| `GlobalSettingsScreen` | Setting: jam operasional, batas izin, grace period, dll |
-| `ScheduleListScreen` | Daftar jadwal kuliah per mahasiswa/prodi |
-| `ScheduleImportScreen` | Pilih file CSV jadwal, mapping kolom, import |
-| `CheckInOutScreen` | Tabel check-in/out hari ini, filter prodi, search nama |
-| `ActiveOutsideScreen` | List mahasiswa yang sedang di luar kampus (belum check-in lagi) |
-| `ViolationListScreen` | Daftar pelanggaran, filter tipe/tanggal, sortir |
-| `ViolationDetailScreen` | Detail pelanggaran + tombol resolve/ignore + notes |
-| `ReportScreen` | Pilih jenis laporan, filter tanggal/prodi/angkatan |
-| `DailyReportScreen` | Preview rekap harian + tombol export CSV/PDF |
-| `ViolationReportScreen` | Laporan pelanggaran periode + export |
-| `AttendanceReportScreen` | Laporan kehadiran per prodi/bulanan + export |
-| `ReportPreviewScreen` | Preview laporan sebelum export |
-| `DeviceListScreen` | Daftar kiosk device + status (online/offline, baterai) |
-| `DeviceDetailScreen` | Detail device + riwayat sync + log |
-| `ImportScreen` | Pilih file CSV/Excel, mapping kolom, preview, import |
-| `ImportPreviewScreen` | Preview data sebelum import, validasi error |
-| `NotificationScreen` | List notifikasi (violation, permit pending, device offline) |
+| `LoginScreen` | Username + password |
+| `DashboardScreen` | Card stats: hadir, alpha, di luar, izin, violation hari ini + recent scan feed |
+| `StudentListScreen` | Search + filter prodi/angkatan |
+| `StudentDetailScreen` | Data + status toggle + history scan + violation |
+| `StudentFormScreen` | Tambah/edit |
+| `FaceRegisterScreen` | Kamera + panduan oval |
+| `PermitListScreen` | Tab: Izin Harian, Pengajuan, All |
+| `PermitFormScreen` | Pilih jenis (harian/pengajuan), pilih mahasiswa, tanggal, jam, alasan, lampiran |
+| `PendingApprovalScreen` | List pengajuan izin yang pending + tombol approve/reject |
+| `ToggleStatusScreen` | Tabel: semua mahasiswa + status toggle real-time |
+| `OutsideNowScreen` | Filter mahasiswa yang saat ini "di luar" |
+| `RulesListScreen` | CRUD aturan + toggle aktif/nonaktif |
+| `GlobalSettingsScreen` | Setting jam operasional, kuota, dll |
+| `ViolationListScreen` | Filter tipe/tanggal |
+| `ViolationDetailScreen` | Detail + resolve/ignore + notes |
+| `ReportScreen` | Pilih jenis laporan + filter + preview + export |
+| `DailyReportScreen` | Rekap harian preview |
+| `OutsideHoursReportScreen` | Laporan khusus: keluar di luar jam izin |
+| `SyncScreen` | Status koneksi kiosk + tombol "Sync Sekarang" + log sync |
+| `DeviceListScreen` | Daftar kiosk + status |
+| `NotificationScreen` | Notifikasi violation, sync done, dll |
+| `ImportScreen` | Import CSV/Excel mahasiswa |
 
 ---
 
 ## 15. Hardware Requirement
 
-### 15.1 Kiosk Scanner (Tablet/HP)
+### 15.1 Kiosk Scanner
 
 | Komponen | Minimal | Rekomendasi |
 |---|---|---|
-| OS | Android 12 (API 31) | Android 13+ |
+| OS | Android 12 | Android 13+ |
 | RAM | 4 GB | 6 GB+ |
-| Kamera Depan | 5 MP | 8 MP+ dengan autofocus |
-| CPU | Octa-core 2.0 GHz | Snapdragon 7xx+ / MediaTek G series |
-| Storage | 32 GB | 64 GB+ |
-| Layar | 8 inci | 10 inci (agar mahasiswa lihat hasil) |
-| Baterai | — | Selalu terhubung charger |
-| Konektivitas | Wi-Fi | Wi-Fi + Cellular (backup) |
+| Kamera Depan | 5 MP | 8 MP+ autofocus |
+| CPU | Octa-core 2.0 GHz | Snapdragon 7xx+ |
+| Storage | 32 GB | 64 GB |
+| Layar | 8" | 10" |
+| Koneksi | Wi-Fi | Wi-Fi + backup seluler |
 
-### 15.2 Posisi Pemasangan Kiosk
+### 15.2 Posisi
 
 ```
-         ☀️ Cahaya dari depan (searah mahasiswa)
-         
-         ┌─────────────────────┐
-         │    HP Kiosk         │  ← Kamera menghadap mahasiswa
-         │  ┌─────────────┐   │
-         │  │   Kamera     │───┼──▶ Mahasiswa
-         │  └─────────────┘   │
-         └─────────────────────┘
-                 │
-                 ⛔ JANGAN backlight (matahari dari belakang mahasiswa)
+Cahaya dari depan (searah mahasiswa)
+         │
+         ▼
+┌────────────────┐
+│  HP Kiosk      │ kamera ▶ Mahasiswa
+└────────────────┘
+⛔ Jangan backlight
 ```
 
 ### 15.3 Server
 
-| Komponen | Minimal | Rekomendasi |
-|---|---|---|
-| CPU | 2 core | 4 core |
-| RAM | 4 GB | 8 GB |
-| Storage | 50 GB SSD | 100 GB SSD |
-| OS | Linux (Ubuntu 22.04+) | Linux |
-| Docker | Yes | Yes |
+| Komponen | Minimal |
+|---|---|
+| CPU | 2 core |
+| RAM | 4 GB |
+| Storage | 50 GB SSD |
+| OS | Ubuntu 22.04+ |
+| Docker | Yes |
 
 ---
 
 ## 16. Phase / Milestone Pengembangan
 
-### Phase 1: Foundation + Core Pipeline (Prioritas Tertinggi)
+### Phase 1: Foundation + Core Pipeline
 
-**Tujuan**: Backend + Kiosk Scanner bisa scan offline, check-in/out, dan sync.
+**Tujuan**: Backend + Kiosk bisa scan toggle end-to-end offline.
 
 | Task | Estimasi |
 |---|---|
 | Setup monorepo + Gradle + version catalog | 1 hari |
 | Setup backend (Bun + Prisma + PostgreSQL + pgvector + Docker) | 2 hari |
 | Database schema + migration + seed | 1 hari |
-| API endpoints: CRUD students, attendance, sync | 2 hari |
+| API: CRUD students, attendance scan, sync, rules | 2 hari |
 | `:core` — Room database + TypeConverters | 1 hari |
-| `:core` — TFLite face embedder + liveness detection | 2 hari |
+| `:core` — TFLite face embedder + liveness | 2 hari |
 | `:core` — Network layer (Retrofit) | 1 hari |
 | `:kiosk-scanner` — CameraX + frame analyzer | 2 hari |
-| `:kiosk-scanner` — Face matching engine + result overlay | 2 hari |
-| `:kiosk-scanner` — Check-in/out state management | 1 hari |
-| `:kiosk-scanner` — WorkManager sync tengah malam | 1 hari |
+| `:kiosk-scanner` — Face matching engine | 2 hari |
+| `:kiosk-scanner` — Toggle engine (keluar/kembali) | 1 hari |
+| `:kiosk-scanner` — Sync (midnight + polling sync request) | 1 hari |
 | **Total Phase 1** | **~16 hari** |
 
-### Phase 2: Admin App Essential (Prioritas Sedang)
+### Phase 2: Admin App + Izin
 
-**Tujuan**: Admin bisa daftarin mahasiswa, approve izin, atur rules.
+**Tujuan**: Admin bisa kelola data, izin harian & pengajuan.
 
 | Task | Estimasi |
 |---|---|
-| `:admin-app` — Auth + login screen | 1 hari |
-| `:admin-app` — Dashboard screen | 1 hari |
-| `:admin-app` — Student list + form + detail | 2 hari |
-| `:admin-app` — Face registration dengan kamera | 2 hari |
+| `:admin-app` — Auth + login + dashboard | 2 hari |
+| `:admin-app` — Student CRUD + detail + face register | 3 hari |
 | `:admin-app` — Import CSV/Excel | 1 hari |
-| `:admin-app` — Permit list + form + approve/reject | 2 hari |
-| `:admin-app` — Rules management (CRUD) | 2 hari |
-| `:admin-app` — Global settings screen | 1 hari |
-| API: permit CRUD, rules CRUD, import, settings | 2 hari |
+| `:admin-app` — Izin harian (auto-approved) | 2 hari |
+| `:admin-app` — Pengajuan izin + approve/reject | 2 hari |
+| `:admin-app` — Rules management + global settings | 2 hari |
+| API: permit endpoints + rules + import | 2 hari |
 | **Total Phase 2** | **~14 hari** |
 
-### Phase 3: Check-In/Out + Violation + Report (Prioritas Sedang)
-
-**Tujuan**: Sistem check-in/out lengkap dengan deteksi pelanggaran dan laporan.
+### Phase 3: Monitoring + Violation + Report
 
 | Task | Estimasi |
 |---|---|
-| API: check-in/out endpoints + violation detection | 2 hari |
-| API: report generators (daily, monthly, violation) | 2 hari |
-| `:kiosk-scanner` — Rule checker (offline) | 1 hari |
-| `:kiosk-scanner` — Scan type detector (masuk/keluar) | 1 hari |
-| `:admin-app` — Check-in/out monitoring screen | 1 hari |
+| API: violation detection + report generators | 2 hari |
+| `:kiosk-scanner` — Rule checker offline | 1 hari |
+| `:admin-app` — Toggle status monitoring + outside now | 2 hari |
 | `:admin-app` — Violation list + detail + resolve | 2 hari |
-| `:admin-app` — Report screens (daily, violation, export) | 3 hari |
-| `:admin-app` — Active outside screen | 1 hari |
-| **Total Phase 3** | **~13 hari** |
+| `:admin-app` — Report screens (daily, violation, outside-hours) | 3 hari |
+| `:admin-app` — Export CSV/PDF | 1 hari |
+| **Total Phase 3** | **~11 hari** |
 
-### Phase 4: Advanced Features (Prioritas Rendah)
-
-**Tujuan**: Jadwal kuliah, device management, notifikasi, audit.
+### Phase 4: Sync + Device + Notifikasi
 
 | Task | Estimasi |
 |---|---|
-| API: course schedule CRUD + import | 1 hari |
-| API: device management + ping | 1 hari |
-| API: notification + audit log | 1 hari |
-| `:admin-app` — Schedule management + import | 2 hari |
-| `:admin-app` — Device list + detail | 1 hari |
+| API: sync request/status, device ping, notifications | 2 hari |
+| `:admin-app` — Sync trigger screen + status | 1 hari |
+| `:admin-app` — Device management | 1 hari |
 | `:admin-app` — Notification screen | 1 hari |
-| `:admin-app` — Schedule-based violation detection | 1 hari |
-| **Total Phase 4** | **~8 hari** |
+| `:admin-app` — Schedule management + import | 2 hari |
+| **Total Phase 4** | **~7 hari** |
 
-### Phase 5: Polishing & Production (Prioritas Rendah)
-
-**Tujuan**: Siap dipake beneran.
+### Phase 5: Polishing & Production
 
 | Task | Estimasi |
 |---|---|
-| Error handling + edge cases all screens | 2 hari |
-| Loading state + empty state + error state | 2 hari |
-| Logging + crash reporting (Firebase Crashlytics) | 1 hari |
-| Testing (manual + edge case) | 3 hari |
+| Error handling + edge cases | 2 hari |
+| Loading/empty/error state all screens | 2 hari |
+| Logging + crash reporting | 1 hari |
+| Testing manual + edge case | 3 hari |
 | Performance tuning (10k vectors) | 1 hari |
-| Dokumentasi pengguna | 1 hari |
-| Deployment guide + docker compose final | 1 hari |
+| Dokumentasi + deployment guide | 2 hari |
 | **Total Phase 5** | **~11 hari** |
 
 ---
 
 ## 17. Open Questions
 
-Pertanyaan yang perlu dijawab sebelum/selama development:
-
-### Model & AI
-1. **Model TFLite**: MobileFaceNet atau model lain? Sumber model pre-trained?
+1. **Model TFLite**: MobileFaceNet atau model lain? Sumber pre-trained model?
 2. **Liveness Detection**: Model blinking atau texture-based (faspe)?
-3. **Face Vector Dimensi**: 128-d (cepat) atau 512-d (akurat)?
-4. **Threshold**: Default 0.6? Perlu tuning dengan dataset wajah Indonesia?
-
-### Backend
-5. **Backend Framework**: Elysia vs Hono? Dua-duanya cocok Bun.
-6. **PDF Library**: Puppeteer (butuh Chrome) atau PDFKit (pure JS)?
-
-### Data & Import
-7. **CSV Import Format**: Template kolom: NIM, Nama, Prodi, Angkatan, No HP, Email?
-8. **Jadwal Kuliah Format**: Template kolom: NIM, Mata Kuliah, Hari, Jam Mulai, Jam Selesai, Ruang?
-
-### Operational
-9. **Dashboard Web**: Butuh web dashboard atau cukup dari Admin App?
-10. **Multiple Kiosk**: Awalnya 1 kiosk atau langsung support multi-gerbang?
-11. **Emergency Mode**: Tombol darurat untuk buka semua gerbang & nonaktifkan aturan?
+3. **Face Vector Dimensi**: 128-d (cepat) vs 512-d (akurat)?
+4. **Backend Framework**: Elysia vs Hono?
+5. **CSV Import Format**: Template kolom: NIM, Nama, Prodi, Angkatan, No HP, Email?
+6. **Jadwal Kuliah Format**: Template kolom: NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang?
+7. **Dashboard Web**: Butuh web dashboard atau cukup dari Admin App?
+8. **Multiple Kiosk**: 1 kiosk dulu atau langsung multi-gerbang?
+9. **Emergency Mode**: Tombol darurat untuk nonaktifkan semua aturan?
 
 ---
 
