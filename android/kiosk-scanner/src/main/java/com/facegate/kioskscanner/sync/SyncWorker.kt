@@ -8,7 +8,10 @@ import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
 import com.facegate.core.data.local.dao.StudentDao
+import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiService
+import com.facegate.core.data.remote.dto.AttendanceBatchRequest
+import com.facegate.core.data.remote.dto.ScanRequest
 import com.facegate.core.face.FaceMatcher
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -23,7 +26,8 @@ class SyncWorker @AssistedInject constructor(
     private val faceVectorDao: FaceVectorDao,
     private val studentDao: StudentDao,
     private val campusRuleDao: CampusRuleDao,
-    private val faceMatcher: FaceMatcher
+    private val faceMatcher: FaceMatcher,
+    private val syncMetadata: SyncMetadata
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -78,51 +82,97 @@ class SyncWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
-            val unsyncedLogs = attendanceLogDao.getUnsynced()
-            if (unsyncedLogs.isNotEmpty()) {
-                Log.d(TAG, "Uploading ${unsyncedLogs.size} logs")
-            }
+            syncUnsyncedLogs()
+            syncFaces()
+            syncRules()
+            Result.success()
+        } catch (e: Exception) {
+            Log.e(TAG, "Sync failed", e)
+            Result.retry()
+        }
+    }
 
-            val faceSync = apiService.syncFaces(since = null)
-            if (faceSync.isSuccessful && faceSync.body() != null) {
-                val faces = faceSync.body()!!.data
+    private suspend fun syncUnsyncedLogs() {
+        val unsynced = attendanceLogDao.getUnsynced()
+        if (unsynced.isEmpty()) return
+
+        Log.d(TAG, "Uploading ${unsynced.size} logs")
+
+        val requests = unsynced.map { log ->
+            ScanRequest(
+                studentId = log.studentId,
+                action = log.action,
+                confidenceScore = log.confidenceScore,
+                isViolation = log.isViolation,
+                violationType = log.violationType,
+                deviceId = log.deviceId,
+                photoCapture = log.photoCapture,
+                timestamp = log.timestamp
+            )
+        }
+
+        val response = apiService.syncAttendance(AttendanceBatchRequest(requests))
+        if (response.isSuccessful) {
+            val ids = unsynced.map { it.id }
+            attendanceLogDao.markManySynced(ids)
+            Log.d(TAG, "Uploaded ${ids.size} logs successfully")
+        }
+    }
+
+    private suspend fun syncFaces() {
+        val since = syncMetadata.getLastFaceSync()
+        val response = apiService.syncFaces(since = since)
+
+        if (response.isSuccessful && response.body() != null) {
+            val syncData = response.body()!!
+            val faces = syncData.data
+
+            if (faces.isNotEmpty()) {
                 val vectors = faces.map { dto ->
                     com.facegate.core.data.local.entity.FaceVectorEntity(
                         studentId = dto.studentId,
                         vector = dto.vector.toFloatArray()
                     )
                 }
-                faceVectorDao.deleteAll()
-                faceVectorDao.insertAll(vectors)
-                faceMatcher.buildIndex(vectors.associate { it.studentId to it.vector })
-                Log.d(TAG, "Synced ${vectors.size} faces")
-            }
 
-            val rulesSync = apiService.syncRules()
-            if (rulesSync.isSuccessful && rulesSync.body() != null) {
-                val rules = rulesSync.body()!!.map { dto ->
-                    com.facegate.core.data.local.entity.CampusRuleEntity(
-                        id = dto.id,
-                        dayOfWeek = dto.dayOfWeek,
-                        startTime = dto.startTime,
-                        endTime = dto.endTime,
-                        isRestricted = dto.isRestricted,
-                        appliesToAll = dto.appliesToAll,
-                        studyProgram = dto.studyProgram,
-                        academicYear = dto.academicYear,
-                        priority = dto.priority,
-                        updatedAt = System.currentTimeMillis()
-                    )
+                for (fv in vectors) {
+                    val existing = faceVectorDao.getByStudentId(fv.studentId)
+                    if (existing == null) {
+                        faceVectorDao.insert(fv)
+                    }
                 }
-                campusRuleDao.deleteAll()
-                campusRuleDao.insertAll(rules)
-                Log.d(TAG, "Synced ${rules.size} rules")
+
+                val allVectors = faceVectorDao.getAll()
+                faceMatcher.buildIndex(allVectors.associate { it.studentId to it.vector })
+                Log.d(TAG, "Synced ${vectors.size} new/updated faces")
             }
 
-            Result.success()
-        } catch (e: Exception) {
-            Log.e(TAG, "Sync failed", e)
-            Result.retry()
+            if (syncData.since != null) {
+                syncMetadata.setLastFaceSync(syncData.since)
+            }
+        }
+    }
+
+    private suspend fun syncRules() {
+        val response = apiService.syncRules()
+        if (response.isSuccessful && response.body() != null) {
+            val rules = response.body()!!.map { dto ->
+                com.facegate.core.data.local.entity.CampusRuleEntity(
+                    id = dto.id,
+                    dayOfWeek = dto.dayOfWeek,
+                    startTime = dto.startTime,
+                    endTime = dto.endTime,
+                    isRestricted = dto.isRestricted,
+                    appliesToAll = dto.appliesToAll,
+                    studyProgram = dto.studyProgram,
+                    academicYear = dto.academicYear,
+                    priority = dto.priority,
+                    updatedAt = System.currentTimeMillis()
+                )
+            }
+            campusRuleDao.deleteAll()
+            campusRuleDao.insertAll(rules)
+            Log.d(TAG, "Synced ${rules.size} rules")
         }
     }
 

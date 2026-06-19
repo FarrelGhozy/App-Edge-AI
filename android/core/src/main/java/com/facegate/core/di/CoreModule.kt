@@ -8,6 +8,7 @@ import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
 import com.facegate.core.data.local.dao.StudentDao
+import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiClient
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.AuthInterceptor
@@ -89,5 +90,11 @@ object CoreModule {
     @Singleton
     fun provideLivenessDetector(): LivenessDetector {
         return LivenessDetector()
+    }
+
+    @Provides
+    @Singleton
+    fun provideSyncMetadata(@ApplicationContext context: Context): SyncMetadata {
+        return SyncMetadata(context)
     }
 }

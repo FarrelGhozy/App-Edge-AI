@@ -1,4 +1,4 @@
-package com.facegate.adminapp.permits
+package com.facegate.adminapp.notifications
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,34 +10,32 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class PermitListState(
-    val permits: List<PermitItem> = emptyList(),
-    val isLoading: Boolean = false,
-    val filterStatus: String? = null
+data class NotificationItem(
+    val id: String,
+    val title: String,
+    val message: String,
+    val isRead: Boolean,
+    val createdAt: String = ""
 )
 
-data class PermitItem(
-    val id: String,
-    val studentName: String,
-    val type: String,
-    val status: String,
-    val startDate: String = "",
-    val endDate: String = ""
+data class NotificationListState(
+    val notifications: List<NotificationItem> = emptyList(),
+    val isLoading: Boolean = false
 )
 
 @HiltViewModel
-class PermitListViewModel @Inject constructor(
+class NotificationListViewModel @Inject constructor(
     private val apiService: ApiService
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(PermitListState())
-    val uiState: StateFlow<PermitListState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(NotificationListState())
+    val uiState: StateFlow<NotificationListState> = _uiState.asStateFlow()
 
-    fun loadPermits() {
+    fun load() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val response = apiService.getStudents()
+                val response = apiService.getAttendanceLogs()
                 _uiState.value = _uiState.value.copy(isLoading = false)
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false)
@@ -45,8 +43,5 @@ class PermitListViewModel @Inject constructor(
         }
     }
 
-    fun setFilter(status: String?) {
-        _uiState.value = _uiState.value.copy(filterStatus = status)
-        loadPermits()
-    }
+    fun markAllRead() {}
 }

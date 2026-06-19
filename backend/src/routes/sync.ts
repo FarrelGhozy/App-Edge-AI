@@ -4,17 +4,42 @@ import prisma from "../services/prisma";
 
 export const syncRoutes = new Elysia()
   .get("/api/sync/faces", async ({ query }) => {
-    const faces = await prisma.faceVector.findMany({
-      include: { student: { select: { name: true } } }
-    });
+    const since = query.since as string | undefined;
+    let faces;
 
-    const data = faces.map((f) => ({
-      studentId: f.studentId,
-      vector: [],
-      updatedAt: f.updatedAt.toISOString()
-    }));
+    if (since) {
+      const sinceDate = new Date(since);
+      faces = await prisma.faceVector.findMany({
+        where: { updatedAt: { gte: sinceDate } },
+        include: { student: { select: { name: true, nim: true, studyProgram: true, academicYear: true } } }
+      });
+    } else {
+      faces = await prisma.faceVector.findMany({
+        include: { student: { select: { name: true, nim: true, studyProgram: true, academicYear: true } } }
+      });
+    }
 
-    return { data, since: query.since || null };
+    const data = [];
+    for (const f of faces) {
+      const raw = await prisma.$queryRawUnsafe<Array<{ vector: string }>>(
+        `SELECT vector::text FROM face_vectors WHERE student_id = $1`,
+        f.studentId
+      );
+      const vectorStr = raw[0]?.vector?.replace(/[\[\]]/g, "") || "";
+      const vector = vectorStr ? vectorStr.split(",").map(Number) : [];
+
+      data.push({
+        studentId: f.studentId,
+        studentName: f.student.name,
+        nim: f.student.nim,
+        studyProgram: f.student.studyProgram,
+        academicYear: f.student.academicYear,
+        vector,
+        updatedAt: f.updatedAt.toISOString()
+      });
+    }
+
+    return { data, since: since || null };
   })
   .post("/api/sync/attendance", async ({ body }) => {
     const created = [];
@@ -42,11 +67,28 @@ export const syncRoutes = new Elysia()
     return rules;
   })
   .get("/api/sync/requested", async ({ query }) => {
+    const deviceId = query.deviceId as string | undefined;
+    const where: Record<string, unknown> = { isProcessed: false };
+    if (deviceId) where.deviceId = deviceId;
+
     const request = await prisma.syncRequest.findFirst({
-      where: { deviceId: query.deviceId as string, isProcessed: false },
+      where,
       orderBy: { requestedAt: "desc" }
     });
-    return { requested: !!request, requestedAt: request?.requestedAt?.toISOString() || null };
+
+    return {
+      requested: !!request,
+      requestedAt: request?.requestedAt?.toISOString() || null,
+      deviceId: request?.deviceId || null
+    };
+  })
+  .get("/api/sync/logs", async ({ query }) => {
+    const where = query.deviceId ? { deviceId: query.deviceId as string } : {};
+    return await prisma.syncLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: 50
+    });
   })
   .post("/api/sync/complete", async ({ body }) => {
     await prisma.syncLog.create({
