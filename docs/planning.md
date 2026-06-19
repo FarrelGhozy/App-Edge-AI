@@ -1,6 +1,6 @@
 # FaceGateApp — Planning Document
 
-> Proyek absensi & perizinan kampus berbasis **Face Recognition Offline-First**
+> Proyek **izin keluar-masuk kampus** berbasis Face Recognition untuk **pondok pesantren / asrama kampus**
 > Target: 10.000 mahasiswa | 2 aplikasi Android Native + Backend API
 
 ---
@@ -30,7 +30,13 @@
 ## 1. Ringkasan Proyek
 
 ### 1.1 Visi
-Sistem absensi kampus **tanpa kartu**, **tanpa internet saat operasional**, berbasis pengenalan wajah di *edge device* dengan sistem **scan toggle** (keluar/kembali) dan **sync on-demand** agar tidak membebani server.
+Sistem **izin keluar-masuk kampus** berbasis pengenalan wajah untuk **pondok pesantren / asrama kampus**. Mahasiswa tinggal di dalam kampus, sistem digunakan untuk:
+- Mencatat siapa yang keluar kampus, jam berapa, dan kembali jam berapa
+- Memvalidasi apakah keluar dengan izin atau tidak
+- Aturan jam terlarang keluar (jam kuliah, jam malam, dll)
+- Laporan pelanggaran keluar tanpa izin
+
+**Tidak ada konsep absensi/alpha** — karena mahasiswa memang sudah berada di kampus. Scan hanya untuk pergerakan keluar-masuk gerbang.
 
 ### 1.2 Pengguna
 | Peran | Perangkat | Jumlah |
@@ -44,7 +50,7 @@ Sistem absensi kampus **tanpa kartu**, **tanpa internet saat operasional**, berb
 | Aplikasi | Perangkat | Fungsi Utama |
 |---|---|---|
 | **Kiosk Scanner** | Tablet/HP statis di gerbang | Scan wajah toggle keluar/kembali, verifikasi offline, simpan log |
-| **Admin App** | HP pegangan admin | Registrasi wajah, atur izin harian & pengajuan, monitoring, rekap, trigger sync |
+| **Admin App** | HP pegangan admin | Registrasi wajah, kelola izin harian & pengajuan, atur jam terlarang keluar, monitoring siapa di luar, rekap + trigger sync |
 | **Backend API** | Server (Docker) | Master data, rule engine, violation detector, laporan |
 
 ---
@@ -459,7 +465,7 @@ model CourseSchedule {
 model Violation {
   id              String   @id @default(cuid())
   studentId       String
-  type            String   // "keluar_jam_terlarang" | "keluar_jam_kuliah" | "tidak_kembali" | "alpha"
+  type            String   // "keluar_tanpa_izin" | "keluar_jam_terlarang" | "keluar_jam_kuliah" | "tidak_kembali" | "melebihi_batas_izin"
   description     String
   timestamp       DateTime
   relatedRuleId   String?
@@ -726,65 +732,67 @@ enum class State { DI_KAMPUS, DI_LUAR }
 ### 7.1 Skenario: Scan Toggle (100% Offline)
 
 ```
-Konsep: Setiap scan = toggle state.
+Konsep: Mahasiswa tinggal di asrama dalam kampus.
+        Setiap scan = toggle keluar/masuk gerbang.
         Scan ke-1 → "keluar kampus"
         Scan ke-2 → "kembali ke kampus"
         Scan ke-3 → "keluar lagi"
-        Dan seterusnya...
+        Dan seterusnya.
 
-State awal hari: ASUMSI DI KAMPUS (sebelum scan pertama)
+State awal hari (default): DI KAMPUS (karena tinggal di asrama)
+Tidak ada konsep "absensi/alpha" — sudah pasti di kampus.
 
 Contoh Alur:
 ═══════════════════════════════════════════════════════════════
-WAKTU: 07.00 — Andi datang ke kampus, scan di kiosk
+WAKTU: 10.00 — Andi mau ke luar kampus (beli buku), scan di kiosk
 ═══════════════════════════════════════════════════════════════
 1. CameraX capture + face detection
 2. TFLite liveness check + embedding
-3. Match dengan 10.000 vektor di RAM
-4. Dapat identitas: ANDI (TI, 24001)
-5. Cek state toggle hari ini:
-   → Tidak ada scan sebelumnya → state awal = DI_KAMPUS
-   → Toggle: DI_KAMPUS → KELUAR
-6. Simpan AttendanceLog { action: "keluar", timestamp: 07.00 }
-7. Tampilkan: "☀️ Selamat pagi, Andi! Scan pertama hari ini.
-   Anda tercatat KELUAR kampus pukul 07.00"
-   ✅ = TERCATAT HADIR (minimal 1 scan = hadir)
+3. Match dengan 10.000 vektor di RAM → ANDI (TI, 24001)
+4. Cek state: belum ada scan hari ini → DI_KAMPUS
+5. Toggle: DI_KAMPUS → KELUAR
+6. Cek izin: apakah Andi punya izin harian untuk jam ini?
+   ├── Ada izin harian (10.00-12.00) → ✅ Normal, keluar dengan izin
+   └── Tidak ada izin → ⚠️ Cek aturan:
+       ├── Jam 10.00 restricted? (misal: Senin 08.00-12.00 terlarang)
+       │   ├── Ya + tanpa izin → VIOLATION
+       │   └── Tidak restricted → ✅ Normal (keluar tanpa izin di jam bebas)
+       └── Cek jadwal kuliah → ada jadwal? → VIOLATION
+7. Simpan AttendanceLog { action: "keluar", isViolation: true/false }
+8. Tampilkan hasil di layar kiosk
 
 ═══════════════════════════════════════════════════════════════
 WAKTU: 12.30 — Andi kembali ke kampus, scan lagi
 ═══════════════════════════════════════════════════════════════
 1. Face match → ANDI
-2. Cek state: sebelumnya "keluar" → saat ini DI_LUAR
+2. Cek state: sebelumnya "keluar" → DI_LUAR
 3. Toggle: DI_LUAR → KEMBALI
-4. Hitung durasi di luar: 12.30 - 07.00 = 5j 30m
-5. Cek rule engine:
-   - Jam 12.30 termasuk restricted hours?
-   - Cek izin: apakah Andi punya izin harian yang mencakup jam ini?
-     → Jika ada izin → normal
-     → Jika tidak → cek aturan:
-       - Apakah jam ini restricted? 12.30 termasuk siang (tidak restricted)
-       - Tidak ada violation
-6. Simpan AttendanceLog { action: "kembali", timestamp: 12.30 }
-7. Tampilkan: "🏫 Selamat datang kembali, Andi!
-   Anda di luar selama 5 jam 30 menit"
+4. Hitung durasi di luar: 12.30 - 10.00 = 2j 30m
+5. Jika ada violation di scan keluar → otomatis resolved saat kembali
+6. Simpan AttendanceLog { action: "kembali" }
+7. Tampilkan: "🏫 Selamat datang kembali, Andi! Di luar selama 2 jam 30 menit"
 
 ═══════════════════════════════════════════════════════════════
-WAKTU: 16.00 — Andi pulang, scan lagi
+WAKTU: 16.00 — Andi keluar lagi (main ke tetangga), scan
 ═══════════════════════════════════════════════════════════════
 1. Face match → ANDI
-2. Cek state: sebelumnya "kembali" → saat ini DI_KAMPUS
+2. Cek state: sebelumnya "kembali" → DI_KAMPUS
 3. Toggle: DI_KAMPUS → KELUAR
-4. Cek rule engine:
-   - Jam 16.00 restricted? (misal aturan: Senin 08.00-12.00)
-   - 16.00 > 12.00 → tidak restricted
-   - Tidak ada violation
-5. Simpan AttendanceLog { action: "keluar", timestamp: 16.00 }
-6. Tampilkan: "👋 Sampai jumpa, Andi! Hati-hati di jalan."
+4. Jam 16.00 tidak restricted → ✅ Normal
+5. Simpan AttendanceLog { action: "keluar" }
 
 ═══════════════════════════════════════════════════════════════
-Total scan Andi hari ini: 3 kali
-Total di luar kampus: 5j 30m + (16.00 - 12.30) = 9 jam
-Status: SUDAH PULANG (scan terakhir = keluar)
+WAKTU: 17.30 — Andi kembali, scan
+═══════════════════════════════════════════════════════════════
+1. Face match → ANDI
+2. Toggle: KEMBALI
+3. Durasi: 17.30 - 16.00 = 1j 30m
+4. Total di luar hari ini: 2j 30m + 1j 30m = 4 jam
+
+═══════════════════════════════════════════════════════════════
+Ringkasan harian Andi:
+Keluar 2×, Kembali 2×, Total di luar: 4 jam
+Izin harian: 1 (10.00-12.00) — ✅ dipakai
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -810,15 +818,17 @@ Function determineAction(studentId, today):
         return "keluar"
 ```
 
-### 7.3 Aturan Absensi (Alpha / Hadir)
+### 7.3 Absensi? Tidak Ada.
 
-| Kondisi | Status |
-|---|---|
-| Minimal 1 scan hari ini | ✅ HADIR |
-| Tidak ada scan sama sekali (sampai pukul 10.00) | ❌ ALPHA |
-| Scan terakhir = "keluar" | 🚶 SEDANG DI LUAR |
-| Scan terakhir = "kembali" | 🏫 DI KAMPUS |
-| Punya izin harian aktif hari ini | ✅ IZIN (tetap dianggap hadir) |
+Karena mahasiswa **tinggal di asrama dalam kampus**, maka:
+- **Default**: Semua mahasiswa sudah di kampus
+- **Tidak ada** konsep "hadir", "alpha", "terlambat"
+- **Tidak ada** scan masuk pagi hari
+- Satu-satunya yang dicatat: **siapa keluar, jam berapa, kembali jam berapa, dengan izin atau tidak**
+
+Scan pertama hari ini = saat mahasiswa mau **keluar** kampus.
+Scan kedua = saat **kembali** ke kampus.
+Tidak ada scan = mahasiswa tidak keluar sama sekali hari itu (normal).
 
 ### 7.4 Skenario: Admin Registrasi Wajah
 
@@ -878,12 +888,10 @@ Function determineAction(studentId, today):
 
 | Key | Default | Deskripsi |
 |---|---|---|
-| `operational_start` | `06:00` | Jam buka kampus |
-| `operational_end` | `18:00` | Jam tutup kampus |
+| `operational_start` | `06:00` | Jam awal kiosk bisa discan |
+| `operational_end` | `21:00` | Jam akhir kiosk bisa discan |
 | `max_permit_hours_per_day` | `8` | Maks durasi izin harian (jam) |
 | `max_daily_permit_per_month` | `10` | Kuota izin harian per bulan |
-| `grace_period_minutes` | `15` | Toleransi keterlambatan |
-| `auto_alpha_hour` | `10:00` | Jam auto-tandai alpha jika belum scan |
 | `violation_threshold` | `3` | Batas pelanggaran sebelum notifikasi khusus |
 | `sync_poll_interval_minutes` | `10` | Interval polling sync request |
 
@@ -940,12 +948,10 @@ Setiap scan = toggle. Tidak ada logika "ini scan masuk atau keluar". Sistem hany
 
 | Status | Arti |
 |---|---|
-| 🏫 `DI KAMPUS` | Scan terakhir = "kembali" atau belum scan |
-| 🚶 `DI LUAR` | Scan terakhir = "keluar" |
-| 🏠 `SUDAH PULANG` | Scan terakhir = "keluar" setelah jam 15.00 |
-| ✅ `HADIR (IZIN)` | Punya izin harian, tidak perlu scan |
-| ❌ `ALPHA` | Belum scan sampai pukul 10.00 |
-| 🏖️ `LIBUR` | Hari libur nasional |
+| 🏫 `DI KAMPUS` | Berada di dalam kampus (default — tinggal di asrama) |
+| 🚶 `DI LUAR` | Scan terakhir = "keluar", belum kembali |
+| ✅ `IZIN AKTIF` | Punya izin harian / pengajuan yang mencakup hari ini |
+| ⚠️ `VIOLASI` | Keluar tanpa izin / melanggar aturan |
 
 ### 9.3 Durasi di Luar
 
@@ -958,12 +964,13 @@ Setiap toggle dihitung:
 
 | Skenario | Penanganan |
 |---|---|
-| Scan pertama setelah tengah malam | Anggap state DI_KAMPUS (reset tiap hari) |
+| Scan pertama setelah tengah malam | Anggap state DI_KAMPUS (default, reset tiap hari) |
 | Scan berulang dalam 1 detik | Debounce 2 detik, abaikan duplikat |
 | Scan di luar jam operasional | Tampilkan pesan "di luar jam operasional" |
 | Scan wajah tidak dikenal | Tampilkan "wajah tidak dikenal" tanpa toggle |
 | Mahasiswa scan di 2 kiosk berbeda | Kedua log tetap masuk. Last-write-wins untuk state |
-| Lupa scan (pulang tanpa scan) | Auto close sesi pukul 18.00 (state jadi SUDAH PULANG) |
+| Lupa scan pas balik (masuk tanpa scan) | Auto close sesi pukul 23.59. Jika masih "keluar" → tandai "tidak_kembali" |
+| Libur nasional | Semua aturan restricted dinonaktifkan, bebas keluar |
 
 ---
 
@@ -972,12 +979,12 @@ Setiap toggle dihitung:
 ### 10.1 Jenis Pelanggaran
 
 | Tipe | Deteksi | Kapan |
-|---|---|---|
-| `keluar_jam_terlarang` | Otomatis saat scan "keluar" di restricted hours | Real-time di kiosk |
-| `keluar_jam_kuliah` | Otomatis saat scan "keluar" dan ada jadwal kuliah | Real-time di kiosk |
-| `tidak_kembali` | Scan "keluar" tapi belum "kembali" sampai batas waktu | Auto jam 18.00 |
-| `alpha` | Tidak ada scan sama sekali sampai jam 10.00 | Auto jam 10.00 |
-| `melebihi_batas_izin` | Durasi di luar melebihi izin yang diberikan | Saat scan "kembali" |
+|---|---|---|---|
+| `keluar_tanpa_izin` | Scan "keluar" tanpa punya izin harian aktif | Real-time di kiosk |
+| `keluar_jam_terlarang` | Scan "keluar" di restricted hours (walau punya izin, jam tidak tercakup) | Real-time di kiosk |
+| `keluar_jam_kuliah` | Scan "keluar" saat ada jadwal kuliah | Real-time di kiosk |
+| `tidak_kembali` | Scan "keluar" tapi belum "kembali" sampai pukul 23.59 | Auto tengah malam |
+| `melebihi_batas_izin` | Durasi di luar melebihi batas izin (misal: izin 4 jam, keluar 6 jam) | Saat scan "kembali" |
 
 ### 10.2 Alur Penanganan
 
@@ -1049,38 +1056,40 @@ Setiap toggle dihitung:
 
 ### 12.1 Jenis Laporan
 
-#### A. Rekap Harian Scan Toggle
+#### A. Rekap Harian Pergerakan
 ```
 Rekapan Harian - Senin, 20 Juni 2026 - TI
 
-No  Nama      NIM    Scan1      Scan2      Scan3      Durasi Luar    Status
-―   ────      ───    ─────      ─────      ─────      ──────────    ──────
-1   Andi      24001  07.00 klr  12.30 kmb  16.00 klr  5j 30m + 3j   🚶 Di luar
-2   Budi      24002  08.00 klr  09.00 kmb  12.30 klr  1j + 4j       🏫 Di kampus
-                                      (izin)      16.45 kmb
-3   Cici      24003  -          -          -          -              ❌ Alpha
-4   Dedi      24004  07.30 klr  16.00 kmb  -          8j 30m        🏫 Di kampus
-5   Eko       24005  08.15 klr  -          -          -              ⚠ Di luar (violasi)
+No  Nama      NIM    Keluar    Kembali   Durasi Luar   Izin?      Status
+―   ────      ───    ──────    ───────   ──────────   ─────      ──────
+1   Andi      24001  10.00     12.30     2j 30m        ✅ Ada     🏫 Di kampus
+                      16.00     17.30     1j 30m
+2   Budi      24002  08.00     09.00     1j 0m         ❌ Tidak   ⚠ Violasi
+3   Cici      24003   -          -         -            -         🏫 Di kampus (tdk keluar)
+4   Dedi      24004  07.30     16.00     8j 30m        ✅ Izin    🏫 Di kampus
+5   Eko       24005  08.15       -         -            ❌ Tidak   🚶 Di luar (violasi)
 
 Ringkasan:
-  Hadir   : 4/5  |  Alpha   : 1
-  Izin    : 1    |  Violasi : 1
-  Di luar : 2    |  Di kampus: 2
+  Keluar hari ini : 4 mahasiswa
+  Kembali         : 3 mahasiswa
+  Masih di luar   : 1 mahasiswa
+  Izin            : 2 mahasiswa
+  Violasi         : 2 mahasiswa
+  Tidak keluar    : 1 mahasiswa
 ```
 
-#### B. Laporan Keluar di Luar Jam Izin
+#### B. Laporan Pelanggaran
 ```
-Laporan Keluar di Luar Jam Izin
-Periode: 17-21 Juni 2026
+Laporan Pelanggaran - Periode: 17-21 Juni 2026
 
-No  Nama      NIM      Tgl      Jam Keluar  Jam Kembali  Durasi    Status
-―   ────      ───      ───      ──────────  ───────────  ──────    ──────
-1   Andi      24001    20 Jun   10.00       12.30        2j 30m    ⚠ Violasi
-2   Farah     24015    19 Jun   09.30       11.00        1j 30m    ✅ Selesai
-3   Gilang    24022    17 Jun   14.00       16.00        2j 0m     ❌ Belum
+No  Nama      NIM      Tgl       Keluar    Kembali   Jenis            Status
+―   ────      ───      ───       ──────    ───────   ─────            ──────
+1   Andi      24001    20 Jun    10.00     12.30     keluar tanpa izin ⚠ Belum
+2   Farah     24015    19 Jun    09.30     11.00     jam terlarang     ✅ Selesai
+3   Gilang    24022    17 Jun    14.00       -       tidak kembali     ❌ Belum
 ```
 
-#### C. Status Mahasiswa Saat Ini (Real-Time)
+#### C. Status Real-Time (Saat Ini)
 ```
 Mahasiswa Sedang Di Luar Kampus - 20 Jun 2026 14:30
 
@@ -1088,19 +1097,20 @@ No  Nama      NIM      Keluar Jam  Durasi      Izin?      Status
 ―   ────      ───      ──────────  ───────     ─────      ──────
 1   Andi      24001    10.00       4j 30m      Tidak      ⚠ Violasi
 2   Budi      24002    12.30       2j 0m       Izin       ✅ Normal
-3   Dewi      24010    13.00       1j 30m      Tidak      ✅ Normal (boleh)
+3   Dewi      24010    13.00       1j 30m      Tidak      ✅ Normal (jam bebas)
 ```
 
 #### D. Rekap Bulanan per Prodi
 ```
 Rekap Juni 2026 - per Program Studi
 
-Prodi     Hadir   Alpha   Izin   Violasi   Jumlah
-────      ─────   ─────   ────   ───────   ──────
-TI        92%     3%      4%     1%        250
-SI        88%     5%      5%     2%        180
-DK        95%     2%      2%     1%        120
-MI        85%     7%      6%     2%        100
+Prodi     Total   Pernah     Rata²      Violasi   Izin      Tidak
+          Mhs     Keluar     Jam Luar             Dipakai   Keluar
+────      ────    ──────     ─────────  ───────   ──────    ──────
+TI        250     180 (72%)  3.2 j/hari  12 (5%)   45        70
+SI        180     120 (67%)  2.8 j/hari  8 (4%)    30        60
+DK        120      90 (75%)  4.1 j/hari  5 (4%)    25        30
+MI        100      50 (50%)  2.5 j/hari  10 (10%)  15        50
 ```
 
 ### 12.2 Export
@@ -1114,7 +1124,7 @@ MI        85%     7%      6%     2%        100
 - Tanggal (from - to)
 - Program studi
 - Angkatan
-- Status (hadir, alpha, izin)
+- Status (di kampus, di luar, izin)
 - Tipe pelanggaran
 - NIM / Nama mahasiswa
 
@@ -1269,7 +1279,7 @@ admin-app/src/main/kotlin/.../admin/
 | Screen | Deskripsi |
 |---|---|
 | `LoginScreen` | Username + password |
-| `DashboardScreen` | Card stats: hadir, alpha, di luar, izin, violation hari ini + recent scan feed |
+| `DashboardScreen` | Card stats: di kampus, di luar, izin aktif, violation hari ini + recent scan feed |
 | `StudentListScreen` | Search + filter prodi/angkatan |
 | `StudentDetailScreen` | Data + status toggle + history scan + violation |
 | `StudentFormScreen` | Tambah/edit |
