@@ -123,7 +123,9 @@ FaceGateApp/
 │   ├── package.json
 │   └── tsconfig.json
 │
-├── docker-compose.yml
+├── docker-compose.yml                # PostgreSQL + pgvector + backend (port 8150)
+├── cloudflared/                      # Konfigurasi Cloudflare Tunnel
+│   └── config.yml                    # Tunnel arah ke backend:8150
 ├── docs/
 │   ├── planning.md
 │   └── api-spec.md
@@ -161,7 +163,7 @@ FaceGateApp/
 
 ### 3.2 Backend
 
-| Komponen | Pustaka |
+| Komponen | Pustaka / Nilai |
 |---|---|
 | Runtime | Bun |
 | Framework | Elysia / Hono |
@@ -172,23 +174,45 @@ FaceGateApp/
 | CSV | PapaParse |
 | PDF | PDFKit |
 | Container | Docker + docker-compose |
+| Port | **8150** |
+| Hosting | **Localhost + Cloudflare Tunnel** (cloudflared) — tidak perlu open port, SSL otomatis dari Cloudflare |
+| Domain | **facegate.utc.web.id** — subdomain tunnel via Cloudflare |
 
 ### 3.3 AI Pipeline
 
 ```
-[CameraX frame] → [Face Detection] → [Face Embedding 128-d]
-     ↓                                    ↓
-  Liveness Check                    Brute-force match di RAM
-     ↓                                    ↓
-  Anti-spoofing                    [Match ≥ threshold?]
-                                        ↓
-                                  YES → Dapatkan identitas
-                                  NO  → Wajah tidak dikenal
-                                        ↓
-                                  Tentukan aksi toggle:
-                                  Jika sebelumnya "di_kampus" → "keluar"
-                                  Jika sebelumnya "di_luar"   → "kembali"
+[CameraX frame] → [MediaPipe Face Detection] → [MediaPipe Face Landmarks]
+     ↓                                                    ↓
+  Crop face ROI                             468 titik landmark wajah
+     ↓                                                    ↓
+  [Liveness: Eye Aspect Ratio]              [MobileFaceNet Embedding]
+  Hitung EAR dari landmark mata              Ekstrak 128-d vector
+  Kedipan = EAR turun drastis                      ↓
+     ↓                                       Brute-force match di RAM
+  Jika tidak ada kedipan → tolak             Cosine similarity
+     ↓                                               ↓
+  Lolos liveness                          [Match ≥ threshold 0.6?]
+                                               ↓
+                                        YES → Dapatkan identitas
+                                        NO  → Wajah tidak dikenal
+                                               ↓
+                                        Tentukan aksi toggle:
+                                        Jika sebelumnya "di_kampus" → "keluar"
+                                        Jika sebelumnya "di_luar"   → "kembali"
 ```
+
+| Komponen | Model / Metode | Ukuran | Kecepatan |
+|---|---|---|---|
+| Face Detection | **MediaPipe FaceDetector** (via ML Kit CameraX) | ~350 KB | < 5ms |
+| Face Landmarks | **MediaPipe Face Landmarks** (468 titik) | ~0 KB (bundle) | < 2ms |
+| Liveness | **Eye Aspect Ratio (EAR)** — rule-based dari landmark mata | 0 KB | < 2ms |
+| Face Embedding | **MobileFaceNet** .tflite — 128-d vector | ~4-5 MB | ~15ms |
+| Matching | Brute-force cosine similarity di RAM | 10.000 × 128 = ~5 MB | ~3ms |
+| **Total** | | **~5 MB** | **~25ms per face** |
+
+- **Threshold**: 0.6 (default, bisa di-tuning)
+- **Anti-spoofing**: Deteksi kedipan via EAR — pengguna harus berkedip alami dalam 3 detik
+- **Target performa**: < 50ms per face (terpenuhi dengan margin lebar)
 
 ---
 
@@ -1338,6 +1362,8 @@ Cahaya dari depan (searah mahasiswa)
 | Storage | 50 GB SSD |
 | OS | Ubuntu 22.04+ |
 | Docker | Yes |
+| Cloudflare Tunnel | cloudflared — tunnel ke `localhost:8150` |
+| Port yang dibuka | **Tidak ada** — semua via Cloudflare Tunnel |
 
 ---
 
@@ -1409,22 +1435,27 @@ Cahaya dari depan (searah mahasiswa)
 | Logging + crash reporting | 1 hari |
 | Testing manual + edge case | 3 hari |
 | Performance tuning (10k vectors) | 1 hari |
-| Dokumentasi + deployment guide | 2 hari |
+| Dokumentasi + deployment guide (Docker + Cloudflare Tunnel + domain facegate.utc.web.id) | 2 hari |
 | **Total Phase 5** | **~11 hari** |
 
 ---
 
-## 17. Open Questions
+## 17. Keputusan Final
 
-1. **Model TFLite**: MobileFaceNet atau model lain? Sumber pre-trained model?
-2. **Liveness Detection**: Model blinking atau texture-based (faspe)?
-3. **Face Vector Dimensi**: 128-d (cepat) vs 512-d (akurat)?
-4. **Backend Framework**: Elysia vs Hono?
-5. **CSV Import Format**: Template kolom: NIM, Nama, Prodi, Angkatan, No HP, Email?
-6. **Jadwal Kuliah Format**: Template kolom: NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang?
-7. **Dashboard Web**: Butuh web dashboard atau cukup dari Admin App?
-8. **Multiple Kiosk**: 1 kiosk dulu atau langsung multi-gerbang?
-9. **Emergency Mode**: Tombol darurat untuk nonaktifkan semua aturan?
+| No | Pertanyaan | Keputusan |
+|---|---|---|
+| 1 | Model Face Detection | ✅ **MediaPipe FaceDetector** |
+| 2 | Model Face Embedding | ✅ **MobileFaceNet 128-d** |
+| 3 | Liveness Detection | ✅ **Eye Aspect Ratio (EAR)** — rule-based, 0 KB |
+| 4 | Backend Framework | ✅ **Elysia** (Bun-native) |
+| 5 | CSV Import Format | ✅ NIM, Nama, Prodi, Angkatan, No HP, Email |
+| 6 | Jadwal Kuliah Format | ✅ NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang |
+| 7 | Dashboard Web | ✅ **Skip dulu** — fokus ke Admin App dulu |
+| 8 | Multiple Kiosk | ✅ **Langsung multi-gerbang** dari awal |
+| 9 | Emergency Mode | ✅ **Skip** — tidak perlu untuk sekarang |
+| 10 | Cloudflare Domain | ✅ **facegate.utc.web.id** — pake subdomain sendiri |
+| 11 | Backend Port | ✅ **8150** — localhost + Cloudflare Tunnel |
+| 12 | Hosting | ✅ **Docker + Cloudflare Tunnel** (cloudflared) |
 
 ---
 
