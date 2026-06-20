@@ -1,28 +1,29 @@
 *.iml
 .gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+/.idea
+local.properties
 .DS_Store
 /build
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+
+# Android
+android/*/build/
+android/.kotlin/
+*.apk
+*.aab
 
 # Node
 node_modules/
-backend/node_modules/
-backend/.env
 
 # Docker
 backend/dist/
 backend/*.tsbuildinfo
 
 # Environment
-backend/.env
 **/.env
+
+# IDE
+*.hprof
+*.log
