@@ -9,12 +9,12 @@ plugins {
 
 android {
     namespace = "com.facegate.kioskscanner"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.facegate.kioskscanner"
         minSdk = 31
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -49,6 +49,9 @@ android {
 dependencies {
     implementation(project(":core"))
 
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -63,6 +66,7 @@ dependencies {
 
     implementation(libs.navigation.compose)
     implementation(libs.hilt.navigation.compose)
+    implementation(libs.hilt.work)
 
     implementation(libs.camerax.core)
     implementation(libs.camerax.camera2)

@@ -147,8 +147,9 @@ class SyncWorker @AssistedInject constructor(
                 Log.d(TAG, "Synced ${vectors.size} new/updated faces")
             }
 
-            if (syncData.since != null) {
-                syncMetadata.setLastFaceSync(syncData.since)
+            val s = syncData.since
+            if (s != null) {
+                syncMetadata.setLastFaceSync(s)
             }
         }
     }

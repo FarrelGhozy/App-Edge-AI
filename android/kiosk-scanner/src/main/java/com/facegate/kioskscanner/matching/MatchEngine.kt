@@ -37,8 +37,7 @@ class MatchEngine @Inject constructor(
             ?: return MatchEngineResult.NoFace
 
         val livenessPassed = livenessDetector.checkLiveness(
-            result = detection,
-            currentTimeMs = System.currentTimeMillis()
+            System.currentTimeMillis()
         )
         if (!livenessPassed) {
             return MatchEngineResult.LivenessFailed
@@ -47,11 +46,12 @@ class MatchEngine @Inject constructor(
         val embedding = faceEmbedder.embed(bitmap)
         val matchResult = faceMatcher.match(embedding)
 
-        if (!matchResult.isMatch || matchResult.studentId == null) {
+        val sid = matchResult.studentId
+        if (!matchResult.isMatch || sid == null) {
             return MatchEngineResult.Unknown(matchResult.confidence)
         }
 
-        val student = studentDao.getById(matchResult.studentId)
+        val student = studentDao.getById(sid)
             ?: return MatchEngineResult.Unknown(matchResult.confidence)
 
         val studentInfo = StudentInfo(

@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
@@ -9,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.facegate.core"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 31
@@ -50,14 +49,9 @@ dependencies {
     api(libs.retrofit.kotlinx.serialization)
 
     api(libs.tensorflow.lite)
-    api(libs.tensorflow.lite.support)
-    api(libs.mediapipe.facedetection)
 
     api(libs.workmanager)
     api(libs.datastore.preferences)
-
-    api(libs.compose.foundation)
-    api(libs.compose.material3)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
