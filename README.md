@@ -27,12 +27,32 @@ docker compose up -d postgres
 # Start backend
 cd backend && bun install && bunx prisma db push && bun run src/seed.ts && bun run dev
 
-# Build Android
-cd android && ./gradlew :kiosk-scanner:assembleDebug
-cd android && ./gradlew :admin-app:assembleDebug
+# Build Android (debug — emulator)
+cd android && ./gradlew :kiosk-scanner:assembleDebug && ./gradlew :admin-app:assembleDebug
+
+# Install
+adb install -r android/kiosk-scanner/build/outputs/apk/debug/*.apk
+adb install -r android/admin-app/build/outputs/apk/debug/*.apk
 ```
 
 Default admin login: `admin` / `admin123`
+
+## Build Variants & API URL
+
+Setiap module punya dua build type, masing-masing dengan `API_BASE_URL` berbeda:
+
+| Build Type | API URL | Penggunaan |
+|------------|---------|------------|
+| `debug` | `http://10.0.2.2:8150` | Emulator (localhost host) |
+| `release` | `https://facegate.utc.web.id` | Production (Cloudflare Tunnel) |
+
+Untuk install di HP real (bukan emulator), ada dua opsi:
+
+1. **Via WiFi lokal** — ubah `API_BASE_URL` di `build.gradle.kts` ke IP server di jaringan yang sama (misal `http://192.168.1.42:8150`), lalu `assembleDebug` + install
+2. **Via Cloudflare Tunnel** — pastikan tunnel jalan, lalu build release:
+   ```bash
+   cd android && ./gradlew :kiosk-scanner:assembleRelease :admin-app:assembleRelease
+   ```
 
 ## API
 
