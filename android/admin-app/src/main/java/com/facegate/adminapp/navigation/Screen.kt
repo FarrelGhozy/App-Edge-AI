@@ -30,6 +30,11 @@ sealed class Screen(val route: String) {
     }
     data object Notifications : Screen("notifications")
     data object Violations : Screen("violations")
+    data object ViolationDetail : Screen("violations/{violationId}") {
+        fun createRoute(violationId: String) = "violations/$violationId"
+    }
     data object Reports : Screen("reports")
+    data object DailyReport : Screen("reports/daily")
+    data object OutsideNow : Screen("reports/outside-now")
     data object Settings : Screen("settings")
 }

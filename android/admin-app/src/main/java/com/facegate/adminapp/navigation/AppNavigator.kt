@@ -23,8 +23,11 @@ import com.facegate.adminapp.settings.SettingsScreen
 import com.facegate.adminapp.devices.DeviceListScreen
 import com.facegate.adminapp.devices.DeviceDetailScreen
 import com.facegate.adminapp.notifications.NotificationListScreen
+import com.facegate.adminapp.violations.ViolationDetailScreen
 import com.facegate.adminapp.violations.ViolationListScreen
+import com.facegate.adminapp.reports.DailyReportScreen
 import com.facegate.adminapp.reports.ReportScreen
+import com.facegate.adminapp.monitor.OutsideNowScreen
 import com.facegate.adminapp.students.ImportCsvScreen
 
 @Composable
@@ -117,8 +120,21 @@ fun AppNavigator(
         composable(Screen.Violations.route) {
             ViolationListScreen(navController = navController)
         }
+        composable(
+            Screen.ViolationDetail.route,
+            arguments = listOf(navArgument("violationId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val violationId = backStackEntry.arguments?.getString("violationId") ?: return@composable
+            ViolationDetailScreen(violationId = violationId, navController = navController)
+        }
         composable(Screen.Reports.route) {
             ReportScreen(navController = navController)
+        }
+        composable(Screen.DailyReport.route) {
+            DailyReportScreen(navController = navController)
+        }
+        composable(Screen.OutsideNow.route) {
+            OutsideNowScreen(navController = navController)
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)
