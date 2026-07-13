@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,6 +24,7 @@ fun ViolationListScreen(
     viewModel: ViolationListViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val pullRefreshState = rememberPullToRefreshState()
 
     LaunchedEffect(Unit) { viewModel.load() }
 
@@ -37,8 +40,13 @@ fun ViolationListScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (state.isLoading) {
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize().padding(padding)
+        ) {
+            if (state.isLoading && state.violations.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
@@ -60,6 +68,25 @@ fun ViolationListScreen(
                                 }
                                 if (v.isResolved) {
                                     AssistChip(onClick = {}, label = { Text("Selesai") })
+                                }
+                            }
+                        }
+                    }
+                    if (state.hasMore && state.isLoadingMore) {
+                        item {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                            }
+                        }
+                    }
+                    if (state.hasMore && !state.isLoadingMore) {
+                        item {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                OutlinedButton(
+                                    onClick = { viewModel.loadMore() },
+                                    modifier = Modifier.padding(16.dp)
+                                ) {
+                                    Text("Muat Lebih Banyak")
                                 }
                             }
                         }
