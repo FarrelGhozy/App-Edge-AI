@@ -8,15 +8,15 @@ data class MatchResult(
 
 class FaceMatcher(
     private val threshold: Float = 0.6f
-) {
+) : FaceIndex {
     private val faceIndex = mutableMapOf<String, FloatArray>()
 
-    fun buildIndex(vectors: Map<String, FloatArray>) {
+    override fun buildIndex(vectors: Map<String, FloatArray>) {
         faceIndex.clear()
         faceIndex.putAll(vectors)
     }
 
-    fun match(embedding: FloatArray): MatchResult {
+    override fun match(embedding: FloatArray): MatchResult {
         if (faceIndex.isEmpty()) {
             return MatchResult(null, 0f, false)
         }
@@ -39,6 +39,12 @@ class FaceMatcher(
         )
     }
 
+    override fun clear() {
+        faceIndex.clear()
+    }
+
+    override fun size(): Int = faceIndex.size
+
     private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
         var dotProduct = 0f
         var normA = 0f
@@ -50,9 +56,5 @@ class FaceMatcher(
         }
         val denom = kotlin.math.sqrt(normA) * kotlin.math.sqrt(normB)
         return if (denom > 0) dotProduct / denom else 0f
-    }
-
-    fun clear() {
-        faceIndex.clear()
     }
 }
