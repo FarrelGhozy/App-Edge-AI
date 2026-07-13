@@ -17,7 +17,11 @@ data class StudentListState(
     val students: List<StudentDto> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
-    val searchQuery: String = ""
+    val searchQuery: String = "",
+    val isRefreshing: Boolean = false,
+    val hasMore: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val page: Int = 1
 )
 
 @HiltViewModel
@@ -30,23 +34,53 @@ class StudentListViewModel @Inject constructor(
 
     private var searchJob: Job? = null
 
-    fun loadStudents() {
+    fun loadStudents(page: Int = 1) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
-                val response = apiService.getStudents(search = _uiState.value.searchQuery.ifBlank { null })
+                val response = apiService.getStudents(
+                    page = page,
+                    search = _uiState.value.searchQuery.ifBlank { null }
+                )
                 if (response.isSuccessful && response.body() != null) {
+                    val body = response.body()!!
+                    val newStudents = if (page == 1) body.data else _uiState.value.students + body.data
                     _uiState.value = _uiState.value.copy(
-                        students = response.body()!!.data,
-                        isLoading = false
+                        students = newStudents,
+                        isLoading = false,
+                        isRefreshing = false,
+                        isLoadingMore = false,
+                        hasMore = page * body.pageSize < body.total,
+                        page = page,
+                        error = null
                     )
                 } else {
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal memuat data")
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        isRefreshing = false,
+                        isLoadingMore = false,
+                        error = "Gagal memuat data"
+                    )
                 }
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal terhubung")
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    isLoadingMore = false,
+                    error = "Gagal terhubung"
+                )
             }
         }
+    }
+
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true, page = 1, error = null)
+        loadStudents(page = 1)
+    }
+
+    fun loadMore() {
+        val nextPage = _uiState.value.page + 1
+        _uiState.value = _uiState.value.copy(isLoadingMore = true)
+        loadStudents(page = nextPage)
     }
 
     fun onSearch(query: String) {
@@ -54,7 +88,8 @@ class StudentListViewModel @Inject constructor(
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             delay(300)
-            loadStudents()
+            _uiState.value = _uiState.value.copy(page = 1, isLoading = true, error = null)
+            loadStudents(page = 1)
         }
     }
 }
