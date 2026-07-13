@@ -70,7 +70,7 @@ fun ImportCsvScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
-                onClick = { filePicker.launch("text/*") },
+                onClick = { filePicker.launch("*/*") },
                 enabled = !state.isUploading
             ) {
                 if (state.isUploading) {
