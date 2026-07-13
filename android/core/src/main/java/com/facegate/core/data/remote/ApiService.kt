@@ -172,7 +172,7 @@ interface ApiService {
 
     // =========== HOLIDAYS ===========
     @GET("api/holidays")
-    suspend fun getHolidays(@Query("year") year: Int? = null): Response<HolidayListResponse>
+    suspend fun getHolidays(@Query("year") year: Int? = null): Response<List<HolidayDto>>
 
     @GET("api/holidays/today")
     suspend fun checkTodayHoliday(): Response<TodayHolidayResponse>
