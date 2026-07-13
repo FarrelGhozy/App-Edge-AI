@@ -66,6 +66,7 @@ dependencies {
 
     implementation(libs.navigation.compose)
     implementation(libs.hilt.navigation.compose)
+    implementation(libs.hilt.work)
 
     implementation(libs.camerax.core)
     implementation(libs.camerax.camera2)
