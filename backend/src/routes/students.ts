@@ -30,15 +30,15 @@ export const studentRoutes = new Elysia()
         headers: { "Content-Type": "application/json" }
       });
     }
-    return { success: true, data: student };
+    return student;
   })
   .post("/api/students", async ({ body }) => {
     const student = await createStudent(body);
-    return { success: true, data: student };
+    return student;
   }, { body: createStudentSchema })
   .put("/api/students/:id", async ({ params: { id }, body }) => {
     const student = await updateStudent(id, body as Record<string, unknown>);
-    return { success: true, data: student };
+    return student;
   }, { body: updateStudentSchema })
   .delete("/api/students/:id", async ({ params: { id } }) => {
     await deleteStudent(id);
