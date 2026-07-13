@@ -32,6 +32,7 @@ class RuleFormViewModel @Inject constructor(
 
     fun load(ruleId: String) {
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(error = null)
             try {
                 val response = apiService.getRules()
                 if (response.isSuccessful && response.body() != null) {
@@ -45,9 +46,15 @@ class RuleFormViewModel @Inject constructor(
                             studyProgram = rule.studyProgram ?: "",
                             academicYear = rule.academicYear ?: ""
                         )
+                    } else {
+                        _uiState.value = _uiState.value.copy(error = "Aturan tidak ditemukan")
                     }
+                } else {
+                    _uiState.value = _uiState.value.copy(error = "Gagal memuat aturan")
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = "Gagal terhubung ke server")
+            }
         }
     }
 
