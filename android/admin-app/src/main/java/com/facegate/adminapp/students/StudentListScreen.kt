@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +25,7 @@ fun StudentListScreen(
     viewModel: StudentListViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val pullRefreshState = rememberPullToRefreshState()
 
     LaunchedEffect(Unit) { viewModel.loadStudents() }
 
@@ -46,41 +49,67 @@ fun StudentListScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = { viewModel.onSearch(it) },
-                placeholder = { Text("Cari nama/NIM...") },
-                leadingIcon = { Icon(Icons.Default.Search, "Search") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize().padding(padding)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                OutlinedTextField(
+                    value = state.searchQuery,
+                    onValueChange = { viewModel.onSearch(it) },
+                    placeholder = { Text("Cari nama/NIM...") },
+                    leadingIcon = { Icon(Icons.Default.Search, "Search") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                )
 
-            if (state.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (state.error != null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(state.error!!, color = MaterialTheme.colorScheme.error)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(onClick = { viewModel.loadStudents() }) {
-                            Text("Coba Lagi")
+                if (state.isLoading && state.students.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (state.error != null && state.students.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(state.error!!, color = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(onClick = { viewModel.loadStudents() }) {
+                                Text("Coba Lagi")
+                            }
                         }
                     }
-                }
-            } else if (state.students.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Belum ada mahasiswa", style = MaterialTheme.typography.bodyLarge)
-                }
-            } else {
-                LazyColumn {
-                    items(state.students) { student ->
-                        StudentItem(
-                            student = student,
-                            onClick = { navController.navigate(Screen.StudentDetail.createRoute(student.id)) }
-                        )
+                } else if (state.students.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Belum ada mahasiswa", style = MaterialTheme.typography.bodyLarge)
+                    }
+                } else {
+                    LazyColumn {
+                        items(state.students) { student ->
+                            StudentItem(
+                                student = student,
+                                onClick = { navController.navigate(Screen.StudentDetail.createRoute(student.id)) }
+                            )
+                        }
+                        if (state.hasMore && state.isLoadingMore) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                                }
+                            }
+                        }
+                        if (state.hasMore && !state.isLoadingMore) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.loadMore() },
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text("Muat Lebih Banyak")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
