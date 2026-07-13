@@ -18,12 +18,12 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:8150\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
     }
 
     buildTypes {
         debug {
-            buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:8150\"")
+            buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
         }
         release {
             isMinifyEnabled = true
