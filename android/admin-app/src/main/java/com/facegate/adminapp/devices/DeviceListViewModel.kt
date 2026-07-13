@@ -20,7 +20,9 @@ data class DeviceItem(
 
 data class DeviceListState(
     val devices: List<DeviceItem> = emptyList(),
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
+    val error: String? = null
 )
 
 @HiltViewModel
@@ -33,7 +35,10 @@ class DeviceListViewModel @Inject constructor(
 
     fun loadDevices() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            if (!_uiState.value.isRefreshing) {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+            }
+            _uiState.value = _uiState.value.copy(error = null)
             try {
                 val response = apiService.getDevices()
                 if (response.isSuccessful && response.body() != null) {
@@ -46,13 +51,18 @@ class DeviceListViewModel @Inject constructor(
                             batteryLevel = dto.batteryLevel
                         )
                     }
-                    _uiState.value = _uiState.value.copy(devices = items, isLoading = false)
+                    _uiState.value = _uiState.value.copy(devices = items, isLoading = false, isRefreshing = false)
                 } else {
-                    _uiState.value = _uiState.value.copy(isLoading = false)
+                    _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal memuat perangkat")
                 }
-            } catch (_: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal terhubung ke server")
             }
         }
+    }
+
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        loadDevices()
     }
 }
