@@ -6,6 +6,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +23,7 @@ fun AttendanceScreen(
     viewModel: AttendanceViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val pullRefreshState = rememberPullToRefreshState()
 
     LaunchedEffect(Unit) { viewModel.loadLogs() }
 
@@ -36,29 +39,55 @@ fun AttendanceScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Row(modifier = Modifier.padding(16.dp)) {
-                OutlinedTextField(
-                    value = state.filterDate,
-                    onValueChange = { viewModel.setFilterDate(it) },
-                    label = { Text("Tanggal") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
-            }
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize().padding(padding)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.padding(16.dp)) {
+                    OutlinedTextField(
+                        value = state.filterDate,
+                        onValueChange = { viewModel.setFilterDate(it) },
+                        label = { Text("Tanggal") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
 
-            if (state.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (state.logs.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Belum ada data absensi")
-                }
-            } else {
-                LazyColumn {
-                    items(state.logs) { log ->
-                        AttendanceLogItem(log)
+                if (state.isLoading && state.logs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (state.logs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Belum ada data absensi")
+                    }
+                } else {
+                    LazyColumn {
+                        items(state.logs) { log ->
+                            AttendanceLogItem(log)
+                        }
+                        if (state.hasMore && state.isLoadingMore) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                                }
+                            }
+                        }
+                        if (state.hasMore && !state.isLoadingMore) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.loadMore() },
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text("Muat Lebih Banyak")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
