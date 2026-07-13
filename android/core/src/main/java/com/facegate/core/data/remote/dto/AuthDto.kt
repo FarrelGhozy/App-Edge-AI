@@ -11,6 +11,12 @@ data class LoginRequest(
 
 @Serializable
 data class LoginResponse(
+    val success: Boolean,
+    val `data`: LoginData
+)
+
+@Serializable
+data class LoginData(
     val token: String,
     val admin: AdminDto
 )
@@ -31,5 +37,11 @@ data class RefreshRequest(
 
 @Serializable
 data class RefreshResponse(
+    val success: Boolean,
+    val `data`: RefreshData
+)
+
+@Serializable
+data class RefreshData(
     val token: String
 )
