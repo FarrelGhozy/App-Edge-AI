@@ -16,7 +16,8 @@ data class StudentDetailState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val isDeleted: Boolean = false,
-    val faceRegistered: Boolean = false
+    val faceRegistered: Boolean = false,
+    val faceUpdatedAt: String? = null
 )
 
 @HiltViewModel
@@ -34,9 +35,11 @@ class StudentDetailViewModel @Inject constructor(
                 val response = apiService.getStudent(id)
                 if (response.isSuccessful && response.body() != null) {
                     val student = response.body()!!
+                    val faceVectors = student.faceVectors
                     _uiState.value = StudentDetailState(
                         student = student,
-                        faceRegistered = student.faceRegistered
+                        faceRegistered = student.faceRegistered,
+                        faceUpdatedAt = faceVectors?.firstOrNull()?.updatedAt
                     )
                 } else {
                     _uiState.value = StudentDetailState(error = "Mahasiswa tidak ditemukan")
