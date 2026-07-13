@@ -35,13 +35,33 @@ class NotificationListViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val response = apiService.getAttendanceLogs()
-                _uiState.value = _uiState.value.copy(isLoading = false)
+                val response = apiService.getNotifications()
+                if (response.isSuccessful && response.body() != null) {
+                    val items = response.body()!!.data.map { dto ->
+                        NotificationItem(
+                            id = dto.id,
+                            title = dto.title,
+                            message = dto.message,
+                            isRead = dto.isRead,
+                            createdAt = dto.createdAt
+                        )
+                    }
+                    _uiState.value = _uiState.value.copy(notifications = items, isLoading = false)
+                } else {
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+                }
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false)
             }
         }
     }
 
-    fun markAllRead() {}
+    fun markAllRead() {
+        viewModelScope.launch {
+            try {
+                apiService.markAllNotificationsRead()
+                load()
+            } catch (_: Exception) {}
+        }
+    }
 }
