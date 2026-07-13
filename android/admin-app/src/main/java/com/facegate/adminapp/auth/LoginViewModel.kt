@@ -33,13 +33,13 @@ class LoginViewModel @Inject constructor(
             try {
                 val response = apiService.login(LoginRequest(username, password))
                 if (response.isSuccessful && response.body() != null) {
-                    val body = response.body()!!
+                    val data = response.body()!!.`data`
                     sessionManager.saveSession(
-                        token = body.token,
-                        adminId = body.admin.id,
-                        username = body.admin.username,
-                        displayName = body.admin.displayName,
-                        role = body.admin.role
+                        token = data.token,
+                        adminId = data.admin.id,
+                        username = data.admin.username,
+                        displayName = data.admin.displayName,
+                        role = data.admin.role
                     )
                     _uiState.value = LoginUiState(isSuccess = true)
                 } else {
