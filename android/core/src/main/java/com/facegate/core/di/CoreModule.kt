@@ -3,6 +3,7 @@ package com.facegate.core.di
 import android.content.Context
 import androidx.room.Room
 import com.facegate.core.data.local.AppDatabase
+import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.SessionManager
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
@@ -62,16 +63,22 @@ object CoreModule {
 
     @Provides
     @Singleton
+    @ApiBaseUrl
+    fun provideDefaultApiBaseUrl(): String = "http://127.0.0.1:8150/"
+
+    @Provides
+    @Singleton
     fun provideApiService(
-        authInterceptor: AuthInterceptor
+        authInterceptor: AuthInterceptor,
+        @ApiBaseUrl baseUrl: String
     ): ApiService {
-        return ApiClient.create("http://10.0.2.2:8150/", authInterceptor)
+        return ApiClient.create(baseUrl, authInterceptor)
     }
 
     @Provides
     @Singleton
-    fun provideFaceDetector(@ApplicationContext context: Context): FaceDetectorWrapper {
-        return FaceDetectorWrapper(context)
+    fun provideFaceDetector(): FaceDetectorWrapper {
+        return FaceDetectorWrapper()
     }
 
     @Provides
@@ -97,4 +104,11 @@ object CoreModule {
     fun provideSyncMetadata(@ApplicationContext context: Context): SyncMetadata {
         return SyncMetadata(context)
     }
+
+    @Provides
+    @Singleton
+    fun provideDevicePreferences(@ApplicationContext context: Context): DevicePreferences {
+        return DevicePreferences(context)
+    }
+
 }
