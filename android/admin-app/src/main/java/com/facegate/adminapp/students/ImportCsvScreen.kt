@@ -1,12 +1,17 @@
 package com.facegate.adminapp.students
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -18,6 +23,15 @@ fun ImportCsvScreen(
     viewModel: ImportCsvViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.uploadCsv(context, uri)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -25,7 +39,7 @@ fun ImportCsvScreen(
                 title = { Text("Import CSV") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 }
             )
@@ -55,15 +69,28 @@ fun ImportCsvScreen(
             )
             Spacer(modifier = Modifier.height(24.dp))
 
-            Button(onClick = { viewModel.pickFile() }) {
-                Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = { filePicker.launch("text/*") },
+                enabled = !state.isUploading
+            ) {
+                if (state.isUploading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                } else {
+                    Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
                 Text("Pilih File CSV")
             }
 
             if (state.result != null) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(state.result!!, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    state.result!!,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (state.isError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
