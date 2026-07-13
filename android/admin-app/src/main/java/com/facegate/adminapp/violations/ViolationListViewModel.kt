@@ -34,7 +34,25 @@ class ViolationListViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
-            _uiState.value = ViolationListState(isLoading = false)
+            try {
+                val response = apiService.getViolations()
+                if (response.isSuccessful && response.body() != null) {
+                    val items = response.body()!!.data.map { dto ->
+                        ViolationItem(
+                            id = dto.id,
+                            studentName = dto.studentId,
+                            type = dto.type,
+                            isResolved = dto.isResolved,
+                            timestamp = dto.timestamp
+                        )
+                    }
+                    _uiState.value = _uiState.value.copy(violations = items, isLoading = false)
+                } else {
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+                }
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            }
         }
     }
 }
