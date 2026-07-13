@@ -16,8 +16,13 @@ class FaceEmbedder(private val context: Context) {
     private val embeddingDim = 128
 
     fun init(modelName: String = "mobilefacenet.tflite") {
-        val modelBuffer = loadModelFile(modelName)
-        interpreter = Interpreter(modelBuffer)
+        if (interpreter != null) return
+        try {
+            val modelBuffer = loadModelFile(modelName)
+            interpreter = Interpreter(modelBuffer)
+        } catch (e: Exception) {
+            interpreter = null
+        }
     }
 
     private fun loadModelFile(modelName: String): MappedByteBuffer {
@@ -30,11 +35,14 @@ class FaceEmbedder(private val context: Context) {
     }
 
     fun embed(bitmap: Bitmap): FloatArray {
+        if (interpreter == null) init()
         val inputBuffer = preprocessBitmap(bitmap)
         val outputBuffer = Array(1) { FloatArray(embeddingDim) }
         interpreter?.run(inputBuffer, outputBuffer)
         return normalize(outputBuffer[0])
     }
+
+    fun isReady(): Boolean = interpreter != null
 
     private fun preprocessBitmap(bitmap: Bitmap): ByteBuffer {
         val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
