@@ -146,7 +146,7 @@ class FaceRegisterViewModel @Inject constructor(
 
         try {
             val vector = embedding.toList()
-            val request = UploadFaceRequest(studentId = studentId, vector = vector)
+            val request = UploadFaceRequest(vector = vector)
             val response = withContext(Dispatchers.IO) {
                 apiService.uploadFace(studentId, request)
             }
