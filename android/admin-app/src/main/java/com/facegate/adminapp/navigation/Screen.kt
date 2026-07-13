@@ -40,4 +40,12 @@ sealed class Screen(val route: String) {
         fun createRoute(studentId: String) = "students/$studentId/register-face"
     }
     data object Settings : Screen("settings")
+    data object Holidays : Screen("holidays")
+    data object HolidayForm : Screen("holidays/form?holidayId={holidayId}") {
+        fun createRoute(holidayId: String? = null) =
+            if (holidayId != null) "holidays/form?holidayId=$holidayId" else "holidays/form"
+    }
+    data object Sync : Screen("sync")
+    data object PendingApproval : Screen("permits/pending")
+    data object ToggleStatus : Screen("toggle-status")
 }
