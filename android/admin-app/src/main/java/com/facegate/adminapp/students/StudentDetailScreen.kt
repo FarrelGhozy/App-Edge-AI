@@ -11,6 +11,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.navigation.Screen
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,6 +80,7 @@ fun StudentDetailScreen(
 
                         FaceRegistrationCard(
                             isRegistered = state.faceRegistered,
+                            updatedAt = state.faceUpdatedAt,
                             onClick = {
                                 navController.navigate(Screen.FaceRegister.createRoute(studentId))
                             }
@@ -96,7 +99,7 @@ fun StudentDetailScreen(
 }
 
 @Composable
-fun FaceRegistrationCard(isRegistered: Boolean, onClick: () -> Unit) {
+fun FaceRegistrationCard(isRegistered: Boolean, updatedAt: String? = null, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -125,13 +128,21 @@ fun FaceRegistrationCard(isRegistered: Boolean, onClick: () -> Unit) {
                     color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer
                            else MaterialTheme.colorScheme.onErrorContainer
                 )
-                Text(
-                    text = if (isRegistered) "Ketuk untuk merekam ulang"
-                           else "Ketuk untuk merekam wajah",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                           else MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
-                )
+                if (isRegistered && updatedAt != null) {
+                    Text(
+                        text = "Terakhir diperbarui: ${formatDateTime(updatedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                } else {
+                    Text(
+                        text = if (isRegistered) "Ketuk untuk merekam ulang"
+                               else "Ketuk untuk merekam wajah",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                               else MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                    )
+                }
             }
             Icon(
                 imageVector = Icons.Default.CameraAlt,
@@ -151,4 +162,14 @@ fun DetailRow(label: String, value: String) {
         Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.65f))
     }
     Divider()
+}
+
+private fun formatDateTime(isoString: String): String {
+    return try {
+        val zdt = ZonedDateTime.parse(isoString)
+        val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm")
+        zdt.format(formatter)
+    } catch (_: Exception) {
+        isoString
+    }
 }
