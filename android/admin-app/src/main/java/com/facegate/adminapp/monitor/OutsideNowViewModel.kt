@@ -15,7 +15,8 @@ data class OutsideNowState(
     val count: Int = 0,
     val students: List<OutsideStudent> = emptyList(),
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val isRefreshing: Boolean = false
 )
 
 @HiltViewModel
@@ -28,21 +29,29 @@ class OutsideNowViewModel @Inject constructor(
 
     fun load() {
         viewModelScope.launch {
-            _uiState.value = OutsideNowState(isLoading = true)
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
                 val response = apiService.getOutsideNow()
                 if (response.isSuccessful && response.body() != null) {
                     val body = response.body()!!
-                    _uiState.value = OutsideNowState(
+                    _uiState.value = _uiState.value.copy(
                         count = body.count,
-                        students = body.students
+                        students = body.students,
+                        isLoading = false,
+                        isRefreshing = false,
+                        error = null
                     )
                 } else {
-                    _uiState.value = OutsideNowState(error = "Gagal memuat data")
+                    _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal memuat data")
                 }
             } catch (e: Exception) {
-                _uiState.value = OutsideNowState(error = "Gagal terhubung")
+                _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal terhubung")
             }
         }
+    }
+
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        load()
     }
 }
