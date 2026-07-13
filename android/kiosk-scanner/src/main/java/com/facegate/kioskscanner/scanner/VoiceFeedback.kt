@@ -2,13 +2,14 @@ package com.facegate.kioskscanner.scanner
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class VoiceFeedback @Inject constructor(
-    private val context: Context
+    @ApplicationContext private val context: Context
 ) {
     private var tts: TextToSpeech? = null
     private var isInitialized = false
