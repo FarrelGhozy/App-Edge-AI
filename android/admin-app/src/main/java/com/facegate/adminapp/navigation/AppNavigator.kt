@@ -28,6 +28,7 @@ import com.facegate.adminapp.violations.ViolationListScreen
 import com.facegate.adminapp.reports.DailyReportScreen
 import com.facegate.adminapp.reports.ReportScreen
 import com.facegate.adminapp.monitor.OutsideNowScreen
+import com.facegate.adminapp.register.FaceRegisterScreen
 import com.facegate.adminapp.students.ImportCsvScreen
 
 @Composable
@@ -135,6 +136,13 @@ fun AppNavigator(
         }
         composable(Screen.OutsideNow.route) {
             OutsideNowScreen(navController = navController)
+        }
+        composable(
+            Screen.FaceRegister.route,
+            arguments = listOf(navArgument("studentId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val studentId = backStackEntry.arguments?.getString("studentId") ?: return@composable
+            FaceRegisterScreen(studentId = studentId, navController = navController)
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)
