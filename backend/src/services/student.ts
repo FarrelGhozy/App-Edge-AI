@@ -46,19 +46,26 @@ export async function listStudents(params: {
   if (params.studyProgram) where.studyProgram = params.studyProgram;
   if (params.academicYear) where.academicYear = params.academicYear;
 
-  const [data, total] = await Promise.all([
+  const [data, total, faceStudentIds] = await Promise.all([
     prisma.student.findMany({ where, skip, take: pageSize, orderBy: { name: "asc" } }),
-    prisma.student.count({ where })
+    prisma.student.count({ where }),
+    prisma.faceVector.findMany({ select: { studentId: true } })
   ]);
 
-  return { data, total, page, pageSize };
+  const faceSet = new Set(faceStudentIds.map(f => f.studentId));
+  const enriched = data.map(s => ({
+    ...s,
+    faceRegistered: faceSet.has(s.id)
+  }));
+
+  return { data: enriched, total, page, pageSize };
 }
 
 export async function getStudent(id: string) {
-  return prisma.student.findUnique({
-    where: { id },
-    include: { faceVectors: true }
-  });
+  const student = await prisma.student.findUnique({ where: { id } });
+  if (!student) return null;
+  const faceCount = await prisma.faceVector.count({ where: { studentId: id } });
+  return { ...student, faceRegistered: faceCount > 0 };
 }
 
 export async function createStudent(data: {
