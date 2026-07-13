@@ -20,7 +20,8 @@ data class StudentFormState(
     val email: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
-    val isSaved: Boolean = false
+    val isSaved: Boolean = false,
+    val savedStudentId: String? = null
 )
 
 @HiltViewModel
@@ -33,6 +34,7 @@ class StudentFormViewModel @Inject constructor(
 
     fun loadStudent(id: String) {
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(error = null)
             try {
                 val response = apiService.getStudent(id)
                 if (response.isSuccessful && response.body() != null) {
@@ -42,8 +44,12 @@ class StudentFormViewModel @Inject constructor(
                         studyProgram = s.studyProgram, academicYear = s.academicYear,
                         phone = s.phone ?: "", email = s.email ?: ""
                     )
+                } else {
+                    _uiState.value = _uiState.value.copy(error = "Mahasiswa tidak ditemukan")
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = "Gagal terhubung ke server")
+            }
         }
     }
 
@@ -73,7 +79,8 @@ class StudentFormViewModel @Inject constructor(
                 )
                 val response = apiService.createStudent(request)
                 if (response.isSuccessful) {
-                    _uiState.value = _uiState.value.copy(isLoading = false, isSaved = true)
+                    val savedId = response.body()?.id
+                    _uiState.value = _uiState.value.copy(isLoading = false, isSaved = true, savedStudentId = savedId)
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal menyimpan")
                 }
