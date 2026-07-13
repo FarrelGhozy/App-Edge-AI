@@ -25,7 +25,6 @@ FaceGateApp/
 │   ├── prisma/schema.prisma    # Database schema (16 models)
 │   ├── src/routes/             # API route handlers (auth, students, attendance, sync, rules, devices, permits, violations, notifications, settings)
 │   └── src/services/           # Business logic
-├── cloudflared/                # Cloudflare Tunnel config
 ├── docker-compose.yml          # PostgreSQL + pgvector + backend
 └── docs/planning.md            # Full planning document
 ```

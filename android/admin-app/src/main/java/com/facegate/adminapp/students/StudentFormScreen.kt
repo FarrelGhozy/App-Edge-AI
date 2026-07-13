@@ -27,7 +27,9 @@ fun StudentFormScreen(
 
     LaunchedEffect(state.isSaved) {
         if (state.isSaved) {
-            if (state.savedStudentId != null) {
+            if (isEdit) {
+                navController.popBackStack()
+            } else if (state.savedStudentId != null) {
                 navController.navigate(Screen.StudentDetail.createRoute(state.savedStudentId!!)) {
                     popUpTo(Screen.Students.route)
                 }
@@ -106,7 +108,7 @@ fun StudentFormScreen(
             }
 
             Button(
-                onClick = { viewModel.save() },
+                onClick = { viewModel.save(isEdit) },
                 enabled = !state.isLoading,
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {

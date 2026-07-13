@@ -60,6 +60,19 @@ export const studentRoutes = new Elysia()
     return { success: true };
   })
   .post("/api/students/:id/face", async ({ params: { id }, body }) => {
-    await uploadFace(id, body.vector);
-    return { success: true };
+    try {
+      await uploadFace(id, body.vector);
+      return { success: true };
+    } catch (error: any) {
+      if (error.code === "23502" || error.message?.includes("null")) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Gagal menyimpan vector wajah, kolom tidak boleh kosong" }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: false, error: "Gagal mengunggah wajah" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
   }, { body: uploadFaceSchema });

@@ -24,7 +24,8 @@ data class StudentFormState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val isSaved: Boolean = false,
-    val savedStudentId: String? = null
+    val savedStudentId: String? = null,
+    val editingStudentId: String? = null
 )
 
 @HiltViewModel
@@ -45,7 +46,8 @@ class StudentFormViewModel @Inject constructor(
                     _uiState.value = StudentFormState(
                         nim = s.nim, name = s.name,
                         studyProgram = s.studyProgram, academicYear = s.academicYear,
-                        phone = s.phone ?: "", email = s.email ?: ""
+                        phone = s.phone ?: "", email = s.email ?: "",
+                        editingStudentId = id
                     )
                 } else {
                     _uiState.value = _uiState.value.copy(error = "Mahasiswa tidak ditemukan")
@@ -68,10 +70,14 @@ class StudentFormViewModel @Inject constructor(
         }
     }
 
-    fun save() {
+    fun save(isEdit: Boolean = false) {
         val s = _uiState.value
-        if (s.nim.isBlank() || s.name.isBlank() || s.studyProgram.isBlank() || s.academicYear.isBlank()) {
-            _uiState.value = s.copy(error = "Harap isi NIM, Nama, Program Studi, dan Angkatan")
+        if (s.name.isBlank() || s.studyProgram.isBlank() || s.academicYear.isBlank()) {
+            _uiState.value = s.copy(error = "Harap isi Nama, Program Studi, dan Angkatan")
+            return
+        }
+        if (!isEdit && s.nim.isBlank()) {
+            _uiState.value = s.copy(error = "Harap isi NIM")
             return
         }
 
@@ -86,9 +92,13 @@ class StudentFormViewModel @Inject constructor(
                     phone = s.phone.ifBlank { null },
                     email = s.email.ifBlank { null }
                 )
-                val response = apiService.createStudent(request)
+                val response = if (isEdit && s.editingStudentId != null) {
+                    apiService.updateStudent(s.editingStudentId!!, request)
+                } else {
+                    apiService.createStudent(request)
+                }
                 if (response.isSuccessful) {
-                    val savedId = response.body()?.id
+                    val savedId = response.body()?.id ?: s.editingStudentId
                     _uiState.value = _uiState.value.copy(isLoading = false, isSaved = true, savedStudentId = savedId)
                 } else {
                     val msg = parseError(response.errorBody()?.string())

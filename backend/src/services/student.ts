@@ -100,7 +100,7 @@ export async function deleteStudent(id: string) {
 export async function uploadFace(studentId: string, vector: number[]) {
   const vectorStr = `[${vector.join(",")}]`;
   return prisma.$executeRawUnsafe(
-    `INSERT INTO face_vectors (student_id, vector) VALUES ($1, $2::vector)
+    `INSERT INTO face_vectors (student_id, vector, updated_at) VALUES ($1, $2::vector, NOW())
      ON CONFLICT (student_id) DO UPDATE SET vector = $2::vector, updated_at = NOW()`,
     studentId,
     vectorStr
