@@ -15,6 +15,8 @@ import { settingRoutes } from "./routes/settings";
 import { reportRoutes } from "./routes/reports";
 import { dashboardRoutes } from "./routes/dashboard";
 import { holidayRoutes } from "./routes/holidays";
+import { scheduleRoutes } from "./routes/schedules";
+import { auditRoutes } from "./routes/audit";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8150;
 const JWT_SECRET = process.env.JWT_SECRET || "facegate-jwt-secret";
@@ -56,6 +58,8 @@ const app = new Elysia()
   .use(reportRoutes)
   .use(dashboardRoutes)
   .use(holidayRoutes)
+  .use(scheduleRoutes)
+  .use(auditRoutes)
   .listen(PORT);
 
 console.log(`🚀 FaceGate API running at http://localhost:${PORT}`);

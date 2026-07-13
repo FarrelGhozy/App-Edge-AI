@@ -12,6 +12,21 @@ export const deviceRoutes = new Elysia()
   .get("/api/devices", async () => {
     return await listDevices();
   })
+  .get("/api/devices/:deviceId", async ({ params: { deviceId } }) => {
+    const device = await prisma.device.findUnique({ where: { deviceId } });
+    if (!device) {
+      return new Response(JSON.stringify({ success: false, error: "Device not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return { success: true, data: device };
+  })
+  .put("/api/devices/:deviceId", async ({ params: { deviceId }, body }) => {
+    const data = body as { name?: string; location?: string; isActive?: boolean };
+    const device = await prisma.device.update({ where: { deviceId }, data });
+    return { success: true, data: device };
+  })
   .put("/api/devices/:deviceId/ping", async ({ params: { deviceId }, body }) => {
     const { batteryLevel } = body as { batteryLevel?: number };
     await pingDevice(deviceId, batteryLevel);

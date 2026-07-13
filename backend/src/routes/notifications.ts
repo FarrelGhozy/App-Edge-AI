@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import prisma from "../services/prisma";
 import { listNotifications, markRead, markAllRead } from "../services/notification";
 import { authGuard } from "../guards/auth";
 

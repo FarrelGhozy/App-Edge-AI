@@ -7,39 +7,44 @@ export const syncRoutes = new Elysia()
   .use(authGuard)
   .get("/api/sync/faces", async ({ query }) => {
     const since = query.since as string | undefined;
-    let faces;
 
-    if (since) {
-      const sinceDate = new Date(since);
-      faces = await prisma.faceVector.findMany({
-        where: { updatedAt: { gte: sinceDate } },
-        include: { student: { select: { name: true, nim: true, studyProgram: true, academicYear: true } } }
-      });
-    } else {
-      faces = await prisma.faceVector.findMany({
-        include: { student: { select: { name: true, nim: true, studyProgram: true, academicYear: true } } }
-      });
-    }
+    const rows = await prisma.$queryRawUnsafe<Array<{
+      student_id: string;
+      vector: string;
+      updated_at: Date;
+      name: string;
+      nim: string;
+      study_program: string;
+      academic_year: string;
+    }>>(
+      `SELECT
+        fv.student_id,
+        fv.vector::text,
+        fv.updated_at,
+        s.name,
+        s.nim,
+        s.study_program,
+        s.academic_year
+      FROM face_vectors fv
+      JOIN students s ON s.id = fv.student_id
+      WHERE $1::timestamptz IS NULL OR fv.updated_at >= $1::timestamptz`,
+      since ? new Date(since) : null
+    );
 
-    const data = [];
-    for (const f of faces) {
-      const raw = await prisma.$queryRawUnsafe<Array<{ vector: string }>>(
-        `SELECT vector::text FROM face_vectors WHERE student_id = $1`,
-        f.studentId
-      );
-      const vectorStr = raw[0]?.vector?.replace(/[\[\]]/g, "") || "";
+    const data = rows.map((r) => {
+      const vectorStr = r.vector?.replace(/[\[\]]/g, "") || "";
       const vector = vectorStr ? vectorStr.split(",").map(Number) : [];
 
-      data.push({
-        studentId: f.studentId,
-        studentName: f.student.name,
-        nim: f.student.nim,
-        studyProgram: f.student.studyProgram,
-        academicYear: f.student.academicYear,
+      return {
+        studentId: r.student_id,
+        studentName: r.name,
+        nim: r.nim,
+        studyProgram: r.study_program,
+        academicYear: r.academic_year,
         vector,
-        updatedAt: f.updatedAt.toISOString()
-      });
-    }
+        updatedAt: r.updated_at.toISOString()
+      };
+    });
 
     return { data, since: since || null };
   })
@@ -84,6 +89,45 @@ export const syncRoutes = new Elysia()
       deviceId: request?.deviceId || null
     };
   })
+  .get("/api/sync/status/:deviceId", async ({ params: { deviceId } }) => {
+    const device = await prisma.device.findUnique({ where: { deviceId } });
+    if (!device) {
+      return new Response(JSON.stringify({ success: false, error: "Device not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const pendingRequest = await prisma.syncRequest.findFirst({
+      where: { deviceId, isProcessed: false },
+      orderBy: { requestedAt: "desc" }
+    });
+
+    const lastSync = await prisma.syncLog.findFirst({
+      where: { deviceId },
+      orderBy: { createdAt: "desc" }
+    });
+
+    const unprocessedLogs = await prisma.syncLog.count({
+      where: { deviceId, status: "pending" }
+    });
+
+    return {
+      success: true,
+      data: {
+        deviceId,
+        deviceName: device.name,
+        isOnline: device.lastPingAt ? (Date.now() - device.lastPingAt.getTime()) < 300000 : false,
+        lastPingAt: device.lastPingAt?.toISOString() || null,
+        batteryLevel: device.batteryLevel,
+        hasPendingSync: !!pendingRequest,
+        pendingSyncRequestedAt: pendingRequest?.requestedAt?.toISOString() || null,
+        lastSyncAt: lastSync?.createdAt?.toISOString() || null,
+        lastSyncStatus: lastSync?.status || null,
+        unprocessedLogs
+      }
+    };
+  })
   .get("/api/sync/logs", async ({ query }) => {
     const where = query.deviceId ? { deviceId: query.deviceId as string } : {};
     return await prisma.syncLog.findMany({
@@ -93,17 +137,18 @@ export const syncRoutes = new Elysia()
     });
   })
   .post("/api/sync/complete", async ({ body }) => {
+    const data = body as { deviceId: string; syncType?: string; status?: string; logsCount?: number };
     await prisma.syncLog.create({
       data: {
-        deviceId: body.deviceId,
-        syncType: body.syncType || "manual",
-        status: body.status || "success",
-        logsCount: body.logsCount || 0
+        deviceId: data.deviceId,
+        syncType: data.syncType || "manual",
+        status: data.status || "success",
+        logsCount: data.logsCount || 0
       }
     });
 
     await prisma.syncRequest.updateMany({
-      where: { deviceId: body.deviceId, isProcessed: false },
+      where: { deviceId: data.deviceId, isProcessed: false },
       data: { isProcessed: true, processedAt: new Date() }
     });
 

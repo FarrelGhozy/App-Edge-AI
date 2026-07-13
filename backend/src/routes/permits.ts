@@ -111,6 +111,19 @@ export const permitRoutes = new Elysia()
     }
     return { success: false, error: "Invalid status" };
   })
+  .get("/api/permits/active/:studentId", async ({ params: { studentId } }) => {
+    const now = new Date();
+    const permits = await prisma.permit.findMany({
+      where: {
+        studentId,
+        status: { in: ["approved", "pending"] },
+        startDate: { lte: now },
+        endDate: { gte: now }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    return { success: true, data: permits };
+  })
   .get("/api/permits/quota", async ({ query }) => {
     const studentId = query.studentId as string;
     if (!studentId) return { success: false, error: "studentId required" };

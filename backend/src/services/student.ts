@@ -21,7 +21,6 @@ export const updateStudentSchema = t.Object({
 });
 
 export const uploadFaceSchema = t.Object({
-  studentId: t.String(),
   vector: t.Array(t.Number())
 });
 
@@ -64,8 +63,18 @@ export async function listStudents(params: {
 export async function getStudent(id: string) {
   const student = await prisma.student.findUnique({ where: { id } });
   if (!student) return null;
-  const faceCount = await prisma.faceVector.count({ where: { studentId: id } });
-  return { ...student, faceRegistered: faceCount > 0 };
+  const [faceCount, faceVectors] = await Promise.all([
+    prisma.faceVector.count({ where: { studentId: id } }),
+    prisma.$queryRawUnsafe<Array<{ student_id: string; updated_at: Date }>>(
+      `SELECT student_id, updated_at FROM face_vectors WHERE student_id = $1`,
+      id
+    )
+  ]);
+  const enrichedVectors = faceVectors.map(fv => ({
+    studentId: fv.student_id,
+    updatedAt: fv.updated_at.toISOString()
+  }));
+  return { ...student, faceRegistered: faceCount > 0, faceVectors: enrichedVectors };
 }
 
 export async function createStudent(data: {
