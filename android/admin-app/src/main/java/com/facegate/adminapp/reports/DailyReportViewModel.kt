@@ -18,7 +18,8 @@ data class DailyReportState(
     val stillOutsideCount: Int = 0,
     val logs: List<DailyReportLog> = emptyList(),
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val isRefreshing: Boolean = false
 )
 
 @HiltViewModel
@@ -35,23 +36,31 @@ class DailyReportViewModel @Inject constructor(
 
     fun load(date: String) {
         viewModelScope.launch {
-            _uiState.value = DailyReportState(isLoading = true)
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
                 val response = apiService.getDailyReport(date)
                 if (response.isSuccessful && response.body() != null) {
                     val body = response.body()!!
-                    _uiState.value = DailyReportState(
+                    _uiState.value = _uiState.value.copy(
                         keluarCount = body.keluarCount,
                         kembaliCount = body.kembaliCount,
                         stillOutsideCount = body.stillOutsideCount,
-                        logs = body.logs
+                        logs = body.logs,
+                        isLoading = false,
+                        isRefreshing = false,
+                        error = null
                     )
                 } else {
-                    _uiState.value = DailyReportState(error = "Gagal memuat laporan")
+                    _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal memuat laporan")
                 }
             } catch (e: Exception) {
-                _uiState.value = DailyReportState(error = "Gagal terhubung")
+                _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal terhubung")
             }
         }
+    }
+
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        loadToday()
     }
 }
