@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.facegate.adminapp.navigation.Screen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -25,7 +26,15 @@ fun StudentFormScreen(
     }
 
     LaunchedEffect(state.isSaved) {
-        if (state.isSaved) navController.popBackStack()
+        if (state.isSaved) {
+            if (state.savedStudentId != null) {
+                navController.navigate(Screen.StudentDetail.createRoute(state.savedStudentId!!)) {
+                    popUpTo(Screen.Students.route)
+                }
+            } else {
+                navController.popBackStack()
+            }
+        }
     }
 
     Scaffold(
