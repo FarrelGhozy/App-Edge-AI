@@ -6,6 +6,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +23,7 @@ fun DailyReportScreen(
     viewModel: DailyReportViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val pullRefreshState = rememberPullToRefreshState()
 
     LaunchedEffect(Unit) { viewModel.loadToday() }
 
@@ -36,50 +39,56 @@ fun DailyReportScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (state.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (state.error != null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(state.error!!, color = MaterialTheme.colorScheme.error)
-                }
-            } else {
-                // Summary cards
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StatCard("Keluar", "${state.keluarCount}", Color(0xFF1976D2), Modifier.weight(1f))
-                    StatCard("Kembali", "${state.kembaliCount}", Color(0xFF388E3C), Modifier.weight(1f))
-                    StatCard("Di Luar", "${state.stillOutsideCount}", Color(0xFFE53935), Modifier.weight(1f))
-                }
-
-                if (state.logs.isEmpty()) {
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize().padding(padding)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (state.isLoading && state.logs.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Belum ada scan hari ini")
+                        CircularProgressIndicator()
+                    }
+                } else if (state.error != null && state.logs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(state.error!!, color = MaterialTheme.colorScheme.error)
                     }
                 } else {
-                    LazyColumn {
-                        items(state.logs) { log ->
-                            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                Row(modifier = Modifier.padding(12.dp)) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(log.studentName, style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        StatCard("Keluar", "${state.keluarCount}", Color(0xFF1976D2), Modifier.weight(1f))
+                        StatCard("Kembali", "${state.kembaliCount}", Color(0xFF388E3C), Modifier.weight(1f))
+                        StatCard("Di Luar", "${state.stillOutsideCount}", Color(0xFFE53935), Modifier.weight(1f))
+                    }
+
+                    if (state.logs.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Belum ada scan hari ini")
+                        }
+                    } else {
+                        LazyColumn {
+                            items(state.logs) { log ->
+                                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                    Row(modifier = Modifier.padding(12.dp)) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(log.studentName, style = MaterialTheme.typography.titleSmall)
+                                            Text(
+                                                log.timestamp.take(19).replace("T", " "),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        val actionColor = if (log.action == "keluar") Color(0xFFE53935) else Color(0xFF4CAF50)
+                                        val actionLabel = if (log.action == "keluar") "KELUAR" else "KEMBALI"
                                         Text(
-                                            log.timestamp.take(19).replace("T", " "),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            actionLabel,
+                                            color = actionColor,
+                                            style = MaterialTheme.typography.labelMedium
                                         )
                                     }
-                                    val actionColor = if (log.action == "keluar") Color(0xFFE53935) else Color(0xFF4CAF50)
-                                    val actionLabel = if (log.action == "keluar") "KELUAR" else "KEMBALI"
-                                    Text(
-                                        actionLabel,
-                                        color = actionColor,
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
                                 }
                             }
                         }
