@@ -23,6 +23,17 @@ fun StudentDetailScreen(
 
     LaunchedEffect(studentId) { viewModel.loadStudent(studentId) }
 
+    val currentEntry = navController.currentBackStackEntry
+    val faceRegisteredResult = currentEntry?.savedStateHandle?.getStateFlow("faceRegistered", false)
+    val faceResult by faceRegisteredResult?.collectAsState() ?: remember { mutableStateOf(false) }
+
+    LaunchedEffect(faceResult) {
+        if (faceResult) {
+            viewModel.onFaceRegistered()
+            currentEntry?.savedStateHandle?.set("faceRegistered", false)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -62,6 +73,15 @@ fun StudentDetailScreen(
                         DetailRow("No. HP", s.phone ?: "-")
                         DetailRow("Email", s.email ?: "-")
                         DetailRow("Status", if (s.isActive) "Aktif" else "Nonaktif")
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        FaceRegistrationCard(
+                            isRegistered = state.faceRegistered,
+                            onClick = {
+                                navController.navigate(Screen.FaceRegister.createRoute(studentId))
+                            }
+                        )
                     }
                 }
             }
@@ -71,6 +91,54 @@ fun StudentDetailScreen(
                     navController.popBackStack()
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun FaceRegistrationCard(isRegistered: Boolean, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isRegistered)
+                MaterialTheme.colorScheme.primaryContainer
+            else
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Face,
+                contentDescription = null,
+                tint = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer
+                       else MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isRegistered) "Wajah Terdaftar" else "Wajah Belum Terdaftar",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer
+                           else MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = if (isRegistered) "Ketuk untuk merekam ulang"
+                           else "Ketuk untuk merekam wajah",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                           else MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.CameraAlt,
+                contentDescription = "Registrasi Wajah",
+                tint = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer
+                       else MaterialTheme.colorScheme.onErrorContainer
+            )
         }
     }
 }
