@@ -1,8 +1,10 @@
 import { Elysia } from "elysia";
 import { listPermits, approvePermit, rejectPermit } from "../services/permit";
 import prisma from "../services/prisma";
+import { authGuard } from "../guards/auth";
 
 export const permitRoutes = new Elysia()
+  .use(authGuard)
   .get("/api/permits", async ({ query }) => {
     const params = {
       page: query.page ? parseInt(query.page as string) : 1,

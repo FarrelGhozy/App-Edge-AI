@@ -10,8 +10,10 @@ import {
   deleteStudent,
   uploadFace
 } from "../services/student";
+import { authGuard } from "../guards/auth";
 
 export const studentRoutes = new Elysia()
+  .use(authGuard)
   .get("/api/students", async ({ query }) => {
     const params = {
       page: query.page ? parseInt(query.page as string) : 1,

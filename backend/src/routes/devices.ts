@@ -1,8 +1,10 @@
 import { Elysia } from "elysia";
 import { registerDevice, pingDevice, listDevices } from "../services/device";
 import prisma from "../services/prisma";
+import { authGuard } from "../guards/auth";
 
 export const deviceRoutes = new Elysia()
+  .use(authGuard)
   .post("/api/devices/register", async ({ body }) => {
     const device = await registerDevice(body as { name: string; location?: string });
     return { success: true, data: device };

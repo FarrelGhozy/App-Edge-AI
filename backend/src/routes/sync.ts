@@ -1,8 +1,10 @@
 import { Elysia } from "elysia";
 import { batchSyncSchema, recordScan } from "../services/attendance";
 import prisma from "../services/prisma";
+import { authGuard } from "../guards/auth";
 
 export const syncRoutes = new Elysia()
+  .use(authGuard)
   .get("/api/sync/faces", async ({ query }) => {
     const since = query.since as string | undefined;
     let faces;

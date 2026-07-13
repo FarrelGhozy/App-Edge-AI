@@ -1,8 +1,10 @@
 import { Elysia } from "elysia";
 import { scanSchema, batchSyncSchema, recordScan, listAttendance } from "../services/attendance";
 import prisma from "../services/prisma";
+import { authGuard } from "../guards/auth";
 
 export const attendanceRoutes = new Elysia()
+  .use(authGuard)
   .post("/api/attendance/scan", async ({ body }) => {
     const student = await prisma.student.findUnique({ where: { id: body.studentId } });
     if (!student) {
