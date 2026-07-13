@@ -64,9 +64,27 @@ export const studentRoutes = new Elysia()
       await uploadFace(id, body.vector);
       return { success: true };
     } catch (error: any) {
+      if (error.message === "STUDENT_NOT_FOUND") {
+        return new Response(
+          JSON.stringify({ success: false, error: "Mahasiswa tidak ditemukan" }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (error.message?.startsWith("VECTOR_DIMENSION_MISMATCH")) {
+        return new Response(
+          JSON.stringify({ success: false, error: `Dimensi vector tidak sesuai: ${error.message}` }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
       if (error.code === "23502" || error.message?.includes("null")) {
         return new Response(
           JSON.stringify({ success: false, error: "Gagal menyimpan vector wajah, kolom tidak boleh kosong" }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (error.message?.startsWith("PGVECTOR_ERROR")) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Gagal menyimpan ke database vector: pastikan ekstensi pgvector sudah aktif" }),
           { status: 500, headers: { "Content-Type": "application/json" } }
         );
       }

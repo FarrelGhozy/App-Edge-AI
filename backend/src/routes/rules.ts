@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import prisma from "../services/prisma";
-import { listRules, getSettings } from "../services/rule";
+import { listRules } from "../services/rule";
 import { authGuard } from "../guards/auth";
 
 export const ruleRoutes = new Elysia()
@@ -48,7 +48,4 @@ export const ruleRoutes = new Elysia()
       orderBy: { priority: "desc" }
     });
     return { success: true, data: rules };
-  })
-  .get("/api/settings", async () => {
-    return await getSettings();
   });

@@ -126,8 +126,6 @@ FaceGateApp/
 │   └── .env.example
 │
 ├── docker-compose.yml                # PostgreSQL + pgvector + backend (port 8150)
-├── cloudflared/                      # Konfigurasi Cloudflare Tunnel
-│   └── config.yml                    # Tunnel arah ke backend:8150
 ├── docs/
 │   ├── planning.md
 │   └── api-spec.md
@@ -177,8 +175,8 @@ FaceGateApp/
 | PDF | PDFKit |
 | Container | Docker + docker-compose |
 | Port | **8150** |
-| Hosting | **Localhost + Cloudflare Tunnel** (cloudflared) — tidak perlu open port, SSL otomatis dari Cloudflare |
-| Domain | **facegate.utc.web.id** — subdomain tunnel via Cloudflare |
+| Hosting | **Home server** — server sendiri di rumah, di-tunnel dengan Cloudflare Tunnel, port dibelokkan via web panel server |
+| Domain | **https://facegate.utc.web.id** — domain yang sudah terhubung ke home server via Cloudflare Tunnel |
 
 ### 3.3 AI Pipeline
 
@@ -188,7 +186,7 @@ FaceGateApp/
   Crop face ROI                             468 titik landmark wajah
      ↓                                                    ↓
   [Liveness: Eye Aspect Ratio]              [MobileFaceNet Embedding]
-  Hitung EAR dari landmark mata              Ekstrak 128-d vector
+  Hitung EAR dari landmark mata              Ekstrak 192-d vector
   Kedipan = EAR turun drastis                      ↓
      ↓                                       Brute-force match di RAM
   Jika tidak ada kedipan → tolak             Cosine similarity
@@ -208,9 +206,9 @@ FaceGateApp/
 | Face Detection | **MediaPipe FaceDetector** (via ML Kit CameraX) | ~350 KB | < 5ms |
 | Face Landmarks | **MediaPipe Face Landmarks** (468 titik) | ~0 KB (bundle) | < 2ms |
 | Liveness | **Eye Aspect Ratio (EAR)** — rule-based dari landmark mata | 0 KB | < 2ms |
-| Face Embedding | **MobileFaceNet** .tflite — 128-d vector | ~4-5 MB | ~15ms |
-| Matching | Brute-force cosine similarity di RAM | 10.000 × 128 = ~5 MB | ~3ms |
-| **Total** | | **~5 MB** | **~25ms per face** |
+| Face Embedding | **MobileFaceNet** .tflite — 192-d vector | ~4-5 MB | ~15ms |
+| Matching | Brute-force cosine similarity di RAM | 10.000 × 192 = ~7.7 MB | ~3ms |
+| **Total** | | **~9-10 MB** | **~25ms per face** |
 
 - **Threshold**: 0.6 (default, bisa di-tuning)
 - **Anti-spoofing**: Deteksi kedipan via EAR — pengguna harus berkedip alami dalam 3 detik
@@ -310,6 +308,80 @@ Admin App                          Server                       Kiosk Scanner
 
 **Saat offline**: Jika kiosk tidak punya internet, log menumpuk di lokal. Saat internet kembali, WorkManager otomatis jalan (NetworkType.CONNECTED constraint), kiosk cek flag syncRequested. Jika admin sudah meminta sync, langsung proses. Jika tidak, kiosk tetap upload log yang tertunda.
 
+### 4.3 Realtime Data (Admin ↔ Server)
+
+Admin App membutuhkan data realtime dari server untuk monitoring. Server menggunakan **Server-Sent Events (SSE)** untuk push data ke admin.
+
+```
+┌────────────┐     SSE (persistent)      ┌────────────┐
+│ Admin App  │◄──────────────────────────│   Server   │
+│            │   event: dashboard_update │            │
+│            │   event: violation_new    │            │
+│            │   event: scan_realtime    │            │
+│            │   event: outside_update   │            │
+└────────────┘                           └────────────┘
+```
+
+**Event types**:
+| Event | Trigger | Data |
+|---|---|---|
+| `dashboard_update` | Setiap 5 detik / saat ada perubahan | Summary stats (di kampus, di luar, izin, violation) |
+| `violation_new` | Violation terdeteksi (via scan kiosk) | Violation record baru |
+| `scan_realtime` | AttendanceLog baru dibuat | Data scan terbaru (nama, aksi, jam) |
+| `outside_update` | Mahasiswa keluar/kembali | Jumlah & daftar mahasiswa di luar |
+| `sync_status` | Sync selesai/gagal | Status sync per device |
+
+**Implementasi**:
+- Endpoint: `GET /api/events/stream` (SSE) — admin connect dan terima event secara realtime
+- Admin App menggunakan `EventSource` / OkHttp SSE untuk listen event
+- Dashboard otomatis terupdate tanpa polling
+
+### 4.4 Kiosk Auto-Fetch (Database Change Trigger)
+
+Saat ada perubahan di database (admin tambah/edit mahasiswa, approve izin, ubah rules, upload face vector), kiosk harus segera mengambil data terbaru — tidak menunggu polling 10 menit.
+
+```
+┌────────────┐   POST /api/students/:id   ┌────────────┐
+│ Admin App  │───────────────────────────►│   Server   │
+└────────────┘                            └─────┬──────┘
+                                                │
+                                    Trigger DB change
+                                                │
+                              ┌─────────────────▼──────────────────┐
+                              │  DB Change Hook                    │
+                              │  - Student created/updated         │
+                              │  - Face vector uploaded            │
+                              │  - Permit approved/rejected        │
+                              │  - CampusRule changed              │
+                              │  - Holiday added                   │
+                              └─────────────────┬──────────────────┘
+                                                │
+                                    Set syncRequested=true
+                                    untuk SEMUA kiosk aktif
+                                                │
+                              ┌─────────────────▼──────────────────┐
+                              │  Kiosk polling GET /api/sync/req   │
+                              │  (setiap 10 detik saat idle,       │
+                              │   bukan 10 menit seperti sebelum)  │
+                              └─────────────────┬──────────────────┘
+                                                │
+                                    Jika requested=true →
+                                    langsung sync penuh
+                                    (download faces/rules/settings)
+```
+
+**Perubahan dari desain sebelumnya**:
+| Aspek | Sebelumnya | Sekarang |
+|---|---|---|
+| Poll interval kiosk | 10 menit | **10 detik** (ringan, cuma return boolean) |
+| Trigger sync | Admin klik tombol manual | Admin klik tombol **ATAU** otomatis saat DB berubah |
+| Admin data | Polling REST API manual | **SSE realtime push** |
+| DB change → kiosk | Tidak ada mekanisme | **Auto set syncRequested=true** untuk semua device aktif |
+
+**DB Change Hook** — diimplementasikan di backend service layer:
+- Setiap kali `createStudent`, `updateStudent`, `deleteStudent`, `uploadFace`, `approvePermit`, `rejectPermit`, `createRule`, `updateRule`, `deleteRule`, `createHoliday`, `deleteHoliday` dipanggil → otomatis set `syncRequested = true` untuk semua device aktif.
+- Ini memastikan kiosk selalu punya data terbaru dalam waktu < 10 detik setelah perubahan.
+
 ---
 
 ## 5. Data Model & Database
@@ -344,7 +416,7 @@ model Student {
 
 model FaceVector {
   studentId String   @id @map("student_id")
-  vector    Unsupported("vector(128)")
+  vector    Unsupported("vector(192)")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -797,6 +869,12 @@ enum class State { DI_KAMPUS, DI_LUAR }
 | GET | `/api/notifications` |
 | PUT | `/api/notifications/:id/read` |
 
+### 6.15 Realtime Events (SSE)
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| GET | `/api/events/stream` | SSE stream — admin terima event realtime |
+| POST | `/api/events/trigger-change` | Internal — trigger sync flag untuk semua kiosk saat DB berubah |
+
 ---
 
 ## 7. Alur Data Offline-First
@@ -965,7 +1043,7 @@ Tidak ada scan = mahasiswa tidak keluar sama sekali hari itu (normal).
 | `max_permit_hours_per_day` | `8` | Maks durasi izin harian (jam) |
 | `max_daily_permit_per_month` | `10` | Kuota izin harian per bulan |
 | `violation_threshold` | `3` | Batas pelanggaran sebelum notifikasi khusus |
-| `sync_poll_interval_minutes` | `10` | Interval polling sync request |
+| `sync_poll_interval_seconds` | `10` | Interval polling sync request (detik) |
 
 ### 8.3 Logika Evaluasi (Offline-capable)
 
@@ -1419,8 +1497,8 @@ Cahaya dari depan (searah mahasiswa)
 | Storage | 50 GB SSD |
 | OS | Ubuntu 22.04+ |
 | Docker | Yes |
-| Cloudflare Tunnel | cloudflared — tunnel ke `localhost:8150` |
-| Port yang dibuka | **Tidak ada** — semua via Cloudflare Tunnel |
+| Tunnel | **Cloudflare Tunnel** — dikonfigurasi di server, domain facegate.utc.web.id mengarah ke port 8150 |
+| Port forwarding | Diatur via web panel server — membelokkan traffic ke backend:8150 |
 
 ---
 
@@ -1502,7 +1580,7 @@ Cahaya dari depan (searah mahasiswa)
 | No | Pertanyaan | Keputusan |
 |---|---|---|
 | 1 | Model Face Detection | ✅ **MediaPipe FaceDetector** |
-| 2 | Model Face Embedding | ✅ **MobileFaceNet 128-d** |
+| 2 | Model Face Embedding | ✅ **MobileFaceNet 192-d** |
 | 3 | Liveness Detection | ✅ **Eye Aspect Ratio (EAR)** — rule-based, 0 KB |
 | 4 | Backend Framework | ✅ **Elysia** (Bun-native) |
 | 5 | CSV Import Format | ✅ NIM, Nama, Prodi, Angkatan, No HP, Email |
@@ -1510,9 +1588,9 @@ Cahaya dari depan (searah mahasiswa)
 | 7 | Dashboard Web | ✅ **Skip dulu** — fokus ke Admin App dulu |
 | 8 | Multiple Kiosk | ✅ **Langsung multi-gerbang** dari awal |
 | 9 | Emergency Mode | ✅ **Skip** — tidak perlu untuk sekarang |
-| 10 | Cloudflare Domain | ✅ **facegate.utc.web.id** — pake subdomain sendiri |
-| 11 | Backend Port | ✅ **8150** — localhost + Cloudflare Tunnel |
-| 12 | Hosting | ✅ **Docker + Cloudflare Tunnel** (cloudflared) |
+| 10 | Domain | ✅ **facegate.utc.web.id** — Cloudflare Tunnel dari home server |
+| 11 | Backend Port | ✅ **8150** — dibelokkan via web panel server |
+| 12 | Hosting | ✅ **Docker** di home server + Cloudflare Tunnel |
 | 13 | Kursus Kuliah | ✅ **Per Mahasiswa** — ada relasi studentId |
 | 14 | FaceVector | ✅ **1:1 (studentId PK)** — satu mahasiswa satu vector, paling efektif untuk brute-force matching |
 | 15 | Jam Operasional | ✅ **TOLAK** scan di luar jam operasional (baik sebelum start maupun setelah end) |

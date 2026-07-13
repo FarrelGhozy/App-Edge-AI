@@ -77,6 +77,22 @@ export async function getStudent(id: string) {
   return { ...student, faceRegistered: faceCount > 0, faceVectors: enrichedVectors };
 }
 
+async function triggerSyncForAllDevices() {
+  try {
+    const activeDevices = await prisma.device.findMany({
+      where: { isActive: true },
+      select: { deviceId: true }
+    });
+    for (const device of activeDevices) {
+      await prisma.syncRequest.create({
+        data: { deviceId: device.deviceId }
+      });
+    }
+  } catch (_) {
+    // Silently fail — trigger is best-effort, doesn't block the main operation
+  }
+}
+
 export async function createStudent(data: {
   nim: string;
   name: string;
@@ -85,24 +101,52 @@ export async function createStudent(data: {
   phone?: string;
   email?: string;
 }) {
-  return prisma.student.create({ data });
+  const student = await prisma.student.create({ data });
+  await triggerSyncForAllDevices();
+  return student;
 }
 
 export async function updateStudent(id: string, data: Record<string, unknown>) {
-  return prisma.student.update({ where: { id }, data });
+  const student = await prisma.student.update({ where: { id }, data });
+  await triggerSyncForAllDevices();
+  return student;
 }
 
 export async function deleteStudent(id: string) {
   await prisma.faceVector.deleteMany({ where: { studentId: id } });
-  return prisma.student.delete({ where: { id } });
+  const student = await prisma.student.delete({ where: { id } });
+  await triggerSyncForAllDevices();
+  return student;
 }
 
 export async function uploadFace(studentId: string, vector: number[]) {
+  // Validate student exists
+  const student = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!student) {
+    throw new Error("STUDENT_NOT_FOUND");
+  }
+
+  // Validate vector dimension (model produces 192-d embedding)
+  if (vector.length !== 192) {
+    throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192, got ${vector.length}`);
+  }
+
   const vectorStr = `[${vector.join(",")}]`;
-  return prisma.$executeRawUnsafe(
-    `INSERT INTO face_vectors (student_id, vector, updated_at) VALUES ($1, $2::vector, NOW())
-     ON CONFLICT (student_id) DO UPDATE SET vector = $2::vector, updated_at = NOW()`,
-    studentId,
-    vectorStr
-  );
+  try {
+    const result = await prisma.$executeRawUnsafe(
+      `INSERT INTO face_vectors (student_id, vector, updated_at) VALUES ($1, $2::vector, NOW())
+       ON CONFLICT (student_id) DO UPDATE SET vector = $2::vector, updated_at = NOW()`,
+      studentId,
+      vectorStr
+    );
+    // Trigger sync so kiosks download the new face vector
+    await triggerSyncForAllDevices();
+    return result;
+  } catch (error: any) {
+    // Catch pgvector-specific errors
+    if (error.message?.includes("vector")) {
+      throw new Error(`PGVECTOR_ERROR: ${error.message}`);
+    }
+    throw error;
+  }
 }

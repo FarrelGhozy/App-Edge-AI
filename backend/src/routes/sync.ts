@@ -136,6 +136,30 @@ export const syncRoutes = new Elysia()
       take: 50
     });
   })
+  .post("/api/events/trigger-change", async ({ body }) => {
+    // Called by service layer when DB changes (student CRUD, face upload, permit approve, rules change, etc.)
+    // Sets syncRequested=true for ALL active devices so kiosks fetch latest data
+    const activeDevices = await prisma.device.findMany({
+      where: { isActive: true },
+      select: { deviceId: true }
+    });
+
+    const requestedBy = (body as { requestedBy?: string }).requestedBy || null;
+
+    for (const device of activeDevices) {
+      await prisma.syncRequest.create({
+        data: {
+          deviceId: device.deviceId,
+          requestedById: requestedBy
+        }
+      });
+    }
+
+    return {
+      success: true,
+      data: { triggeredDevices: activeDevices.length }
+    };
+  })
   .post("/api/sync/complete", async ({ body }) => {
     const data = body as { deviceId: string; syncType?: string; status?: string; logsCount?: number };
     await prisma.syncLog.create({

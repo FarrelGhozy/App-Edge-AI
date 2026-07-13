@@ -23,6 +23,9 @@ model Student {
   faceVectors   FaceVector[]
   attendanceLogs AttendanceLog[]
   permits       Permit[]
+  violations    Violation[]
+  courseSchedules CourseSchedule[]
+  permitQuotas  PermitQuota[]
 
   @@map("students")
 }
@@ -108,6 +111,8 @@ model PermitQuota {
   permitsUsed Int    @default(0) @map("permits_used")
   maxPermits  Int    @default(10) @map("max_permits")
 
+  student     Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
   @@unique([studentId, month, year])
   @@map("permit_quotas")
 }
@@ -139,13 +144,19 @@ model GlobalSetting {
 
 model CourseSchedule {
   id          String   @id @default(uuid())
+  studentId   String   @map("student_id")
   courseName  String   @map("course_name")
   dayOfWeek   Int      @map("day_of_week")
   startTime   String   @map("start_time")
   endTime     String   @map("end_time")
   room        String?
+  lecturer    String?
+  isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
 
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, dayOfWeek])
   @@map("course_schedules")
 }
 
@@ -162,6 +173,8 @@ model Violation {
   resolvedAt      DateTime? @map("resolved_at")
   resolvedNote    String?   @map("resolved_note")
   createdAt       DateTime  @default(now()) @map("created_at")
+
+  student         Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@index([studentId])
   @@index([type])
@@ -243,13 +256,15 @@ model ImportBatch {
 
 model Notification {
   id          String   @id @default(uuid())
+  adminId     String?  @map("admin_id")
   type        String
   title       String
   message     String
   isRead      Boolean  @default(false) @map("is_read")
+  linkTo      String?
   createdAt   DateTime @default(now()) @map("created_at")
 
-  @@index([isRead])
+  @@index([adminId, isRead])
   @@index([createdAt])
   @@map("notifications")
 }

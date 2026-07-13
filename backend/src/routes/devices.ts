@@ -32,17 +32,13 @@ export const deviceRoutes = new Elysia()
     await pingDevice(deviceId, batteryLevel);
     return { success: true };
   })
-  .post("/api/sync/request/:deviceId", async ({ params: { deviceId } }) => {
+  .post("/api/sync/request/:deviceId", async ({ params: { deviceId }, store }) => {
+    const admin = store?.admin as { id: string } | undefined;
     const request = await prisma.syncRequest.create({
-      data: { deviceId }
+      data: {
+        deviceId,
+        requestedById: admin?.id || null
+      }
     });
     return { success: true, data: request };
-  })
-  .get("/api/sync/logs", async ({ query }) => {
-    const where = query.deviceId ? { deviceId: query.deviceId as string } : {};
-    return await prisma.syncLog.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: 50
-    });
   });
