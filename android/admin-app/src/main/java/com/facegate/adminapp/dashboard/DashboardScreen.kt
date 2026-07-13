@@ -32,10 +32,14 @@ val dashboardItems = listOf(
     DashboardItem("Mahasiswa", Icons.Default.People, Screen.Students, Color(0xFF1976D2)),
     DashboardItem("Absensi", Icons.Default.History, Screen.Attendance, Color(0xFF388E3C)),
     DashboardItem("Izin", Icons.Default.Description, Screen.Permits, Color(0xFFF57C00)),
+    DashboardItem("Persetujuan", Icons.Default.Approval, Screen.PendingApproval, Color(0xFFE91E63)),
     DashboardItem("Aturan", Icons.Default.Rule, Screen.Rules, Color(0xFF7B1FA2)),
     DashboardItem("Device", Icons.Default.Devices, Screen.Devices, Color(0xFF00796B)),
     DashboardItem("Pelanggaran", Icons.Default.Gavel, Screen.Violations, Color(0xFFC62828)),
+    DashboardItem("Status", Icons.Default.Logout, Screen.ToggleStatus, Color(0xFFFF5722)),
+    DashboardItem("Hari Libur", Icons.Default.CalendarMonth, Screen.Holidays, Color(0xFF4CAF50)),
     DashboardItem("Notifikasi", Icons.Default.Notifications, Screen.Notifications, Color(0xFF1565C0)),
+    DashboardItem("Sinkronisasi", Icons.Default.CloudSync, Screen.Sync, Color(0xFF0097A7)),
     DashboardItem("Laporan", Icons.Default.BarChart, Screen.Reports, Color(0xFF4E342E)),
     DashboardItem("Pengaturan", Icons.Default.Settings, Screen.Settings, Color(0xFF546E7A))
 )
