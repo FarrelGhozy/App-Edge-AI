@@ -15,7 +15,7 @@ data class DeviceItem(
     val name: String,
     val isActive: Boolean,
     val lastPingAt: String? = null,
-    val batteryLevel: Float? = null
+    val batteryLevel: Double? = null
 )
 
 data class DeviceListState(
@@ -34,13 +34,25 @@ class DeviceListViewModel @Inject constructor(
     fun loadDevices() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
-            _uiState.value = _uiState.value.copy(
-                devices = listOf(
-                    DeviceItem("DEV-001", "Kiosk Lobby", true, "2026-06-19 23:00", 0.85f),
-                    DeviceItem("DEV-002", "Kiosk Lab", false, "2026-06-18 10:00", 0.12f)
-                ),
-                isLoading = false
-            )
+            try {
+                val response = apiService.getDevices()
+                if (response.isSuccessful && response.body() != null) {
+                    val items = response.body()!!.map { dto ->
+                        DeviceItem(
+                            deviceId = dto.deviceId,
+                            name = dto.name,
+                            isActive = dto.isActive,
+                            lastPingAt = dto.lastPingAt,
+                            batteryLevel = dto.batteryLevel
+                        )
+                    }
+                    _uiState.value = _uiState.value.copy(devices = items, isLoading = false)
+                } else {
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+                }
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            }
         }
     }
 }
