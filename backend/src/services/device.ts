@@ -17,11 +17,3 @@ export async function pingDevice(deviceId: string, batteryLevel?: number) {
 export async function listDevices() {
   return prisma.device.findMany({ orderBy: { createdAt: "desc" } });
 }
-
-export async function getDevice(deviceId: string) {
-  return prisma.device.findUnique({ where: { deviceId } });
-}
-
-export async function updateDevice(deviceId: string, data: { name?: string; location?: string; isActive?: boolean }) {
-  return prisma.device.update({ where: { deviceId }, data });
-}

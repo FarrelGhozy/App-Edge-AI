@@ -20,10 +20,9 @@ model Student {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  faceVectors    FaceVector[]
+  faceVectors   FaceVector[]
   attendanceLogs AttendanceLog[]
-  permits        Permit[]
-  courseSchedules CourseSchedule[]
+  permits       Permit[]
 
   @@map("students")
 }
@@ -145,26 +144,9 @@ model CourseSchedule {
   startTime   String   @map("start_time")
   endTime     String   @map("end_time")
   room        String?
-  studentId   String?  @map("student_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  student     Student? @relation(fields: [studentId], references: [id])
-
-  @@index([studentId])
   @@map("course_schedules")
-}
-
-model Holiday {
-  id          String   @id @default(uuid())
-  name        String
-  date        DateTime
-  type        String   @default("national")
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  @@unique([date])
-  @@index([date])
-  @@map("holidays")
 }
 
 model Violation {

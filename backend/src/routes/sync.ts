@@ -68,12 +68,6 @@ export const syncRoutes = new Elysia()
     const rules = await prisma.campusRule.findMany();
     return rules;
   })
-  .get("/api/sync/settings", async () => {
-    const settings = await prisma.globalSetting.findMany();
-    const map: Record<string, string> = {};
-    for (const s of settings) map[s.key] = s.value;
-    return map;
-  })
   .get("/api/sync/requested", async ({ query }) => {
     const deviceId = query.deviceId as string | undefined;
     const where: Record<string, unknown> = { isProcessed: false };
@@ -90,33 +84,6 @@ export const syncRoutes = new Elysia()
       deviceId: request?.deviceId || null
     };
   })
-  .get("/api/sync/status/:deviceId", async ({ params: { deviceId } }) => {
-    const [device, lastSync, pendingRequests] = await Promise.all([
-      prisma.device.findUnique({ where: { deviceId } }),
-      prisma.syncLog.findFirst({ where: { deviceId }, orderBy: { createdAt: "desc" } }),
-      prisma.syncRequest.count({ where: { deviceId, isProcessed: false } }),
-    ]);
-
-    if (!device) {
-      return new Response(JSON.stringify({ success: false, error: "Device not found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    return {
-      success: true,
-      data: {
-        deviceId: device.deviceId,
-        isActive: device.isActive,
-        lastPingAt: device.lastPingAt?.toISOString() || null,
-        batteryLevel: device.batteryLevel,
-        lastSyncAt: lastSync?.createdAt?.toISOString() || null,
-        lastSyncStatus: lastSync?.status || null,
-        pendingRequests,
-      }
-    };
-  })
   .get("/api/sync/logs", async ({ query }) => {
     const where = query.deviceId ? { deviceId: query.deviceId as string } : {};
     return await prisma.syncLog.findMany({
@@ -125,7 +92,7 @@ export const syncRoutes = new Elysia()
       take: 50
     });
   })
-  .post("/api/sync/complete", async ({ body }: any) => {
+  .post("/api/sync/complete", async ({ body }) => {
     await prisma.syncLog.create({
       data: {
         deviceId: body.deviceId,

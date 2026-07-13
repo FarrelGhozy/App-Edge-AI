@@ -21,6 +21,7 @@ export const updateStudentSchema = t.Object({
 });
 
 export const uploadFaceSchema = t.Object({
+  studentId: t.String(),
   vector: t.Array(t.Number())
 });
 

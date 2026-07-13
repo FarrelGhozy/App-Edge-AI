@@ -15,27 +15,6 @@ export const permitRoutes = new Elysia()
     };
     return await listPermits(params);
   })
-  .get("/api/permits/pending", async ({ query }) => {
-    const params = {
-      page: query.page ? parseInt(query.page as string) : 1,
-      pageSize: query.pageSize ? parseInt(query.pageSize as string) : 20,
-      status: "pending",
-    };
-    return await listPermits(params);
-  })
-  .get("/api/permits/active/:studentId", async ({ params: { studentId } }) => {
-    const now = new Date();
-    const permits = await prisma.permit.findMany({
-      where: {
-        studentId,
-        status: "approved",
-        startDate: { lte: now },
-        endDate: { gte: now },
-      },
-      orderBy: { endDate: "asc" }
-    });
-    return { success: true, data: permits };
-  })
   .get("/api/permits/:id", async ({ params: { id } }) => {
     const permit = await prisma.permit.findUnique({ where: { id } });
     if (!permit) {
@@ -45,28 +24,6 @@ export const permitRoutes = new Elysia()
       });
     }
     return { success: true, data: permit };
-  })
-  .put("/api/permits/:id/approve", async ({ params: { id }, body }) => {
-    const { adminId } = body as { adminId: string };
-    const permit = await approvePermit(id, adminId);
-    return { success: true, data: permit };
-  })
-  .put("/api/permits/:id/reject", async ({ params: { id }, body }) => {
-    const { adminId } = body as { adminId: string };
-    const permit = await rejectPermit(id, adminId);
-    return { success: true, data: permit };
-  })
-  .put("/api/permits/:id/status", async ({ params: { id }, body }) => {
-    const { status, adminId } = body as { status: string; adminId: string };
-
-    if (status === "approved") {
-      const permit = await approvePermit(id, adminId);
-      return { success: true, data: permit };
-    } else if (status === "rejected") {
-      const permit = await rejectPermit(id, adminId);
-      return { success: true, data: permit };
-    }
-    return { success: false, error: "Invalid status" };
   })
   .post("/api/permits", async ({ body }) => {
     const data = body as {
@@ -141,6 +98,18 @@ export const permitRoutes = new Elysia()
     });
 
     return { success: true, data: permit };
+  })
+  .put("/api/permits/:id/status", async ({ params: { id }, body }) => {
+    const { status, adminId } = body as { status: string; adminId: string };
+
+    if (status === "approved") {
+      const permit = await approvePermit(id, adminId);
+      return { success: true, data: permit };
+    } else if (status === "rejected") {
+      const permit = await rejectPermit(id, adminId);
+      return { success: true, data: permit };
+    }
+    return { success: false, error: "Invalid status" };
   })
   .get("/api/permits/quota", async ({ query }) => {
     const studentId = query.studentId as string;
