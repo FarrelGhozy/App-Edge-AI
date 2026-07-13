@@ -35,6 +35,7 @@ class PermitFormViewModel @Inject constructor(
 
     fun loadStudents() {
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(error = null)
             try {
                 val response = apiService.getStudents(page = 1, pageSize = 200)
                 if (response.isSuccessful && response.body() != null) {
@@ -42,8 +43,12 @@ class PermitFormViewModel @Inject constructor(
                         StudentBrief(id = dto.id, nim = dto.nim, name = dto.name)
                     }
                     _uiState.value = _uiState.value.copy(students = briefs)
+                } else {
+                    _uiState.value = _uiState.value.copy(error = "Gagal memuat data mahasiswa")
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = "Gagal terhubung ke server")
+            }
         }
     }
 
