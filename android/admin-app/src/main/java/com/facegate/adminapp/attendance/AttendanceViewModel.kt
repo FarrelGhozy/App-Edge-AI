@@ -29,7 +29,15 @@ class AttendanceViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val response = apiService.getAttendanceLogs()
+                val filterDate = _uiState.value.filterDate
+                val response = if (filterDate.isNotBlank()) {
+                    apiService.getAttendanceLogs(
+                        startDate = filterDate,
+                        endDate = filterDate
+                    )
+                } else {
+                    apiService.getAttendanceLogs()
+                }
                 if (response.isSuccessful && response.body() != null) {
                     _uiState.value = _uiState.value.copy(
                         logs = response.body()!!.data, isLoading = false
@@ -45,5 +53,6 @@ class AttendanceViewModel @Inject constructor(
 
     fun setFilterDate(date: String) {
         _uiState.value = _uiState.value.copy(filterDate = date)
+        loadLogs()
     }
 }
