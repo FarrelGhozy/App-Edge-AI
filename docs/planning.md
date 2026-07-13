@@ -336,51 +336,45 @@ Admin App membutuhkan data realtime dari server untuk monitoring. Server menggun
 - Admin App menggunakan `EventSource` / OkHttp SSE untuk listen event
 - Dashboard otomatis terupdate tanpa polling
 
-### 4.4 Kiosk Auto-Fetch (Database Change Trigger)
+### 4.4 Kiosk Auto-Fetch (Efisien: Cek Flag Dulu, Baru Download)
 
-Saat ada perubahan di database (admin tambah/edit mahasiswa, approve izin, ubah rules, upload face vector), kiosk harus segera mengambil data terbaru — tidak menunggu polling 10 menit.
+Kiosk polling ringan setiap 10 detik — **hanya cek boolean**, tidak download data. Download data berat (faces, rules) HANYA dilakukan saat server memberi sinyal ada perubahan.
 
 ```
-┌────────────┐   POST /api/students/:id   ┌────────────┐
-│ Admin App  │───────────────────────────►│   Server   │
-└────────────┘                            └─────┬──────┘
-                                                │
-                                    Trigger DB change
-                                                │
-                              ┌─────────────────▼──────────────────┐
-                              │  DB Change Hook                    │
-                              │  - Student created/updated         │
-                              │  - Face vector uploaded            │
-                              │  - Permit approved/rejected        │
-                              │  - CampusRule changed              │
-                              │  - Holiday added                   │
-                              └─────────────────┬──────────────────┘
-                                                │
-                                    Set syncRequested=true
-                                    untuk SEMUA kiosk aktif
-                                                │
-                              ┌─────────────────▼──────────────────┐
-                              │  Kiosk polling GET /api/sync/req   │
-                              │  (setiap 10 detik saat idle,       │
-                              │   bukan 10 menit seperti sebelum)  │
-                              └─────────────────┬──────────────────┘
-                                                │
-                                    Jika requested=true →
-                                    langsung sync penuh
-                                    (download faces/rules/settings)
+SETIAP 10 DETIK (polling ringan):
+┌──────────┐  GET /api/sync/requested   ┌──────────┐
+│  Kiosk   │───────────────────────────►│  Server  │
+│          │◄──── { requested: false }──│          │  ← 99% waktu: tidak ada perubahan
+└──────────┘                            └──────────┘
+     │                                       ▲
+     │  Tidak download apa pun              │
+     └──────────────────────────────────────┘
+
+SAAT ADA PERUBAHAN DB:
+┌──────────┐  GET /api/sync/requested   ┌──────────┐
+│  Kiosk   │───────────────────────────►│  Server  │
+│          │◄──── { requested: true }───│          │  ← Flag dari DB Change Hook
+└────┬─────┘                            └──────────┘
+     │
+     │  GET /api/sync/faces   (download faces + students)
+     │  GET /api/sync/rules   (download rules)
+     │  POST /api/sync/complete (konfirmasi)
+     │
+     └── Rebuild FaceIndex di RAM
 ```
 
-**Perubahan dari desain sebelumnya**:
-| Aspek | Sebelumnya | Sekarang |
+**Perbandingan traffic**:
+| | Sebelumnya | Sekarang |
 |---|---|---|
-| Poll interval kiosk | 10 menit | **10 detik** (ringan, cuma return boolean) |
-| Trigger sync | Admin klik tombol manual | Admin klik tombol **ATAU** otomatis saat DB berubah |
-| Admin data | Polling REST API manual | **SSE realtime push** |
-| DB change → kiosk | Tidak ada mekanisme | **Auto set syncRequested=true** untuk semua device aktif |
+| Polling tiap | 10 menit | **10 detik** |
+| Data per poll | — | **~100 bytes** (boolean doang) |
+| Download faces | Tiap poll (boros) | **Hanya saat ada perubahan** |
+| Download rules | Tiap poll (boros) | **Hanya saat ada perubahan** |
+| Estimasi data/bulan | ~500 MB | **~5 MB** (99% poll ringan) |
 
 **DB Change Hook** — diimplementasikan di backend service layer:
-- Setiap kali `createStudent`, `updateStudent`, `deleteStudent`, `uploadFace`, `approvePermit`, `rejectPermit`, `createRule`, `updateRule`, `deleteRule`, `createHoliday`, `deleteHoliday` dipanggil → otomatis set `syncRequested = true` untuk semua device aktif.
-- Ini memastikan kiosk selalu punya data terbaru dalam waktu < 10 detik setelah perubahan.
+- Setiap `createStudent`, `updateStudent`, `deleteStudent`, `uploadFace`, `approvePermit`, `rejectPermit`, `createRule`, `updateRule`, `deleteRule`, `createHoliday`, `deleteHoliday` → otomatis set `syncRequested = true` untuk **semua device aktif**.
+- Kiosk mendeteksi perubahan dalam waktu < 10 detik.
 
 ---
 

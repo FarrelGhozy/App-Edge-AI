@@ -2,12 +2,15 @@ package com.facegate.kioskscanner.service
 
 import android.util.Log
 import com.facegate.core.data.local.DevicePreferences
+import com.facegate.core.data.local.SessionManager
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
 import com.facegate.core.data.remote.ApiService
+import com.facegate.core.data.remote.dto.LoginRequest
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.FaceMatcher
+import com.facegate.kioskscanner.BuildConfig
 import com.facegate.kioskscanner.scanner.VoiceFeedback
 import com.facegate.kioskscanner.sync.DevicePingWorker
 import com.facegate.kioskscanner.sync.SyncWorker
@@ -21,6 +24,7 @@ import javax.inject.Singleton
 @Singleton
 class KioskInitializer @Inject constructor(
     private val devicePreferences: DevicePreferences,
+    private val sessionManager: SessionManager,
     private val apiService: ApiService,
     private val faceVectorDao: FaceVectorDao,
     private val campusRuleDao: CampusRuleDao,
@@ -41,6 +45,7 @@ class KioskInitializer @Inject constructor(
                 initFaceDetector()
                 initFaceEmbedder()
                 initVoiceFeedback()
+                loginDevice()
                 registerDevice()
                 loadCachedFaces()
                 loadCachedRules()
@@ -65,6 +70,33 @@ class KioskInitializer @Inject constructor(
     private fun initVoiceFeedback() {
         voiceFeedback.init()
         Log.d(TAG, "VoiceFeedback initialized")
+    }
+
+    /** Auto-login using device credentials to get JWT token for API access */
+    private suspend fun loginDevice() {
+        try {
+            val response = apiService.login(
+                LoginRequest(
+                    username = BuildConfig.DEVICE_USERNAME,
+                    password = BuildConfig.DEVICE_PASSWORD
+                )
+            )
+            if (response.isSuccessful && response.body() != null) {
+                val loginData = response.body()!!.`data`
+                sessionManager.saveSession(
+                    token = loginData.token,
+                    adminId = loginData.admin.id,
+                    username = loginData.admin.username,
+                    displayName = loginData.admin.displayName,
+                    role = loginData.admin.role
+                )
+                Log.d(TAG, "Device logged in: ${loginData.admin.username} (${loginData.admin.role})")
+            } else {
+                Log.w(TAG, "Device login failed: ${response.code()} — ${response.errorBody()?.string()}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Device login skipped (offline): ${e.message}")
+        }
     }
 
     private suspend fun registerDevice() {
@@ -99,9 +131,9 @@ class KioskInitializer @Inject constructor(
         val vectors = faceVectorDao.getAll()
         if (vectors.isNotEmpty()) {
             faceMatcher.buildIndex(vectors.associate { it.studentId to it.vector })
-            Log.d(TAG, "Loaded ${vectors.size} faces into matcher")
+            Log.d(TAG, "Loaded ${vectors.size} cached faces into matcher")
         } else {
-            Log.d(TAG, "No cached faces to load")
+            Log.d(TAG, "No cached faces — will download on first sync")
         }
     }
 

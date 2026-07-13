@@ -9,10 +9,12 @@ import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.entity.AttendanceLogEntity
 import com.facegate.core.engine.ToggleAction
+import com.facegate.core.face.FaceDetectionResult
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.FaceMatcher
 import com.facegate.core.face.LivenessDetector
+import com.facegate.core.sync.SyncManager
 import com.facegate.kioskscanner.matching.MatchEngine
 import com.facegate.kioskscanner.matching.MatchEngineResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -29,7 +31,8 @@ class ScannerViewModel @Inject constructor(
     private val matchEngine: MatchEngine,
     private val attendanceLogDao: AttendanceLogDao,
     private val devicePreferences: DevicePreferences,
-    private val voiceFeedback: VoiceFeedback
+    private val voiceFeedback: VoiceFeedback,
+    private val syncManager: SyncManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<UIState>(UIState.Idle)
@@ -37,6 +40,14 @@ class ScannerViewModel @Inject constructor(
 
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+
+    // Debug: expose last detection for overlay
+    private val _debugDetection = MutableStateFlow<FaceDetectionResult?>(null)
+    val debugDetection: StateFlow<FaceDetectionResult?> = _debugDetection.asStateFlow()
+
+    // Sync status
+    private val _syncStatus = MutableStateFlow<String?>(null)
+    val syncStatus: StateFlow<String?> = _syncStatus.asStateFlow()
 
     sealed class UIState {
         data object Idle : UIState()
@@ -67,6 +78,10 @@ class ScannerViewModel @Inject constructor(
         }
 
         val detection = matchEngine.detectFromImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+
+        // Expose detection for debug overlay
+        _debugDetection.value = detection
+
         if (detection == null) {
             Log.d("ScannerVM", "no face detected")
             _isProcessing.value = false
@@ -154,6 +169,27 @@ class ScannerViewModel @Inject constructor(
                 _isProcessing.value = false
                 bitmap.recycle()
             }
+        }
+    }
+
+    /** Manual pull data from server */
+    fun syncNow() {
+        viewModelScope.launch {
+            _syncStatus.value = "Menarik data..."
+            try {
+                val deviceId = devicePreferences.getDeviceId() ?: "unknown"
+                val result = syncManager.syncAll(deviceId)
+                if (result.success) {
+                    _syncStatus.value = "OK: ${result.facesDownloaded} wajah, ${result.rulesDownloaded} aturan"
+                } else {
+                    _syncStatus.value = "Gagal: ${result.error ?: "unknown"}"
+                }
+            } catch (e: Exception) {
+                _syncStatus.value = "Gagal: ${e.message}"
+            }
+            // Auto-hide status after 3 seconds
+            kotlinx.coroutines.delay(3000)
+            _syncStatus.value = null
         }
     }
 

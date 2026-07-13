@@ -9,7 +9,15 @@ data class FaceVectorDto(
     val studentId: String,
     val vector: List<Float>,
     @SerialName("updatedAt")
-    val updatedAt: String? = null
+    val updatedAt: String? = null,
+    // Student data joined from server (for local caching)
+    @SerialName("studentName")
+    val studentName: String? = null,
+    val nim: String? = null,
+    @SerialName("studyProgram")
+    val studyProgram: String? = null,
+    @SerialName("academicYear")
+    val academicYear: String? = null
 )
 
 @Serializable

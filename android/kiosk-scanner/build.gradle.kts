@@ -19,16 +19,22 @@ android {
         versionName = "1.0"
 
         buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
+        buildConfigField("String", "DEVICE_USERNAME", "\"kiosk-gate1\"")
+        buildConfigField("String", "DEVICE_PASSWORD", "\"facegate-kiosk-2024\"")
     }
 
     buildTypes {
         debug {
             buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
+            buildConfigField("String", "DEVICE_USERNAME", "\"kiosk-gate1\"")
+            buildConfigField("String", "DEVICE_PASSWORD", "\"facegate-kiosk-2024\"")
         }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
+            buildConfigField("String", "DEVICE_USERNAME", "\"kiosk-gate1\"")
+            buildConfigField("String", "DEVICE_PASSWORD", "\"facegate-kiosk-2024\"")
         }
     }
 

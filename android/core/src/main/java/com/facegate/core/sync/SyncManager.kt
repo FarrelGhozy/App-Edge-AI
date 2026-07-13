@@ -9,6 +9,7 @@ import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.AttendanceBatchRequest
 import com.facegate.core.data.remote.dto.ScanRequest
 import com.facegate.core.data.remote.dto.SyncCompleteRequest
+import com.facegate.core.data.local.entity.StudentEntity
 import com.facegate.core.data.remote.dto.toEntity
 import com.facegate.core.face.FaceMatcher
 import kotlinx.coroutines.Dispatchers
@@ -95,10 +96,28 @@ class SyncManager @Inject constructor(
         if (response.isSuccessful && response.body() != null) {
             val faceSync = response.body()!!
             if (faceSync.data.isNotEmpty()) {
+                // Save face vectors
                 val vectors = faceSync.data.map { it.toEntity() }
                 faceVectorDao.deleteAll()
                 faceVectorDao.insertAll(vectors)
 
+                // Save student data from joined query
+                val students = faceSync.data.mapNotNull { dto ->
+                    if (dto.studentName != null && dto.nim != null) {
+                        StudentEntity(
+                            id = dto.studentId,
+                            nim = dto.nim,
+                            name = dto.studentName,
+                            studyProgram = dto.studyProgram ?: "",
+                            academicYear = dto.academicYear ?: ""
+                        )
+                    } else null
+                }
+                if (students.isNotEmpty()) {
+                    studentDao.insertAll(students)
+                }
+
+                // Rebuild face index in RAM
                 val faceMap = mutableMapOf<String, FloatArray>()
                 for (v in vectors) {
                     faceMap[v.studentId] = v.vector

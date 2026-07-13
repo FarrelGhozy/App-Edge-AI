@@ -75,18 +75,19 @@ Admin App receives realtime push from server via SSE:
 - Events: `dashboard_update`, `violation_new`, `scan_realtime`, `outside_update`, `sync_status`
 - No polling needed — dashboard auto-updates
 
-### Kiosk Auto-Fetch (DB Change Trigger)
-When database changes (student CRUD, face upload, permit approved, rules changed), server automatically sets `syncRequested=true` for all active devices:
-- Kiosk polls `GET /api/sync/requested` every **10 seconds** (was 10 minutes)
-- Polling is lightweight — only returns boolean + timestamp
-- When DB changes → kiosk fetches within 10 seconds
+### Kiosk Auto-Fetch (Efisien — cek flag dulu, baru download)
+Setiap 10 detik kiosk cek `GET /api/sync/requested` (ringan: boolean saja, ~100 bytes):
+- **Tidak ada perubahan** → tidak download apa pun (hemat bandwidth)
+- **Ada perubahan** (`requested=true`) → download faces + students + rules, lalu rebuild face index
+- Server auto-set `syncRequested=true` untuk semua device aktif saat ada DB mutation
 
 ### Sync Mechanism
-- **Midnight auto**: WorkManager periodic at 00:00 WIB — upload logs, download faces+rules
-- **Manual trigger**: Admin clicks "Sync" button → `POST /api/sync/request/:deviceId` → kiosk polls → sync
-- **Auto trigger**: Backend sets `syncRequested=true` for all active devices on any DB mutation
-- **Poll interval**: 10 seconds (configurable via GlobalSetting `sync_poll_interval_seconds`)
-- **Offline**: Logs queue locally (`isSynced=false`). When internet returns, WorkManager auto-runs.
+- **Polling ringan**: Setiap 10 detik — cuma cek boolean `GET /api/sync/requested`
+- **Download berat**: HANYA saat `requested=true` atau midnight — `GET /api/sync/faces` + `GET /api/sync/rules`
+- **Midnight auto**: 00:00 WIB — full sync (selalu download faces+rules, tidak cek flag)
+- **Manual trigger**: Admin klik "Sync" → `POST /api/sync/request/:deviceId` → flag jadi true → kiosk download
+- **Auto trigger**: Backend service layer auto-set flag setiap create/update/delete student, upload face, approve permit, dll.
+- **Offline**: Logs queue locally (`isSynced=false`). Saat internet kembali, WorkManager auto-upload.
 
 ## Permit System
 Two types:
