@@ -1,7 +1,9 @@
 import { Elysia } from "elysia";
 import { dailyReport, monthlyReport, violationReport, outsideNow } from "../services/report";
+import { authGuard } from "../guards/auth";
 
 export const reportRoutes = new Elysia()
+  .use(authGuard)
   .get("/api/reports/daily", async ({ query }) => {
     const date = (query.date as string) || new Date().toISOString().split("T")[0];
     return await dailyReport(date);
