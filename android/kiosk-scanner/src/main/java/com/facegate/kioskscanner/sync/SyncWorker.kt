@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.*
+import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
@@ -12,6 +13,7 @@ import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.AttendanceBatchRequest
 import com.facegate.core.data.remote.dto.ScanRequest
+import com.facegate.core.data.remote.dto.SyncCompleteRequest
 import com.facegate.core.face.FaceMatcher
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -27,7 +29,8 @@ class SyncWorker @AssistedInject constructor(
     private val studentDao: StudentDao,
     private val campusRuleDao: CampusRuleDao,
     private val faceMatcher: FaceMatcher,
-    private val syncMetadata: SyncMetadata
+    private val syncMetadata: SyncMetadata,
+    private val devicePreferences: DevicePreferences
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -83,12 +86,45 @@ class SyncWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         return try {
             syncUnsyncedLogs()
-            syncFaces()
-            syncRules()
+
+            val isRequested = checkSyncRequested()
+            if (isRequested) {
+                syncFaces()
+                syncRules()
+                notifySyncComplete()
+            }
+
             Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Sync failed", e)
             Result.retry()
+        }
+    }
+
+    /** Check if admin requested a manual sync. */
+    private suspend fun checkSyncRequested(): Boolean {
+        return try {
+            val response = apiService.checkSyncRequested()
+            response.isSuccessful && response.body()?.requested == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Notify backend that sync is complete. */
+    private suspend fun notifySyncComplete() {
+        try {
+            val deviceId = devicePreferences.getDeviceId() ?: "unknown"
+            apiService.completeSync(
+                SyncCompleteRequest(
+                    deviceId = deviceId,
+                    status = "success",
+                    logsCount = 0,
+                    facesCount = 0
+                )
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to notify sync complete", e)
         }
     }
 
