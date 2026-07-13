@@ -162,4 +162,8 @@ interface ApiService {
 
     @GET("api/reports/outside-now")
     suspend fun getOutsideNow(): Response<OutsideNowResponse>
+
+    // =========== DASHBOARD ===========
+    @GET("api/dashboard/summary")
+    suspend fun getDashboardSummary(): Response<DashboardSummaryResponse>
 }

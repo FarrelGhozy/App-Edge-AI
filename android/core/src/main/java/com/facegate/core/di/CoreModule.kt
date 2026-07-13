@@ -63,11 +63,6 @@ object CoreModule {
 
     @Provides
     @Singleton
-    @ApiBaseUrl
-    fun provideDefaultApiBaseUrl(): String = "http://127.0.0.1:8150/"
-
-    @Provides
-    @Singleton
     fun provideApiService(
         authInterceptor: AuthInterceptor,
         @ApiBaseUrl baseUrl: String
