@@ -30,6 +30,11 @@ import com.facegate.adminapp.reports.ReportScreen
 import com.facegate.adminapp.monitor.OutsideNowScreen
 import com.facegate.adminapp.register.FaceRegisterScreen
 import com.facegate.adminapp.students.ImportCsvScreen
+import com.facegate.adminapp.holiday.HolidayListScreen
+import com.facegate.adminapp.holiday.HolidayFormScreen
+import com.facegate.adminapp.sync.SyncScreen
+import com.facegate.adminapp.permits.PendingApprovalScreen
+import com.facegate.adminapp.monitor.ToggleStatusScreen
 
 @Composable
 fun AppNavigator(
@@ -146,6 +151,27 @@ fun AppNavigator(
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)
+        }
+        composable(Screen.Holidays.route) {
+            HolidayListScreen(navController = navController)
+        }
+        composable(
+            Screen.HolidayForm.route,
+            arguments = listOf(navArgument("holidayId") {
+                type = NavType.StringType; nullable = true; defaultValue = null
+            })
+        ) { backStackEntry ->
+            val holidayId = backStackEntry.arguments?.getString("holidayId")
+            HolidayFormScreen(holidayId = holidayId, navController = navController)
+        }
+        composable(Screen.Sync.route) {
+            SyncScreen(navController = navController)
+        }
+        composable(Screen.PendingApproval.route) {
+            PendingApprovalScreen(navController = navController)
+        }
+        composable(Screen.ToggleStatus.route) {
+            ToggleStatusScreen(navController = navController)
         }
     }
 }
