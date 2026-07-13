@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { scanSchema, batchSyncSchema, recordScan, listAttendance } from "../services/attendance";
+import { scanSchema, batchSyncSchema, recordScan, listAttendance, getTodayAttendance, getAttendanceStatus, getAttendanceStatistics } from "../services/attendance";
 import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 
@@ -37,4 +37,13 @@ export const attendanceRoutes = new Elysia()
       endDate: query.endDate as string | undefined
     };
     return await listAttendance(params);
+  })
+  .get("/api/attendance/today", async () => {
+    return await getTodayAttendance();
+  })
+  .get("/api/attendance/status/:studentId", async ({ params: { studentId } }) => {
+    return await getAttendanceStatus(studentId);
+  })
+  .get("/api/attendance/statistics", async () => {
+    return await getAttendanceStatistics();
   });

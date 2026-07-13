@@ -20,4 +20,13 @@ export const settingRoutes = new Elysia()
       });
     }
     return { success: true };
+  })
+  .put("/api/settings/:key", async ({ params: { key }, body }) => {
+    const { value } = body as { value: string };
+    await prisma.globalSetting.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value }
+    });
+    return { success: true };
   });
