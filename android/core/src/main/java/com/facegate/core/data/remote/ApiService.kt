@@ -77,6 +77,89 @@ interface ApiService {
     @POST("api/devices/register")
     suspend fun registerDevice(@Body request: Map<String, String>): Response<Map<String, String>>
 
+    // =========== PERMITS ===========
+    @GET("api/permits")
+    suspend fun getPermits(
+        @Query("page") page: Int = 1,
+        @Query("pageSize") pageSize: Int = 20,
+        @Query("status") status: String? = null,
+        @Query("type") type: String? = null,
+        @Query("studentId") studentId: String? = null
+    ): Response<PermitListResponse>
+
+    @GET("api/permits/{id}")
+    suspend fun getPermit(@Path("id") id: String): Response<ApiResponse<PermitDto>>
+
+    @POST("api/permits")
+    suspend fun createPermit(@Body request: CreatePermitRequest): Response<ApiResponse<PermitDto>>
+
+    @PUT("api/permits/{id}/status")
+    suspend fun updatePermitStatus(
+        @Path("id") id: String,
+        @Body request: UpdatePermitStatusRequest
+    ): Response<ApiResponse<PermitDto>>
+
+    @GET("api/permits/quota")
+    suspend fun getPermitQuota(
+        @Query("studentId") studentId: String
+    ): Response<ApiResponse<PermitQuotaResponse>>
+
+    // =========== VIOLATIONS ===========
+    @GET("api/violations")
+    suspend fun getViolations(
+        @Query("page") page: Int = 1,
+        @Query("pageSize") pageSize: Int = 20,
+        @Query("type") type: String? = null,
+        @Query("studentId") studentId: String? = null
+    ): Response<ViolationListResponse>
+
+    @PUT("api/violations/{id}/resolve")
+    suspend fun resolveViolation(
+        @Path("id") id: String,
+        @Body request: ResolveViolationRequest
+    ): Response<ApiResponse<ViolationDto>>
+
+    // =========== NOTIFICATIONS ===========
+    @GET("api/notifications")
+    suspend fun getNotifications(
+        @Query("page") page: Int = 1,
+        @Query("pageSize") pageSize: Int = 20
+    ): Response<NotificationListResponse>
+
+    @PUT("api/notifications/{id}/read")
+    suspend fun markNotificationRead(@Path("id") id: String): Response<ApiResponse<Unit>>
+
+    @PUT("api/notifications/read-all")
+    suspend fun markAllNotificationsRead(): Response<ApiResponse<Unit>>
+
+    // =========== DEVICES ===========
+    @GET("api/devices")
+    suspend fun getDevices(): Response<List<DeviceDto>>
+
     @PUT("api/devices/{deviceId}/ping")
-    suspend fun pingDevice(@Path("deviceId") deviceId: String): Response<Unit>
+    suspend fun pingDeviceWithBattery(
+        @Path("deviceId") deviceId: String,
+        @Body request: DevicePingRequest
+    ): Response<ApiResponse<Unit>>
+
+    // =========== REPORTS ===========
+    @GET("api/reports/daily")
+    suspend fun getDailyReport(
+        @Query("date") date: String? = null
+    ): Response<DailyReportResponse>
+
+    @GET("api/reports/monthly")
+    suspend fun getMonthlyReport(
+        @Query("month") month: Int? = null,
+        @Query("year") year: Int? = null
+    ): Response<MonthlyReportResponse>
+
+    @GET("api/reports/violations")
+    suspend fun getViolationReport(
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null
+    ): Response<ViolationReportResponse>
+
+    @GET("api/reports/outside-now")
+    suspend fun getOutsideNow(): Response<OutsideNowResponse>
 }
