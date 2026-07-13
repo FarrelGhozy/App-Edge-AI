@@ -20,10 +20,18 @@ data class StudentDto(
     val photoUrl: String? = null,
     @SerialName("faceRegistered")
     val faceRegistered: Boolean = false,
+    @SerialName("faceVectors")
+    val faceVectors: List<FaceVectorInfo>? = null,
     @SerialName("createdAt")
     val createdAt: String? = null,
     @SerialName("updatedAt")
     val updatedAt: String? = null
+)
+
+@Serializable
+data class FaceVectorInfo(
+    @SerialName("studentId") val studentId: String,
+    @SerialName("updatedAt") val updatedAt: String? = null
 )
 
 @Serializable
