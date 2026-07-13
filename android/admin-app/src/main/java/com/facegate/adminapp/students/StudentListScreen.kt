@@ -95,7 +95,18 @@ fun StudentItem(student: StudentDto, onClick: () -> Unit) {
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(student.name, style = MaterialTheme.typography.titleSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(student.name, style = MaterialTheme.typography.titleSmall)
+                    if (student.faceRegistered) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.Face,
+                            contentDescription = "Wajah terdaftar",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
                 Text("NIM: ${student.nim}", style = MaterialTheme.typography.bodySmall)
                 Text("${student.studyProgram} - ${student.academicYear}", style = MaterialTheme.typography.bodySmall)
             }
