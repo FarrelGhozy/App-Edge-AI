@@ -1,11 +1,9 @@
 package com.facegate.kioskscanner.scanner
 
 import android.graphics.Bitmap
-import android.graphics.ImageFormat
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -29,6 +27,7 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.facegate.kioskscanner.scanner.ScannerViewModel.UIState
 import kotlinx.coroutines.delay
+import java.util.concurrent.Executors
 
 @Composable
 fun ScannerScreen(
@@ -81,8 +80,15 @@ fun CameraPreviewWithAnalysis(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isEnabled = remember { mutableStateOf(true) }
+    val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
+    val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
+    val frameCount = remember { mutableIntStateOf(0) }
 
     LaunchedEffect(enabled) { isEnabled.value = enabled }
+
+    DisposableEffect(Unit) {
+        onDispose { analyzerExecutor.shutdown() }
+    }
 
     AndroidView(
         factory = { ctx ->
@@ -104,13 +110,20 @@ fun CameraPreviewWithAnalysis(
                             .build()
                             .also { analyzer ->
                                 analyzer.setAnalyzer(
-                                    ContextCompat.getMainExecutor(ctx)
+                                    analyzerExecutor
                                 ) { imageProxy ->
-                                    if (isEnabled.value) {
-                                        val bitmap = imageProxy.toBitmap()
-                                        if (bitmap != null) {
-                                            onFrameCaptured(bitmap)
-                                        }
+                                    if (!isEnabled.value) {
+                                        imageProxy.close()
+                                        return@setAnalyzer
+                                    }
+                                    frameCount.intValue = (frameCount.intValue + 1) % 2
+                                    if (frameCount.intValue != 0) {
+                                        imageProxy.close()
+                                        return@setAnalyzer
+                                    }
+                                    val bitmap = imageProxy.toBitmap()
+                                    if (bitmap != null) {
+                                        onFrameCaptured(bitmap)
                                     }
                                     imageProxy.close()
                                 }
@@ -127,71 +140,12 @@ fun CameraPreviewWithAnalysis(
                         } catch (e: Exception) {
                             // Camera binding failed
                         }
-                    }, ContextCompat.getMainExecutor(ctx))
+                    }, mainExecutor)
                 }
             }
         },
         modifier = modifier
     )
-}
-
-private fun ImageProxy.toBitmap(): Bitmap? {
-    return try {
-        when (format) {
-            ImageFormat.YUV_420_888 -> yuv420ToBitmap()
-            else -> {
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                bitmap.copyPixelsFromBuffer(planes[0].buffer)
-                bitmap
-            }
-        }
-    } catch (e: Exception) {
-        null
-    }
-}
-
-private fun ImageProxy.yuv420ToBitmap(): Bitmap {
-    val yPlane = planes[0]
-    val uPlane = planes[1]
-    val vPlane = planes[2]
-
-    val yRowStride = yPlane.rowStride
-    val uRowStride = uPlane.rowStride
-    val vRowStride = vPlane.rowStride
-
-    val yPixelStride = yPlane.pixelStride
-    val uPixelStride = uPlane.pixelStride
-    val vPixelStride = vPlane.pixelStride
-
-    val yData = ByteArray(yPlane.buffer.remaining()).also { yPlane.buffer.get(it) }
-    val uData = ByteArray(uPlane.buffer.remaining()).also { uPlane.buffer.get(it) }
-    val vData = ByteArray(vPlane.buffer.remaining()).also { vPlane.buffer.get(it) }
-
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val pixels = IntArray(width * height)
-
-    for (row in 0 until height) {
-        val yRowOff = row * yRowStride
-        val uvRow = row / 2
-        val uRowOff = uvRow * uRowStride
-        val vRowOff = uvRow * vRowStride
-
-        for (col in 0 until width) {
-            val y = yData[yRowOff + col * yPixelStride].toInt() and 0xFF
-            val uvCol = col / 2
-            val u = (uData[uRowOff + uvCol * uPixelStride].toInt() and 0xFF) - 128
-            val v = (vData[vRowOff + uvCol * vPixelStride].toInt() and 0xFF) - 128
-
-            val r = (y + 1.402f * v).toInt().coerceIn(0, 255)
-            val g = (y - 0.344f * u - 0.714f * v).toInt().coerceIn(0, 255)
-            val b = (y + 1.772f * u).toInt().coerceIn(0, 255)
-
-            pixels[row * width + col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-    }
-
-    bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-    return bitmap
 }
 
 @Composable

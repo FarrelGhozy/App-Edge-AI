@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 
 data class StudentFormState(
@@ -66,27 +69,44 @@ class StudentFormViewModel @Inject constructor(
     }
 
     fun save() {
+        val s = _uiState.value
+        if (s.nim.isBlank() || s.name.isBlank() || s.studyProgram.isBlank() || s.academicYear.isBlank()) {
+            _uiState.value = s.copy(error = "Harap isi NIM, Nama, Program Studi, dan Angkatan")
+            return
+        }
+
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
                 val request = CreateStudentRequest(
-                    nim = _uiState.value.nim,
-                    name = _uiState.value.name,
-                    studyProgram = _uiState.value.studyProgram,
-                    academicYear = _uiState.value.academicYear,
-                    phone = _uiState.value.phone.ifBlank { null },
-                    email = _uiState.value.email.ifBlank { null }
+                    nim = s.nim,
+                    name = s.name,
+                    studyProgram = s.studyProgram,
+                    academicYear = s.academicYear,
+                    phone = s.phone.ifBlank { null },
+                    email = s.email.ifBlank { null }
                 )
                 val response = apiService.createStudent(request)
                 if (response.isSuccessful) {
                     val savedId = response.body()?.id
                     _uiState.value = _uiState.value.copy(isLoading = false, isSaved = true, savedStudentId = savedId)
                 } else {
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal menyimpan")
+                    val msg = parseError(response.errorBody()?.string())
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = msg)
                 }
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal terhubung")
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal terhubung ke server")
             }
+        }
+    }
+
+    private fun parseError(errorBody: String?): String {
+        if (errorBody == null) return "Gagal menyimpan"
+        return try {
+            val obj = Json.decodeFromString<JsonObject>(errorBody)
+            obj["error"]?.jsonPrimitive?.content ?: "Gagal menyimpan"
+        } catch (_: Exception) {
+            "Gagal menyimpan"
         }
     }
 }

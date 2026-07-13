@@ -2,7 +2,7 @@ package com.facegate.core.face
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.util.Log
 import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.ByteBuffer
@@ -14,14 +14,20 @@ class FaceEmbedder(private val context: Context) {
     private var interpreter: Interpreter? = null
     private val inputSize = 112
     private val embeddingDim = 128
+    private var initError: String? = null
 
-    fun init(modelName: String = "mobilefacenet.tflite") {
-        if (interpreter != null) return
-        try {
+    fun init(modelName: String = "mobilefacenet.tflite"): Boolean {
+        if (interpreter != null) return true
+        return try {
             val modelBuffer = loadModelFile(modelName)
             interpreter = Interpreter(modelBuffer)
+            initError = null
+            true
         } catch (e: Exception) {
             interpreter = null
+            initError = "Gagal load model $modelName: ${e.message}"
+            Log.e("FaceEmbedder", initError!!, e)
+            false
         }
     }
 
@@ -35,10 +41,15 @@ class FaceEmbedder(private val context: Context) {
     }
 
     fun embed(bitmap: Bitmap): FloatArray {
-        if (interpreter == null) init()
+        if (interpreter == null) {
+            val ok = init()
+            if (!ok || interpreter == null) {
+                throw IllegalStateException(initError ?: "FaceEmbedder belum diinisialisasi")
+            }
+        }
         val inputBuffer = preprocessBitmap(bitmap)
         val outputBuffer = Array(1) { FloatArray(embeddingDim) }
-        interpreter?.run(inputBuffer, outputBuffer)
+        interpreter!!.run(inputBuffer, outputBuffer)
         return normalize(outputBuffer[0])
     }
 

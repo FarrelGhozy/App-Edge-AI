@@ -56,6 +56,14 @@ fun DashboardScreen(
         viewModel.loadSummary()
     }
 
+    LaunchedEffect(state.isLoggedOut) {
+        if (state.isLoggedOut) {
+            navController.navigate(Screen.Login.route) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -63,7 +71,16 @@ fun DashboardScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                ),
+                actions = {
+                    IconButton(onClick = { viewModel.logout() }) {
+                        Icon(
+                            Icons.Default.Logout,
+                            contentDescription = "Logout",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
             )
         }
     ) { padding ->

@@ -35,8 +35,21 @@ export const studentRoutes = new Elysia()
     return student;
   })
   .post("/api/students", async ({ body }) => {
-    const student = await createStudent(body);
-    return student;
+    try {
+      const student = await createStudent(body);
+      return student;
+    } catch (error: any) {
+      if (error.code === "P2002") {
+        return new Response(
+          JSON.stringify({ success: false, error: "NIM sudah terdaftar" }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: false, error: "Gagal menyimpan mahasiswa" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
   }, { body: createStudentSchema })
   .put("/api/students/:id", async ({ params: { id }, body }) => {
     const student = await updateStudent(id, body as Record<string, unknown>);

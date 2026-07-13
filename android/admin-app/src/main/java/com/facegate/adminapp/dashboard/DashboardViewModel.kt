@@ -2,6 +2,7 @@ package com.facegate.adminapp.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.facegate.core.data.local.SessionManager
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.AttendanceLogDto
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,16 +18,27 @@ data class DashboardState(
     val violationsToday: Int = 0,
     val recentScans: List<AttendanceLogDto> = emptyList(),
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val isLoggingOut: Boolean = false,
+    val isLoggedOut: Boolean = false
 )
 
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
-    private val apiService: ApiService
+    private val apiService: ApiService,
+    private val sessionManager: SessionManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardState())
     val uiState: StateFlow<DashboardState> = _uiState.asStateFlow()
+
+    fun logout() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoggingOut = true)
+            sessionManager.clearSession()
+            _uiState.value = _uiState.value.copy(isLoggingOut = false, isLoggedOut = true)
+        }
+    }
 
     fun loadSummary() {
         viewModelScope.launch {

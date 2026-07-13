@@ -115,6 +115,8 @@ class FaceRegisterViewModel @Inject constructor(
             return
         }
 
+        isProcessing = false
+
         _state.value = FaceRegisterState(
             step = FaceRegisterStep.EMBEDDING,
             message = "Memproses wajah..."
