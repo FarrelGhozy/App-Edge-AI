@@ -74,6 +74,9 @@ interface ApiService {
     @GET("api/settings")
     suspend fun getSettings(): Response<Map<String, String>>
 
+    @PUT("api/settings")
+    suspend fun updateSettings(@Body body: Map<String, String>): Response<Map<String, Any>>
+
     @POST("api/devices/register")
     suspend fun registerDevice(@Body request: Map<String, String>): Response<Map<String, String>>
 
@@ -166,4 +169,27 @@ interface ApiService {
     // =========== DASHBOARD ===========
     @GET("api/dashboard/summary")
     suspend fun getDashboardSummary(): Response<DashboardSummaryResponse>
+
+    // =========== HOLIDAYS ===========
+    @GET("api/holidays")
+    suspend fun getHolidays(@Query("year") year: Int? = null): Response<HolidayListResponse>
+
+    @GET("api/holidays/today")
+    suspend fun checkTodayHoliday(): Response<TodayHolidayResponse>
+
+    @POST("api/holidays")
+    suspend fun createHoliday(@Body request: CreateHolidayRequest): Response<HolidayDto>
+
+    @PUT("api/holidays/{id}")
+    suspend fun updateHoliday(
+        @Path("id") id: String,
+        @Body request: UpdateHolidayRequest
+    ): Response<HolidayDto>
+
+    @DELETE("api/holidays/{id}")
+    suspend fun deleteHoliday(@Path("id") id: String): Response<Unit>
+
+    // =========== SYNC REQUEST ===========
+    @POST("api/sync/request/{deviceId}")
+    suspend fun requestSync(@Path("deviceId") deviceId: String): Response<Map<String, Any>>
 }
