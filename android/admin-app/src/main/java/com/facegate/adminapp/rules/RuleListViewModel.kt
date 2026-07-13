@@ -14,7 +14,8 @@ import javax.inject.Inject
 data class RuleListState(
     val rules: List<CampusRuleDto> = emptyList(),
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val isRefreshing: Boolean = false
 )
 
 @HiltViewModel
@@ -27,17 +28,24 @@ class RuleListViewModel @Inject constructor(
 
     fun loadRules() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            if (!_uiState.value.isRefreshing) {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+            }
             try {
                 val response = apiService.getRules()
                 if (response.isSuccessful && response.body() != null) {
-                    _uiState.value = _uiState.value.copy(rules = response.body()!!, isLoading = false)
+                    _uiState.value = _uiState.value.copy(rules = response.body()!!, isLoading = false, isRefreshing = false)
                 } else {
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal memuat")
+                    _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal memuat")
                 }
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = "Gagal terhubung")
+                _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal terhubung")
             }
         }
+    }
+
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        loadRules()
     }
 }
