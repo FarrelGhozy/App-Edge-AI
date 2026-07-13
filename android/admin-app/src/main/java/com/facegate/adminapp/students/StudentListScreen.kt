@@ -42,7 +42,7 @@ fun StudentListScreen(
                     IconButton(onClick = { navController.navigate(Screen.ImportCsv.route) }) {
                         Icon(Icons.Default.UploadFile, "Import CSV")
                     }
-                    IconButton(onClick = { navController.navigate(Screen.StudentForm.route) }) {
+                    IconButton(onClick = { navController.navigate(Screen.StudentForm.createRoute()) }) {
                         Icon(Icons.Default.Add, "Tambah")
                     }
                 }

@@ -2,6 +2,8 @@ package com.facegate.kioskscanner.matching
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.media.Image
+import android.util.Log
 import com.facegate.core.data.local.dao.FaceVectorDao
 import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.engine.*
@@ -35,40 +37,35 @@ class MatchEngine @Inject constructor(
     private val faceVectorDao: FaceVectorDao
 ) {
 
-    /**
-     * Full face recognition pipeline for a single frame.
-     *
-     * Pipeline: detect → quality check → liveness → embed → match → toggle → violation
-     */
-    suspend fun match(bitmap: Bitmap): MatchEngineResult {
-        // Step 1: Face detection via ML Kit
-        val detection = faceDetector.detect(bitmap)
-            ?: return MatchEngineResult.NoFace
+    /** Synchronous face detection from raw camera image — call on analyzer thread. */
+    fun detectFromImage(mediaImage: Image, rotationDegrees: Int): FaceDetectionResult? {
+        val result = faceDetector.detectImage(mediaImage, rotationDegrees)
+        Log.d("MatchEngine", "detectFromImage: ${result != null}")
+        return result
+    }
 
-        // Step 2: Quality check — reject if face is too tilted
-        if (!detection.isGoodQuality) {
-            return MatchEngineResult.QualityFailed("Wajah terlalu miring — hadap lurus ke kamera")
-        }
-
-        // Step 3: Liveness detection — requires natural blink
-        val currentTime = System.currentTimeMillis()
-        val livenessPassed = livenessDetector.checkLiveness(
+    /** Synchronous liveness check — call on analyzer thread. */
+    fun checkLiveness(detection: FaceDetectionResult, currentTimeMs: Long): Boolean {
+        return livenessDetector.checkLiveness(
             leftEyeContour = detection.leftEyeContour,
             rightEyeContour = detection.rightEyeContour,
-            currentTimeMs = currentTime,
+            currentTimeMs = currentTimeMs,
             leftEyeOpenProb = detection.leftEyeOpenProbability,
             rightEyeOpenProb = detection.rightEyeOpenProbability
         )
-        if (!livenessPassed) {
-            // Not failed — still collecting blinks. Return NoFace to keep scanning silently.
-            // Only return LivenessFailed after window timeout (handled internally).
-            return if (currentTime - getLivenessWindowStart() > 3500L) {
-                MatchEngineResult.LivenessFailed
-            } else {
-                MatchEngineResult.NoFace // silently keep scanning
-            }
-        }
+    }
 
+    /** Check if liveness window (3.5s) has expired. */
+    fun isLivenessWindowExpired(currentTimeMs: Long): Boolean {
+        return currentTimeMs - getLivenessWindowStart() > 3500L
+    }
+
+    /**
+     * Continue pipeline after detection + liveness pass.
+     *
+     * Steps: embed → match → toggle → violation → session
+     */
+    suspend fun matchAfterDetection(detection: FaceDetectionResult, bitmap: Bitmap): MatchEngineResult {
         // Reset liveness for next scan
         livenessDetector.reset()
         livenessWindowStart = 0L
@@ -78,7 +75,6 @@ class MatchEngine @Inject constructor(
         val embedding = try {
             faceEmbedder.embed(faceCrop)
         } catch (e: Exception) {
-            // Embedding failed (e.g. model not found) — fall through
             null
         } finally {
             if (faceCrop !== bitmap) faceCrop.recycle()
@@ -88,7 +84,6 @@ class MatchEngine @Inject constructor(
         val matchResult = if (embedding != null) {
             faceMatcher.match(embedding)
         } else {
-            // No embedding — skip match (model not available)
             null
         }
 
@@ -127,6 +122,36 @@ class MatchEngine @Inject constructor(
             isViolation = violation.isViolation,
             violationMessage = violation.message
         )
+    }
+
+    /**
+     * Full face recognition pipeline for a single frame (Bitmap fallback).
+     */
+    suspend fun match(bitmap: Bitmap): MatchEngineResult {
+        val detection = faceDetector.detectSync(bitmap)
+            ?: return MatchEngineResult.NoFace
+
+        if (!detection.isGoodQuality) {
+            return MatchEngineResult.QualityFailed("Wajah terlalu miring — hadap lurus ke kamera")
+        }
+
+        val currentTime = System.currentTimeMillis()
+        val livenessPassed = livenessDetector.checkLiveness(
+            leftEyeContour = detection.leftEyeContour,
+            rightEyeContour = detection.rightEyeContour,
+            currentTimeMs = currentTime,
+            leftEyeOpenProb = detection.leftEyeOpenProbability,
+            rightEyeOpenProb = detection.rightEyeOpenProbability
+        )
+        if (!livenessPassed) {
+            return if (currentTime - getLivenessWindowStart() > 3500L) {
+                MatchEngineResult.LivenessFailed
+            } else {
+                MatchEngineResult.NoFace
+            }
+        }
+
+        return matchAfterDetection(detection, bitmap)
     }
 
     private var livenessWindowStart: Long = 0L

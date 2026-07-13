@@ -1,9 +1,10 @@
 package com.facegate.kioskscanner.scanner
 
-import android.graphics.Bitmap
+import android.util.Log
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -42,8 +43,8 @@ fun ScannerScreen(
         CameraPreviewWithAnalysis(
             modifier = Modifier.fillMaxSize(),
             enabled = state is UIState.Idle && !isProcessing,
-            onFrameCaptured = { bitmap ->
-                viewModel.onFrameCaptured(bitmap)
+            onFrameCaptured = { imageProxy ->
+                viewModel.onFrameCaptured(imageProxy)
             }
         )
 
@@ -75,7 +76,7 @@ fun ScannerScreen(
 fun CameraPreviewWithAnalysis(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    onFrameCaptured: (Bitmap) -> Unit
+    onFrameCaptured: (ImageProxy) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -112,20 +113,16 @@ fun CameraPreviewWithAnalysis(
                                 analyzer.setAnalyzer(
                                     analyzerExecutor
                                 ) { imageProxy ->
-                                    if (!isEnabled.value) {
+                                    try {
+                                        if (!isEnabled.value) return@setAnalyzer
+                                        frameCount.intValue = (frameCount.intValue + 1) % 2
+                                        if (frameCount.intValue != 0) return@setAnalyzer
+                                        onFrameCaptured(imageProxy)
+                                    } catch (e: Exception) {
+                                        Log.e("Scanner", "error", e)
+                                    } finally {
                                         imageProxy.close()
-                                        return@setAnalyzer
                                     }
-                                    frameCount.intValue = (frameCount.intValue + 1) % 2
-                                    if (frameCount.intValue != 0) {
-                                        imageProxy.close()
-                                        return@setAnalyzer
-                                    }
-                                    val bitmap = imageProxy.toBitmap()
-                                    if (bitmap != null) {
-                                        onFrameCaptured(bitmap)
-                                    }
-                                    imageProxy.close()
                                 }
                             }
 
@@ -222,3 +219,4 @@ fun AutoDismissEffect(state: UIState, onDismiss: () -> Unit) {
         }
     }
 }
+

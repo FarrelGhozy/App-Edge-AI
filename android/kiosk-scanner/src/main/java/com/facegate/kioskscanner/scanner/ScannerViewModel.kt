@@ -1,12 +1,18 @@
 package com.facegate.kioskscanner.scanner
 
 import android.graphics.Bitmap
+import android.util.Log
+import androidx.camera.core.ImageProxy
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.entity.AttendanceLogEntity
 import com.facegate.core.engine.ToggleAction
+import com.facegate.core.face.FaceDetectorWrapper
+import com.facegate.core.face.FaceEmbedder
+import com.facegate.core.face.FaceMatcher
+import com.facegate.core.face.LivenessDetector
 import com.facegate.kioskscanner.matching.MatchEngine
 import com.facegate.kioskscanner.matching.MatchEngineResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,71 +51,122 @@ class ScannerViewModel @Inject constructor(
         ) : UIState()
     }
 
-    fun onFrameCaptured(bitmap: Bitmap) {
+    fun onFrameCaptured(imageProxy: ImageProxy) {
         if (_state.value is UIState.Success || _state.value is UIState.Error) return
         if (_isProcessing.value) return
 
         _isProcessing.value = true
 
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.Default) {
-                matchEngine.match(bitmap)
-            }
-
-            when (result) {
-                is MatchEngineResult.Matched -> {
-                    val action = when (result.action) {
-                        ToggleAction.KELUAR -> "keluar"
-                        ToggleAction.KEMBALI -> "kembali"
-                    }
-                    val deviceId = devicePreferences.getDeviceId()
-                    val log = AttendanceLogEntity(
-                        studentId = result.studentId,
-                        studentName = result.studentName,
-                        action = action,
-                        timestamp = System.currentTimeMillis(),
-                        confidenceScore = 1.0f,
-                        isViolation = result.isViolation,
-                        violationType = if (result.isViolation) result.violationMessage else null,
-                        deviceId = deviceId
-                    )
-                    attendanceLogDao.insert(log)
-                    voiceFeedback.speakSuccess(result.studentName, action)
-                    if (result.isViolation) {
-                        result.violationMessage?.let { voiceFeedback.speakWarning(it) }
-                    }
-                    val label = when (action) {
-                        "keluar" -> "KELUAR ✅"
-                        "kembali" -> "KEMBALI ✅"
-                        else -> action
-                    }
-                    _state.value = UIState.Success(
-                        studentName = result.studentName,
-                        actionLabel = label,
-                        isViolation = result.isViolation,
-                        message = result.violationMessage
-                    )
-                }
-                is MatchEngineResult.Unknown -> {
-                    voiceFeedback.speakError()
-                    _state.value = UIState.Error("Wajah tidak dikenal (${String.format("%.0f", result.confidence * 100)}% mirip)")
-                }
-                is MatchEngineResult.LivenessFailed -> {
-                    _state.value = UIState.Error("Kedipkan mata untuk verifikasi")
-                }
-                is MatchEngineResult.NoFace -> {
-                    // silent — stay Idle, no state change
-                }
-                is MatchEngineResult.QualityFailed -> {
-                    _state.value = UIState.Error(result.reason)
-                }
-            }
-
+        // Detection + liveness synchronously on analyzer thread.
+        // ImageProxy is only valid during this call.
+        val mediaImage = imageProxy.image
+        if (mediaImage == null) {
+            Log.d("ScannerVM", "mediaImage null")
             _isProcessing.value = false
+            return
+        }
+
+        val detection = matchEngine.detectFromImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+        if (detection == null) {
+            Log.d("ScannerVM", "no face detected")
+            _isProcessing.value = false
+            return
+        }
+
+        if (!detection.isGoodQuality) {
+            _state.value = UIState.Error("Wajah terlalu miring — hadap lurus ke kamera")
+            _isProcessing.value = false
+            return
+        }
+
+        val currentTime = System.currentTimeMillis()
+        val livenessPassed = matchEngine.checkLiveness(detection, currentTime)
+        if (!livenessPassed) {
+            val timedOut = matchEngine.isLivenessWindowExpired(currentTime)
+            _state.value = if (timedOut) {
+                UIState.Error("Kedipkan mata untuk verifikasi")
+            } else {
+                // silently keep scanning
+                UIState.Idle
+            }
+            _isProcessing.value = false
+            return
+        }
+
+        // Liveness passed — take bitmap then launch coroutine for heavy work
+        val bitmap = imageProxyToBitmap(imageProxy)
+        if (bitmap == null) {
+            _isProcessing.value = false
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val result = matchEngine.matchAfterDetection(detection, bitmap)
+
+                when (result) {
+                    is MatchEngineResult.Matched -> {
+                        val action = when (result.action) {
+                            ToggleAction.KELUAR -> "keluar"
+                            ToggleAction.KEMBALI -> "kembali"
+                        }
+                        val deviceId = devicePreferences.getDeviceId()
+                        val log = AttendanceLogEntity(
+                            studentId = result.studentId,
+                            studentName = result.studentName,
+                            action = action,
+                            timestamp = System.currentTimeMillis(),
+                            confidenceScore = 1.0f,
+                            isViolation = result.isViolation,
+                            violationType = if (result.isViolation) result.violationMessage else null,
+                            deviceId = deviceId
+                        )
+                        attendanceLogDao.insert(log)
+                        voiceFeedback.speakSuccess(result.studentName, action)
+                        if (result.isViolation) {
+                            result.violationMessage?.let { voiceFeedback.speakWarning(it) }
+                        }
+                        val label = when (action) {
+                            "keluar" -> "KELUAR ✅"
+                            "kembali" -> "KEMBALI ✅"
+                            else -> action
+                        }
+                        _state.value = UIState.Success(
+                            studentName = result.studentName,
+                            actionLabel = label,
+                            isViolation = result.isViolation,
+                            message = result.violationMessage
+                        )
+                    }
+                    is MatchEngineResult.Unknown -> {
+                        voiceFeedback.speakError()
+                        _state.value = UIState.Error("Wajah tidak dikenal (${String.format("%.0f", result.confidence * 100)}% mirip)")
+                    }
+                    is MatchEngineResult.LivenessFailed -> {
+                        _state.value = UIState.Error("Kedipkan mata untuk verifikasi")
+                    }
+                    is MatchEngineResult.NoFace -> {}
+                    is MatchEngineResult.QualityFailed -> {
+                        _state.value = UIState.Error(result.reason)
+                    }
+                }
+            } finally {
+                _isProcessing.value = false
+                bitmap.recycle()
+            }
         }
     }
 
     fun resetState() {
         _state.value = UIState.Idle
+    }
+
+    private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
+        return try {
+            imageProxy.toBitmap()
+        } catch (e: Exception) {
+            Log.e("ScannerVM", "toBitmap error", e)
+            null
+        }
     }
 }

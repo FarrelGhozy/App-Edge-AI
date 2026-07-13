@@ -13,7 +13,7 @@ import java.nio.channels.FileChannel
 class FaceEmbedder(private val context: Context) {
     private var interpreter: Interpreter? = null
     private val inputSize = 112
-    private val embeddingDim = 128
+    private val embeddingDim = 192
     private var initError: String? = null
 
     fun init(modelName: String = "mobilefacenet.tflite"): Boolean {

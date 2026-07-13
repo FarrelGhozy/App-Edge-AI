@@ -1,6 +1,7 @@
 package com.facegate.core.face
 
 import android.graphics.PointF
+import android.util.Log
 
 /**
  * Liveness detection using Eye Aspect Ratio (EAR).
@@ -12,11 +13,11 @@ import android.graphics.PointF
  * Based on Soukupová & Čech (2016) — Real-Time Eye Blink Detection using Facial Landmarks.
  */
 class LivenessDetector {
-    /** Minimum EAR value to consider eye as "open" */
-    var earThreshold: Float = 0.20f
+    /** Blink threshold ratio (relative to running baseline EAR) */
+    private val blinkRatio: Float = 0.60f  // EAR < 60% of baseline = closed
 
     /** Maximum time (ms) to wait for a blink */
-    private val blinkWindowMs: Long = 3_000L
+    private val blinkWindowMs: Long = 4_000L
 
     /** Minimum time (ms) between blinks to avoid false double-trigger */
     private val blinkCooldownMs: Long = 300L
@@ -26,6 +27,8 @@ class LivenessDetector {
 
     // Internal state
     private var blinkCount: Int = 0
+    private var baselineEar: Float = 0.0f     // running max EAR (open eyes baseline)
+    private var baselineFrames: Int = 0
     private var lastEarValue: Float = 1.0f
     private var wasBelowThreshold: Boolean = false
     private var lastBlinkTime: Long = 0L
@@ -68,21 +71,38 @@ class LivenessDetector {
 
         // Calculate EAR from eye contours (primary method)
         val ear = if (leftEyeContour != null && rightEyeContour != null &&
-            leftEyeContour.size >= 6 && rightEyeContour.size >= 6
+            leftEyeContour.size >= 14 && rightEyeContour.size >= 14
         ) {
-            val leftEAR = calculateEAR(sampleContourPoints(leftEyeContour))
-            val rightEAR = calculateEAR(sampleContourPoints(rightEyeContour))
-            (leftEAR + rightEAR) / 2f
+            val leftEAR = calculateEAR(leftEyeContour)
+            val rightEAR = calculateEAR(rightEyeContour)
+            val avgEAR = (leftEAR + rightEAR) / 2f
+            Log.d("Liveness", "EAR left=$leftEAR right=$rightEAR avg=$avgEAR baseline=$baselineEar ratio=%.2f wasBelow=$wasBelowThreshold blink=$blinkCount".format(if (baselineEar > 0f) (avgEAR / baselineEar) else 1f))
+            avgEAR
         } else {
             // Fallback: use ML Kit's built-in probability
             val avgProb = (leftEyeOpenProb + rightEyeOpenProb) / 2f
             0.10f + (avgProb * 0.25f) // Map 0→0.10, 1→0.35
         }
 
-        // Blink detection: EAR drops below threshold → rises again = 1 blink
-        if (ear < earThreshold && !wasBelowThreshold) {
+        lastEarValue = ear
+
+        // Update baseline: running max of EAR (tracks open-eyes level)
+        if (ear > baselineEar) {
+            baselineEar = ear
+            baselineFrames = 0
+        } else {
+            baselineFrames++
+            // Decay baseline slightly if it stays high for many frames (prevents stuck high baseline)
+            if (baselineFrames > 30 && baselineEar > 0.15f) {
+                baselineEar *= 0.98f
+            }
+        }
+
+        // Blink detection: EAR drops below ratio of baseline → rises again = 1 blink
+        val dynamicThreshold = baselineEar * blinkRatio
+        if (ear < dynamicThreshold && !wasBelowThreshold) {
             wasBelowThreshold = true
-        } else if (ear >= earThreshold && wasBelowThreshold) {
+        } else if (ear >= dynamicThreshold && wasBelowThreshold) {
             val timeSinceLastBlink = currentTimeMs - lastBlinkTime
             if (timeSinceLastBlink > blinkCooldownMs) {
                 blinkCount++
@@ -90,8 +110,6 @@ class LivenessDetector {
             }
             wasBelowThreshold = false
         }
-
-        lastEarValue = ear
 
         if (blinkCount >= requiredBlinks) {
             isPassed = true
@@ -101,39 +119,37 @@ class LivenessDetector {
     }
 
     /**
-     * Calculate Eye Aspect Ratio for one eye.
+     * Calculate Eye Aspect Ratio for one eye using ML Kit's 16-point contour.
      *
-     * EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)
+     * ML Kit eye contour ordering (clockwise from outer corner, 16 points):
+     *   [0] = outer corner
+     *   [1..7] = upper eyelid (outer → inner)
+     *   [8] = inner corner
+     *   [9..15] = lower eyelid (inner → outer)
      *
-     * Uses 6 evenly-spaced sample points from the contour array.
+     * EAR = average_vertical / horizontal
+     *
+     * Measures 3 vertical pairs (upper→lower at positions 1/4, 1/2, 3/4)
+     *   and divides by eye width (outer→inner corner).
      */
-    private fun calculateEAR(points: List<PointF>): Float {
-        // p1=left corner, p4=right corner, p2=upper-left, p6=upper-right
-        // p3=lower-left, p5=lower-right
-        val p1 = points[0]  // left corner
-        val p2 = points[1]  // upper-left
-        val p3 = points[2]  // lower-left
-        val p4 = points[3]  // right corner
-        val p5 = points[4]  // lower-right
-        val p6 = points[5]  // upper-right
+    private fun calculateEAR(contour: List<PointF>): Float {
+        if (contour.size < 14) return 1.0f
 
-        val vertical1 = distance(p2, p6)
-        val vertical2 = distance(p3, p5)
-        val horizontal = distance(p1, p4)
+        val outer = contour[0]
+        val inner = contour[8]
+        val horizontalDist = distance(outer, inner)
+        if (horizontalDist < 0.001f) return 1.0f
 
-        if (horizontal < 0.001f) return 1.0f
+        // 3 vertical pairs: upper indices 2,4,6 ↔ lower 14,12,10
+        val v1 = distance(contour[2], contour[14])
+        val v2 = distance(contour[4], contour[12])
+        val v3 = distance(contour[6], contour[10])
+        val avgVertical = (v1 + v2 + v3) / 3f
 
-        return (vertical1 + vertical2) / (2.0f * horizontal)
+        return avgVertical / horizontalDist
     }
 
-    /** Sample N evenly-spaced points from the full contour list. */
-    private fun sampleContourPoints(contour: List<PointF>, sampleCount: Int = 6): List<PointF> {
-        if (contour.size <= sampleCount) return contour.toList()
-        val step = (contour.size - 1).toFloat() / (sampleCount - 1)
-        return (0 until sampleCount).map { i ->
-            contour[(i * step).toInt().coerceIn(0, contour.size - 1)]
-        }
-    }
+
 
     private fun distance(a: PointF, b: PointF): Float {
         val dx = a.x - b.x
@@ -144,6 +160,8 @@ class LivenessDetector {
     /** Reset liveness state (call after successful match or timeout). */
     fun reset() {
         blinkCount = 0
+        baselineEar = 0.0f
+        baselineFrames = 0
         lastEarValue = 1.0f
         wasBelowThreshold = false
         lastBlinkTime = 0L
