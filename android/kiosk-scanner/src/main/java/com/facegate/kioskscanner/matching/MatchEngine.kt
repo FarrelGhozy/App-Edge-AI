@@ -71,6 +71,7 @@ class MatchEngine @Inject constructor(
 
         // Reset liveness for next scan
         livenessDetector.reset()
+        livenessWindowStart = 0L
 
         // Step 4: Face embedding (128-d vector via MobileFaceNet)
         val faceCrop = cropFace(bitmap, detection.boundingBox)
