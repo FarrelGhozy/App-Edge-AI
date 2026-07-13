@@ -18,6 +18,8 @@ data class StudentDto(
     val isActive: Boolean = true,
     @SerialName("photoUrl")
     val photoUrl: String? = null,
+    @SerialName("faceRegistered")
+    val faceRegistered: Boolean = false,
     @SerialName("createdAt")
     val createdAt: String? = null,
     @SerialName("updatedAt")
