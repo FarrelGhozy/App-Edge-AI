@@ -20,6 +20,5 @@ data class FaceSyncResponse(
 
 @Serializable
 data class UploadFaceRequest(
-    val studentId: String,
     val vector: List<Float>
 )
