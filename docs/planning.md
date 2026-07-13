@@ -106,22 +106,24 @@ FaceGateApp/
 ├── backend/
 │   ├── src/
 │   │   ├── index.ts
-│   │   ├── routes/
-│   │   ├── controllers/
-│   │   ├── services/
-│   │   │   ├── rule-engine.ts
-│   │   │   ├── violation-detector.ts
-│   │   │   ├── report-generator.ts
-│   │   │   └── sync-service.ts      # Kelola sync request
-│   │   ├── middleware/
-│   │   └── utils/
-│   ├── prisma/
-│   │   ├── schema.prisma
+│   │   ├── routes/                  # API route handlers (grouped by resource)
+│   │   ├── services/                # Business logic + Prisma queries
+│   │   │   ├── auth.ts
+│   │   │   ├── student.ts
+│   │   │   ├── attendance.ts
+│   │   │   ├── permit.ts
+│   │   │   ├── rule.ts
+│   │   │   ├── violation.ts
+│   │   │   ├── notification.ts
+│   │   │   ├── device.ts
+│   │   │   └── prisma.ts
 │   │   └── seed.ts
-│   ├── docker/
-│   │   └── Dockerfile
+│   ├── prisma/
+│   │   └── schema.prisma
+│   ├── Dockerfile
 │   ├── package.json
-│   └── tsconfig.json
+│   ├── tsconfig.json
+│   └── .env.example
 │
 ├── docker-compose.yml                # PostgreSQL + pgvector + backend (port 8150)
 ├── cloudflared/                      # Konfigurasi Cloudflare Tunnel
@@ -166,7 +168,7 @@ FaceGateApp/
 | Komponen | Pustaka / Nilai |
 |---|---|
 | Runtime | Bun |
-| Framework | Elysia / Hono |
+| Framework | **Elysia** |
 | ORM | Prisma |
 | Database | PostgreSQL + pgvector |
 | Auth | JWT (bcrypt) |
@@ -318,46 +320,52 @@ Admin App                          Server                       Kiosk Scanner
 // ==================== MASTER DATA ====================
 
 model Student {
-  id              String   @id @default(cuid())
-  nim             String   @unique
-  name            String
-  studyProgram    String?
-  academicYear    Int?
-  phone           String?
-  email           String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String   @id @default(uuid()) @map("id")
+  nim           String   @unique
+  name          String
+  studyProgram  String   @map("study_program")
+  academicYear  String   @map("academic_year")
+  phone         String?
+  email         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  photoUrl      String?  @map("photo_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  faceVectors      FaceVector[]
-  attendanceLogs   AttendanceLog[]
-  permits          Permit[]
-  violations       Violation[]
-  courseSchedules  CourseSchedule[]
-  permitQuotas     PermitQuota[]
+  faceVectors   FaceVector[]
+  attendanceLogs AttendanceLog[]
+  permits       Permit[]
+  violations    Violation[]
+  courseSchedules CourseSchedule[]
+  permitQuotas  PermitQuota[]
+
+  @@map("students")
 }
 
 model FaceVector {
-  id        String   @id @default(cuid())
-  studentId String
-  vector    Unsupported("vector(128)")?
-  createdAt DateTime @default(now())
+  studentId String   @id @map("student_id")
+  vector    Unsupported("vector(128)")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  student Student @relation(fields: [studentId], references: [id])
-  @@index([studentId])
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("face_vectors")
 }
 
 model Admin {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid())
   username     String   @unique
-  passwordHash String
-  displayName  String
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
   role         String   @default("admin") // admin | superadmin
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   auditLogs    AuditLog[]
+  syncRequests SyncRequest[]
+  permits      Permit[]       // izin yang di-approve
+
+  @@map("admins")
 }
 
 
@@ -369,221 +377,251 @@ model Admin {
 //   - Jika terakhir "keluar" → saat ini DI LUAR KAMPUS
 //   - Jika terakhir "kembali" atau tidak ada log → DI KAMPUS
 model AttendanceLog {
-  id              String   @id @default(cuid())
-  studentId       String
+  id              String   @id @default(uuid()) @map("id")
+  studentId       String   @map("student_id")
+  studentName     String   @map("student_name")
   action          String   // "keluar" | "kembali"
-  timestamp       DateTime @default(now())
-  confidenceScore Float?
-  isViolation     Boolean  @default(false) // flag jika melanggar aturan
-  violationId     String?  // terkait pelanggaran jika ada
-  isSynced        Boolean  @default(true)
-  deviceId        String?
-  photoCapture    String?  // base64 foto saat scan (audit)
-  createdAt       DateTime @default(now())
+  timestamp       DateTime
+  confidenceScore Float    @map("confidence_score")
+  isViolation     Boolean  @default(false) @map("is_violation")
+  violationType   String?  @map("violation_type")
+  deviceId        String?  @map("device_id")
+  photoCapture    String?  @map("photo_capture") // base64 foto saat scan (audit)
+  isSynced        Boolean  @default(true) @map("is_synced")
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  student Student @relation(fields: [studentId], references: [id])
-  violation Violation? @relation(fields: [violationId], references: [id])
+  student         Student  @relation(fields: [studentId], references: [id])
 
-  @@index([studentId, timestamp])
+  @@index([studentId])
   @@index([timestamp])
+  @@index([action])
+  @@map("attendance_logs")
 }
 
 
 // ==================== PERIZINAN ====================
 
 // Dua jenis izin:
-//   1. izin_harian    → auto-approved, hanya 1 hari, tanpa approval
-//   2. pengajuan_izin → butuh approval admin, bisa multi-hari
+//   1. izin_harian    → auto-approved, hanya 1 hari, tanpa approval (kuota: 10x/bulan)
+//   2. pengajuan_izin → butuh approval admin, bisa multi-hari, tanpa batas kuota
 model Permit {
-  id            String   @id @default(cuid())
-  studentId     String
-  type          String   // "izin_harian" | "pengajuan_izin"
-  reason        String
-  startDate     DateTime // tanggal mulai
-  endDate       DateTime // tanggal selesai (bisa sama dgn startDate)
-  startTime     String?  // "08:00" (null = full day)
-  endTime       String?  // "16:00"
-  status        String   // "approved" | "pending" | "rejected"
+  id              String    @id @default(uuid()) @map("id")
+  studentId       String    @map("student_id")
+  type            String    // "izin_harian" | "pengajuan_izin"
+  startDate       DateTime  @map("start_date")
+  endDate         DateTime  @map("end_date")
+  startTime       String?   @map("start_time") // "08:00" (null = full day)
+  endTime         String?   @map("end_time")   // "16:00"
+  status          String    @default("pending") // "approved" | "pending" | "rejected"
   // izin_harian → status langsung "approved"
   // pengajuan_izin → status default "pending", perlu approve admin
-  approvedBy    String?  // adminId (null untuk izin_harian)
-  rejectReason  String?
-  attachmentUrl String?  // foto surat (untuk pengajuan_izin)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  reason          String?
+  attachmentUrl   String?   @map("attachment_url")
+  approvedById    String?   @map("approved_by_id") // adminId (null untuk izin_harian)
+  approvedAt      DateTime? @map("approved_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  student Student @relation(fields: [studentId], references: [id])
+  student         Student   @relation(fields: [studentId], references: [id])
+  approvedBy      Admin?    @relation(fields: [approvedById], references: [id])
 
-  @@index([studentId, status])
-  @@index([startDate, endDate])
+  @@index([studentId])
+  @@index([status])
+  @@index([type])
+  @@map("permits")
 }
 
 model PermitQuota {
-  id          String   @id @default(cuid())
-  studentId   String
+  id          String   @id @default(uuid()) @map("id")
+  studentId   String   @map("student_id")
   month       Int      // 1-12
   year        Int
-  permitsUsed Int      @default(0)
-  maxPermits  Int      @default(10) // quota izin_harian per bulan
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  permitsUsed Int      @default(0) @map("permits_used")
+  maxPermits  Int      @default(10) @map("max_permits") // quota izin_harian per bulan
 
-  student Student @relation(fields: [studentId], references: [id])
   @@unique([studentId, month, year])
+  @@map("permit_quotas")
 }
 
 
 // ==================== ATURAN & PEMBATASAN ====================
 
 model CampusRule {
-  id              String   @id @default(cuid())
-  name            String
-  ruleType        String   // "restricted_hours" | "operational_hours" | "permit_limit"
-  dayOfWeek       Int?     // 0=Minggu ... 6=Sabtu | null = tiap hari
-  startTime       String   // "08:00"
-  endTime         String   // "16:00"
-  isRestricted    Boolean  // true = tidak boleh keluar
-  appliesToAll    Boolean  @default(true)
-  studyProgram    String?  // filter prodi
-  academicYear    Int?     // filter angkatan
-  description     String?
-  priority        Int      @default(0)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String   @id @default(uuid()) @map("id")
+  dayOfWeek     Int      @map("day_of_week") // 0=Minggu ... 6=Sabtu
+  startTime     String   @map("start_time")  // "08:00"
+  endTime       String   @map("end_time")    // "16:00"
+  isRestricted  Boolean  @default(true) @map("is_restricted") // true = tidak boleh keluar
+  appliesToAll  Boolean  @default(true) @map("applies_to_all")
+  studyProgram  String?  @map("study_program") // filter prodi
+  academicYear  String?  @map("academic_year")  // filter angkatan
+  priority      Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  @@index([dayOfWeek, isActive])
+  @@index([dayOfWeek])
+  @@map("campus_rules")
 }
 
 model GlobalSetting {
-  id          String   @id @default(cuid())
-  key         String   @unique
+  key         String   @id
   value       String
   description String?
-  updatedAt   DateTime @updatedAt
+
+  @@map("global_settings")
 }
 
 
 // ==================== JADWAL KULIAH ====================
+// PER MAHASISWA — setiap mahasiswa punya jadwal sendiri
+// Format import CSV: NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang, Dosen
 
 model CourseSchedule {
-  id            String   @id @default(cuid())
-  studentId     String
-  courseName    String
-  dayOfWeek     Int      // 0=Minggu ... 6=Sabtu
-  startTime     String   // "08:00"
-  endTime       String   // "10:00"
+  id            String   @id @default(uuid()) @map("id")
+  studentId     String   @map("student_id")
+  courseName    String   @map("course_name")
+  dayOfWeek     Int      @map("day_of_week") // 0=Minggu ... 6=Sabtu
+  startTime     String   @map("start_time")  // "08:00"
+  endTime       String   @map("end_time")    // "10:00"
   room          String?
   lecturer      String?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  student Student @relation(fields: [studentId], references: [id])
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
   @@index([studentId, dayOfWeek])
+  @@map("course_schedules")
+}
+
+// ==================== HARI LIBUR ====================
+// Admin input manual: tanggal merah / libur nasional
+// Saat libur, semua aturan restricted dinonaktifkan (bebas keluar)
+
+model Holiday {
+  id          String   @id @default(uuid()) @map("id")
+  date        DateTime @unique // tanggal libur
+  name        String   // nama hari libur (contoh: "Idul Fitri", "17 Agustus")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("holidays")
 }
 
 
 // ==================== PELANGGARAN ====================
 
 model Violation {
-  id              String   @id @default(cuid())
-  studentId       String
-  type            String   // "keluar_tanpa_izin" | "keluar_jam_terlarang" | "keluar_jam_kuliah" | "tidak_kembali" | "melebihi_batas_izin"
-  description     String
+  id              String    @id @default(uuid()) @map("id")
+  studentId       String    @map("student_id")
+  type            String    // "keluar_tanpa_izin" | "keluar_jam_terlarang" | "keluar_jam_kuliah" | "tidak_kembali" | "melebihi_batas_izin"
+  description     String?
+  action          String?   // action saat violation terjadi ("keluar" / "kembali")
   timestamp       DateTime
-  relatedRuleId   String?
-  relatedPermitId String?
-  relatedLogId    String?  // AttendanceLog.id
-  isResolved      Boolean  @default(false)
-  resolvedBy      String?
-  resolvedAt      DateTime?
-  notes           String?
-  createdAt       DateTime @default(now())
+  relatedRuleId   String?   @map("related_rule_id")
+  relatedPermitId String?   @map("related_permit_id")
+  isResolved      Boolean   @default(false) @map("is_resolved")
+  resolvedAt      DateTime? @map("resolved_at")
+  resolvedNote    String?   @map("resolved_note")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
-  student Student @relation(fields: [studentId], references: [id])
   @@index([studentId])
+  @@index([type])
   @@index([timestamp])
+  @@map("violations")
 }
 
 
 // ==================== SYNC & DEVICE ====================
 
 model Device {
-  id           String   @id @default(cuid())
-  name         String
-  deviceId     String   @unique
-  location     String?
-  ipAddress    String?
-  isActive     Boolean  @default(true)
-  lastPingAt   DateTime?
-  batteryLevel Int?
-  appVersion   String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  deviceId    String    @id @map("device_id")
+  name        String
+  location    String?
+  isActive    Boolean   @default(true) @map("is_active")
+  lastPingAt  DateTime? @map("last_ping_at")
+  batteryLevel Float?   @map("battery_level")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  syncRequests SyncRequest[]
+  syncLogs     SyncLog[]
+
+  @@map("devices")
 }
 
 model SyncRequest {
-  id          String   @id @default(cuid())
-  deviceId    String
-  requestedAt DateTime @default(now())
-  isProcessed Boolean  @default(false)
-  processedAt DateTime?
-  requestedBy String?  // adminId yang trigger
+  id            String   @id @default(uuid()) @map("id")
+  deviceId      String   @map("device_id")
+  requestedAt   DateTime @default(now()) @map("requested_at")
+  isProcessed   Boolean  @default(false) @map("is_processed")
+  processedAt   DateTime? @map("processed_at")
+  requestedById String?  @map("requested_by_id")
+
+  device        Device   @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+  requestedBy   Admin?   @relation(fields: [requestedById], references: [id])
+
+  @@map("sync_requests")
 }
 
 model SyncLog {
-  id         String   @id @default(cuid())
-  deviceId   String
-  syncType   String   // "midnight" | "manual" | "reconnect"
-  lastSyncAt DateTime
-  status     String   // success | partial | failed
-  logsCount  Int      @default(0)
-  notes      String?
-  createdAt  DateTime @default(now())
+  id          String   @id @default(uuid()) @map("id")
+  deviceId    String   @map("device_id")
+  syncType    String   @map("sync_type") // "midnight" | "manual" | "reconnect"
+  status      String   // "success" | "partial" | "failed"
+  logsCount   Int      @default(0) @map("logs_count")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  @@index([deviceId, lastSyncAt])
+  device      Device   @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@map("sync_logs")
 }
 
 
 // ==================== AUDIT & NOTIFIKASI ====================
 
 model AuditLog {
-  id          String   @id @default(cuid())
-  adminId     String?
+  id          String   @id @default(uuid()) @map("id")
+  adminId     String   @map("admin_id")
   action      String
-  entityType  String
-  entityId    String?
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
   details     String?  // JSON
-  ipAddress   String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  admin Admin @relation(fields: [adminId], references: [id])
+  admin       Admin    @relation(fields: [adminId], references: [id])
+
+  @@index([adminId])
+  @@index([entityType])
   @@index([createdAt])
+  @@map("audit_logs")
 }
 
 model ImportBatch {
-  id          String   @id @default(cuid())
+  id          String   @id @default(uuid()) @map("id")
   filename    String
-  totalRows   Int
-  successRows Int
-  failedRows  Int
+  totalRows   Int      @map("total_rows")
+  successRows Int      @map("success_rows")
+  failedRows  Int      @map("failed_rows")
   errors      String?
-  importedBy  String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("import_batches")
 }
 
 model Notification {
-  id          String   @id @default(cuid())
-  adminId     String?  // null = broadcast
+  id          String   @id @default(uuid()) @map("id")
+  adminId     String?  @map("admin_id") // null = broadcast ke semua admin
   type        String   // "violation" | "permit_pending" | "sync_done" | "device_offline"
   title       String
   message     String
-  isRead      Boolean  @default(false)
-  linkTo      String?
-  createdAt   DateTime @default(now())
+  isRead      Boolean  @default(false) @map("is_read")
+  linkTo      String?  // deeplink ke screen terkait
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([adminId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
 }
 ```
 
@@ -592,13 +630,14 @@ model Notification {
 | Entity | Catatan |
 |---|---|
 | `StudentEntity` | Cache data mahasiswa |
-| `FaceVectorEntity` | Vektor wajah (Blob via TypeConverter) |
+| `FaceVectorEntity` | Vektor wajah (FloatArray → ByteArray via TypeConverter) |
 | `AttendanceLogEntity` | Log scan lokal (isSynced = false = belum dikirim) |
 | `PermitEntity` | Cache izin (harian + pengajuan) |
 | `CampusRuleEntity` | Aturan untuk verifikasi offline |
-| `CourseScheduleEntity` | Jadwal kuliah |
-| `GlobalSettingEntity` | Pengaturan global |
-| `SyncMetadata` | Tracking sync terakhir |
+| `CourseScheduleEntity` | Jadwal kuliah per mahasiswa |
+| `GlobalSettingEntity` | Pengaturan global (key-value) |
+| `HolidayEntity` | Tanggal libur nasional |
+| `SyncMetadata` | Tracking sync terakhir (lastSyncTimestamp) |
 
 ### 5.3 In-Memory (Kiosk Scanner)
 
@@ -742,7 +781,16 @@ enum class State { DI_KAMPUS, DI_LUAR }
 | GET | `/api/dashboard/violation-summary` |
 | GET | `/api/dashboard/recent-scans` | 20 scan terakhir |
 
-### 6.13 Audit & Notifikasi
+### 6.13 Holiday (Hari Libur)
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| GET | `/api/holidays` | List semua hari libur |
+| POST | `/api/holidays` | Tambah hari libur |
+| PUT | `/api/holidays/:id` | Edit hari libur |
+| DELETE | `/api/holidays/:id` | Hapus hari libur |
+| GET | `/api/holidays/today` | Cek apakah hari ini libur |
+
+### 6.14 Audit & Notifikasi
 | Method | Endpoint |
 |---|---|
 | GET | `/api/audit` |
@@ -888,11 +936,11 @@ Tidak ada scan = mahasiswa tidak keluar sama sekali hari itu (normal).
 
 | Skenario | Resolusi |
 |---|---|
-| Scan duplikat (studentId + timestamp sama) | Backend dedup, tolak duplikat |
-| Log sudah terlanjur dikirim (retry) | Ignore duplicate (idempotent key) |
-| Sync gagal di tengah jalan | Batch dikirim partial, lanjut batch berikutnya |
-| Dua kiosk berbeda kirim scan mahasiswa sama | Last-write-wins (timestamp terlambat diabaikan jika sudah ada log lebih baru) |
-| Admin approve izin saat kiosk offline | Flag syncRequested=true, nanti sync saat online |
+| Scan duplikat (studentId + timestamp sama dalam 2 detik) | Kiosk debounce 2 detik, abaikan scan berulang |
+| Log sudah terlanjur dikirim (retry) | Backend ignore duplicate berdasarkan id unik |
+| Sync gagal di tengah jalan | Batch dikirim partial, lanjut batch berikutnya. Gunakan idempotency key. |
+| Dua kiosk berbeda (gerbang A & B) scan mahasiswa sama | Kedua log TETAP MASUK. Ini valid: keluar gerbang A, kembali gerbang B. Toggle state dihitung dari log TERAKHIR hari ini. |
+| Admin approve izin saat kiosk offline | Flag syncRequested=true, nanti sync saat online. Kiosk download rules + permits terbaru. |
 
 ---
 
@@ -923,23 +971,30 @@ Tidak ada scan = mahasiswa tidak keluar sama sekali hari itu (normal).
 
 ```
 Function canScanOut(student, time, today):
-  1. Cek jam operasional
-     - time < operational_start → TOLAK (tampilkan "kampus belum buka")
-     - time > operational_end → IZINKAN
+  1. Cek hari libur (Holiday)
+     - Hari ini libur nasional? → IZINKAN (skip semua aturan)
 
-  2. Cek izin aktif hari ini
-     - Ada izin_harian ATAU pengajuan_izin approved? → IZINKAN (skip aturan)
+  2. Cek jam operasional
+     - time < operational_start → TOLAK (tampilkan "di luar jam operasional — kampus belum buka")
+     - time > operational_end   → TOLAK (tampilkan "di luar jam operasional — kampus sudah tutup")
 
-  3. Cek restricted hours (CampusRule)
-     - dayOfWeek cocok && startTime <= time <= endTime && isRestricted
+  3. Cek izin aktif hari ini
+     - Ada izin_harian ATAU pengajuan_izin approved? → IZINKAN (skip aturan restricted + jadwal kuliah)
+     - ⚠️ PENTING: Izin hanya meng-override aturan jam, BUKAN jam operasional.
+       Mahasiswa tetap TIDAK BISA keluar di luar jam operasional meskipun punya izin.
+
+  4. Cek restricted hours (CampusRule)
+     - Cocokkan dayOfWeek dan time di antara startTime-endTime
      - Filter prodi/angkatan cocok?
-     - Ada yang cocok → VIOLATION (kecuali point 2 terpenuhi)
+     - Ada yang cocok (isRestricted=true) → VIOLATION (kecuali point 3 terpenuhi)
 
-  4. Cek jadwal kuliah (CourseSchedule)
-     - Ada jadwal di jam ini? → VIOLATION
+  5. Cek jadwal kuliah (CourseSchedule)
+     - Cocokkan dayOfWeek + startTime <= time <= endTime
+     - Ada jadwal → VIOLATION (kecuali point 3 terpenuhi)
 
-  5. Jika violation → simpan Violation + flag isViolation di AttendanceLog
-     Tampilkan peringatan di layar kiosk
+  6. Jika violation → simpan Violation + flag isViolation di AttendanceLog
+     Tampilkan peringatan di layar kiosk (overlay kuning)
+     Semua violation auto-resolved saat mahasiswa scan "kembali"
 ```
 
 ---
@@ -993,8 +1048,9 @@ Setiap toggle dihitung:
 | Scan di luar jam operasional | Tampilkan pesan "di luar jam operasional" |
 | Scan wajah tidak dikenal | Tampilkan "wajah tidak dikenal" tanpa toggle |
 | Mahasiswa scan di 2 kiosk berbeda | Kedua log tetap masuk. Last-write-wins untuk state |
-| Lupa scan pas balik (masuk tanpa scan) | Auto close sesi pukul 23.59. Jika masih "keluar" → tandai "tidak_kembali" |
-| Libur nasional | Semua aturan restricted dinonaktifkan, bebas keluar |
+| Lupa scan pas balik (masuk tanpa scan) | Auto close sesi pukul 23.59. Jika state terakhir masih "keluar" → generate violation "tidak_kembali" otomatis |
+| Libur nasional (Holiday) | Semua aturan restricted + jadwal kuliah di-nonaktifkan. Bebas keluar tanpa izin. Admin input tanggal libur manual via Settings. |
+| Mahasiswa tidak bisa berkedip (medis/kacamata) | Liveness EAR threshold diturunkan (0.15 default → 0.10). Fallback: admin bisa matikan liveness via GlobalSettings. |
 
 ---
 
@@ -1068,11 +1124,12 @@ Setiap toggle dihitung:
 
 ### 11.4 Kuota Izin Harian
 
-- Default: 10 izin harian per bulan per mahasiswa
-- Bisa diubah via GlobalSettings
-- Admin bisa lihat sisa kuota di StudentDetailScreen
-- Reset otomatis tiap awal bulan
-- Kuota khusus bisa di-set per mahasiswa (Override)
+- Default: 10 izin harian **per bulan kalender** per mahasiswa (Januari, Februari, dst.)
+- Bukan rolling 30 hari — reset tiap tanggal 1 pukul 00:00
+- Bisa diubah via GlobalSettings (`max_daily_permit_per_month`)
+- Admin bisa lihat sisa kuota di StudentDetailScreen: `GET /api/permits/quota/:studentId`
+- Reset otomatis: sistem cek bulan berjalan saat membuat izin baru. Jika bulan berbeda dari record terakhir → buat record PermitQuota baru dengan counter 0
+- Kuota override per mahasiswa bisa di-set manual di PermitQuota.maxPermits
 
 ---
 
@@ -1449,15 +1506,22 @@ Cahaya dari depan (searah mahasiswa)
 | 3 | Liveness Detection | ✅ **Eye Aspect Ratio (EAR)** — rule-based, 0 KB |
 | 4 | Backend Framework | ✅ **Elysia** (Bun-native) |
 | 5 | CSV Import Format | ✅ NIM, Nama, Prodi, Angkatan, No HP, Email |
-| 6 | Jadwal Kuliah Format | ✅ NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang |
+| 6 | Jadwal Kuliah Format | ✅ NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang, Dosen |
 | 7 | Dashboard Web | ✅ **Skip dulu** — fokus ke Admin App dulu |
 | 8 | Multiple Kiosk | ✅ **Langsung multi-gerbang** dari awal |
 | 9 | Emergency Mode | ✅ **Skip** — tidak perlu untuk sekarang |
 | 10 | Cloudflare Domain | ✅ **facegate.utc.web.id** — pake subdomain sendiri |
 | 11 | Backend Port | ✅ **8150** — localhost + Cloudflare Tunnel |
 | 12 | Hosting | ✅ **Docker + Cloudflare Tunnel** (cloudflared) |
+| 13 | Kursus Kuliah | ✅ **Per Mahasiswa** — ada relasi studentId |
+| 14 | FaceVector | ✅ **1:1 (studentId PK)** — satu mahasiswa satu vector, paling efektif untuk brute-force matching |
+| 15 | Jam Operasional | ✅ **TOLAK** scan di luar jam operasional (baik sebelum start maupun setelah end) |
+| 16 | Violation Auto-Resolve | ✅ **Semua tipe** violation auto-resolved saat mahasiswa kembali |
+| 17 | Libur Nasional | ✅ **Input manual admin** — model Holiday, saat libur semua aturan skip |
+| 18 | Kuota Izin | ✅ **Per bulan kalender** (reset tiap tanggal 1), bukan rolling 30 hari |
 
 ---
 
-> **Status**: Planning — belum ada coding.
-> **Next step**: Kalau dokumen ini sudah OK, lanjut ke setup monorepo + Phase 1.
+> **Status**: ✅ Planning selesai — sudah sinkron dengan implementasi.
+> **Fase saat ini**: Phase 1-4 selesai (kerangka). Pipeline face recognition masih stub, perlu diselesaikan.
+> **Next step**: Implementasi FaceDetector (MediaPipe) + LivenessDetector (EAR) + CameraX + bundling model TFLite.
