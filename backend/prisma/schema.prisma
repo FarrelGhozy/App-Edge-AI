@@ -253,3 +253,16 @@ model Notification {
   @@index([createdAt])
   @@map("notifications")
 }
+
+model Holiday {
+  id          String   @id @default(uuid())
+  name        String
+  date        DateTime
+  type        String   @default("national")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([date])
+  @@index([date])
+  @@map("holidays")
+}
