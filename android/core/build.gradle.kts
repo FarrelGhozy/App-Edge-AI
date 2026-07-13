@@ -29,6 +29,11 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    // Don't compress TFLite models in APK (they're already compressed)
+    androidResources {
+        noCompress += listOf("tflite")
+    }
 }
 
 dependencies {
@@ -49,6 +54,7 @@ dependencies {
     api(libs.retrofit.kotlinx.serialization)
 
     api(libs.tensorflow.lite)
+    api(libs.mlkit.facedetection)
 
     api(libs.workmanager)
     api(libs.datastore.preferences)
