@@ -45,7 +45,7 @@ export const studentRoutes = new Elysia()
   }, { body: updateStudentSchema })
   .delete("/api/students/:id", async ({ params: { id } }) => {
     await deleteStudent(id);
-    return { success: true };
+    return new Response(null, { status: 204 });
   })
   .post("/api/students/:id/face", async ({ params: { id }, body }) => {
     await uploadFace(id, body.vector);
