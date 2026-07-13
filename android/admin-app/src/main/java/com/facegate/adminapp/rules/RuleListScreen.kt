@@ -35,6 +35,9 @@ fun RuleListScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { navController.navigate(Screen.RuleForm.createRoute()) }) {
+                        Icon(Icons.Default.Add, "Tambah")
+                    }
                     IconButton(onClick = { navController.navigate(Screen.Settings.route) }) {
                         Icon(Icons.Default.Settings, "Settings")
                     }
