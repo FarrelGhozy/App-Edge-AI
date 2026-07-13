@@ -20,7 +20,12 @@ data class NotificationItem(
 
 data class NotificationListState(
     val notifications: List<NotificationItem> = emptyList(),
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
+    val hasMore: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val page: Int = 1,
+    val error: String? = null
 )
 
 @HiltViewModel
@@ -31,13 +36,14 @@ class NotificationListViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(NotificationListState())
     val uiState: StateFlow<NotificationListState> = _uiState.asStateFlow()
 
-    fun load() {
+    fun load(page: Int = 1) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            if (page == 1) _uiState.value = _uiState.value.copy(error = null)
             try {
-                val response = apiService.getNotifications()
+                val response = apiService.getNotifications(page = page)
                 if (response.isSuccessful && response.body() != null) {
-                    val items = response.body()!!.data.map { dto ->
+                    val body = response.body()!!
+                    val items = body.data.map { dto ->
                         NotificationItem(
                             id = dto.id,
                             title = dto.title,
@@ -46,14 +52,39 @@ class NotificationListViewModel @Inject constructor(
                             createdAt = dto.createdAt
                         )
                     }
-                    _uiState.value = _uiState.value.copy(notifications = items, isLoading = false)
+                    val newNotifications = if (page == 1) items else _uiState.value.notifications + items
+                    _uiState.value = _uiState.value.copy(
+                        notifications = newNotifications,
+                        isLoading = false,
+                        isRefreshing = false,
+                        isLoadingMore = false,
+                        hasMore = page * body.pageSize < body.total,
+                        page = page
+                    )
                 } else {
-                    _uiState.value = _uiState.value.copy(isLoading = false)
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false, isRefreshing = false, isLoadingMore = false,
+                        error = "Gagal memuat notifikasi"
+                    )
                 }
-            } catch (_: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false, isRefreshing = false, isLoadingMore = false,
+                    error = "Gagal terhubung ke server"
+                )
             }
         }
+    }
+
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true, page = 1)
+        load(page = 1)
+    }
+
+    fun loadMore() {
+        val nextPage = _uiState.value.page + 1
+        _uiState.value = _uiState.value.copy(isLoadingMore = true)
+        load(page = nextPage)
     }
 
     fun markAllRead() {
@@ -61,7 +92,9 @@ class NotificationListViewModel @Inject constructor(
             try {
                 apiService.markAllNotificationsRead()
                 load()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = "Gagal menandai semua sebagai dibaca")
+            }
         }
     }
 }
