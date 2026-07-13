@@ -17,6 +17,7 @@ import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.FaceMatcher
 import com.facegate.core.face.LivenessDetector
+import com.facegate.core.sync.SyncManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -106,4 +107,25 @@ object CoreModule {
         return DevicePreferences(context)
     }
 
+    @Provides
+    @Singleton
+    fun provideSyncManager(
+        apiService: ApiService,
+        attendanceLogDao: AttendanceLogDao,
+        faceVectorDao: FaceVectorDao,
+        studentDao: StudentDao,
+        campusRuleDao: CampusRuleDao,
+        syncMetadata: SyncMetadata,
+        faceMatcher: FaceMatcher
+    ): SyncManager {
+        return SyncManager(
+            apiService = apiService,
+            attendanceLogDao = attendanceLogDao,
+            faceVectorDao = faceVectorDao,
+            studentDao = studentDao,
+            campusRuleDao = campusRuleDao,
+            syncMetadata = syncMetadata,
+            faceMatcher = faceMatcher
+        )
+    }
 }
