@@ -120,7 +120,8 @@ class SyncWorker @AssistedInject constructor(
     /** Check if admin requested a manual sync. */
     private suspend fun checkSyncRequested(): Boolean {
         return try {
-            val response = apiService.checkSyncRequested()
+            val deviceId = devicePreferences.getDeviceId()
+            val response = apiService.checkSyncRequested(deviceId)
             response.isSuccessful && response.body()?.requested == true
         } catch (e: Exception) {
             false
