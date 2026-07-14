@@ -24,8 +24,13 @@ backend/*.tsbuildinfo
 # Environment
 **/.env
 
+# LaTeX build artifacts
+*.aux
+*.out
+*.toc
+*.log
+
 # IDE
 *.hprof
-*.log
 android/.idea/
 android/build/
