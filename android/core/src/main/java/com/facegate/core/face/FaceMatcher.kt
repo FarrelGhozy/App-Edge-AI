@@ -7,7 +7,7 @@ data class MatchResult(
 )
 
 class FaceMatcher(
-    private val threshold: Float = 0.75f
+    private val threshold: Float = 0.7f
 ) : FaceIndex {
     private val faceIndex = mutableMapOf<String, FloatArray>()
 
