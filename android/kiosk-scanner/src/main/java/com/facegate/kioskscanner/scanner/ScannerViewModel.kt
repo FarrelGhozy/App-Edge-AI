@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import kotlin.math.abs
 
 @HiltViewModel
 class ScannerViewModel @Inject constructor(
@@ -35,11 +36,26 @@ class ScannerViewModel @Inject constructor(
     private val syncManager: SyncManager
 ) : ViewModel() {
 
+    companion object {
+        private const val CENTER_MARGIN_RATIO = 0.25f
+        private const val DELAY_BEFORE_CAPTURE_MS = 1000L
+    }
+
     private val _state = MutableStateFlow<UIState>(UIState.Idle)
     val state: StateFlow<UIState> = _state.asStateFlow()
 
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+
+    // Face detection state for guide overlay
+    private val _isFaceDetected = MutableStateFlow(false)
+    val isFaceDetected: StateFlow<Boolean> = _isFaceDetected.asStateFlow()
+
+    private val _isFaceCentered = MutableStateFlow(false)
+    val isFaceCentered: StateFlow<Boolean> = _isFaceCentered.asStateFlow()
+
+    private val _statusMessage = MutableStateFlow("Arahkan wajah ke kamera")
+    val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
     // Debug: expose last detection for overlay
     private val _debugDetection = MutableStateFlow<FaceDetectionResult?>(null)
@@ -48,6 +64,9 @@ class ScannerViewModel @Inject constructor(
     // Sync status
     private val _syncStatus = MutableStateFlow<String?>(null)
     val syncStatus: StateFlow<String?> = _syncStatus.asStateFlow()
+
+    // Delayed capture — 1s wait after liveness passes
+    private var pendingCaptureAt: Long = 0L
 
     sealed class UIState {
         data object Idle : UIState()
@@ -66,49 +85,84 @@ class ScannerViewModel @Inject constructor(
         if (_state.value is UIState.Success || _state.value is UIState.Error) return
         if (_isProcessing.value) return
 
-        _isProcessing.value = true
-
-        // Detection + liveness synchronously on analyzer thread.
-        // ImageProxy is only valid during this call.
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
             Log.d("ScannerVM", "mediaImage null")
-            _isProcessing.value = false
+            pendingCaptureAt = 0L
+            _isFaceDetected.value = false
+            _isFaceCentered.value = false
+            _statusMessage.value = "Arahkan wajah ke kamera"
+            _debugDetection.value = null
             return
         }
 
         val detection = matchEngine.detectFromImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-
-        // Expose detection for debug overlay
         _debugDetection.value = detection
 
         if (detection == null) {
             Log.d("ScannerVM", "no face detected")
-            _isProcessing.value = false
+            pendingCaptureAt = 0L
+            _isFaceDetected.value = false
+            _isFaceCentered.value = false
+            _statusMessage.value = "Arahkan wajah ke kamera"
             return
         }
 
+        _isFaceDetected.value = true
+
         if (!detection.isGoodQuality) {
-            _state.value = UIState.Error("Wajah terlalu miring — hadap lurus ke kamera")
-            _isProcessing.value = false
+            _isFaceCentered.value = false
+            pendingCaptureAt = 0L
+            _statusMessage.value = "Hadapkan wajah lurus ke kamera"
+            _debugDetection.value = detection
+            return
+        }
+
+        // Center-position check: wajah harus di tengah frame
+        val centered = isFaceCentered(detection)
+        _isFaceCentered.value = centered
+        if (!centered) {
+            pendingCaptureAt = 0L
+            _statusMessage.value = "Posisikan wajah di tengah kotak"
+            _debugDetection.value = detection
             return
         }
 
         val currentTime = System.currentTimeMillis()
+
+        // Liveness check (blink detection)
         val livenessPassed = matchEngine.checkLiveness(detection, currentTime)
         if (!livenessPassed) {
             val timedOut = matchEngine.isLivenessWindowExpired(currentTime)
-            _state.value = if (timedOut) {
-                UIState.Error("Kedipkan mata untuk verifikasi")
+            _statusMessage.value = if (timedOut) {
+                "Kedipkan mata untuk verifikasi"
             } else {
-                // silently keep scanning
-                UIState.Idle
+                "Kedipkan mata"
             }
-            _isProcessing.value = false
+            _debugDetection.value = detection
             return
         }
 
-        // Liveness passed — take bitmap then launch coroutine for heavy work
+        // If this is the first frame after liveness passed, start 1s delay
+        if (pendingCaptureAt == 0L) {
+            pendingCaptureAt = currentTime + DELAY_BEFORE_CAPTURE_MS
+            _statusMessage.value = "Tahan pose..."
+            _debugDetection.value = detection
+            return
+        }
+
+        // Wait for delay to elapse (wajah harus tetap di tengah)
+        if (currentTime < pendingCaptureAt) {
+            _statusMessage.value = "Tahan pose..."
+            _debugDetection.value = detection
+            return
+        }
+
+        // ─── CAPTURE TIME ───
+        pendingCaptureAt = 0L
+        _isProcessing.value = true
+        _statusMessage.value = "Memproses..."
+
         val bitmap = imageProxyToBitmap(imageProxy)
         if (bitmap == null) {
             _isProcessing.value = false
@@ -152,6 +206,7 @@ class ScannerViewModel @Inject constructor(
                             isViolation = result.isViolation,
                             message = result.violationMessage
                         )
+                        _statusMessage.value = ""
                     }
                     is MatchEngineResult.Unknown -> {
                         voiceFeedback.speakError()
@@ -170,6 +225,17 @@ class ScannerViewModel @Inject constructor(
                 bitmap.recycle()
             }
         }
+    }
+
+    private fun isFaceCentered(detection: FaceDetectionResult): Boolean {
+        val cx = detection.imageWidth / 2f
+        val cy = detection.imageHeight / 2f
+        val bb = detection.boundingBox
+        val faceCx = bb.exactCenterX()
+        val faceCy = bb.exactCenterY()
+        val marginX = detection.imageWidth * CENTER_MARGIN_RATIO
+        val marginY = detection.imageHeight * CENTER_MARGIN_RATIO
+        return abs(faceCx - cx) <= marginX && abs(faceCy - cy) <= marginY
     }
 
     /** Manual pull data from server */
@@ -195,6 +261,10 @@ class ScannerViewModel @Inject constructor(
 
     fun resetState() {
         _state.value = UIState.Idle
+        pendingCaptureAt = 0L
+        _isFaceDetected.value = false
+        _isFaceCentered.value = false
+        _statusMessage.value = "Arahkan wajah ke kamera"
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
