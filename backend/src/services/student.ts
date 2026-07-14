@@ -113,10 +113,18 @@ export async function updateStudent(id: string, data: Record<string, unknown>) {
 }
 
 export async function deleteStudent(id: string) {
+  await prisma.attendanceLog.deleteMany({ where: { studentId: id } });
+  await prisma.permit.deleteMany({ where: { studentId: id } });
   await prisma.faceVector.deleteMany({ where: { studentId: id } });
   const student = await prisma.student.delete({ where: { id } });
   await triggerSyncForAllDevices();
   return student;
+}
+
+export async function deleteFace(studentId: string) {
+  const result = await prisma.faceVector.deleteMany({ where: { studentId } });
+  await triggerSyncForAllDevices();
+  return { deleted: result.count > 0 };
 }
 
 export async function uploadFace(studentId: string, vector: number[]) {
