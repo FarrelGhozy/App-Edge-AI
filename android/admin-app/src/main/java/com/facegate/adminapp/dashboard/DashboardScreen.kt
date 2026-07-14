@@ -101,13 +101,13 @@ fun DashboardScreen(
             val rows = dashboardItems.chunked(3)
             rows.forEach { row ->
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(96.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     row.forEach { item ->
                         DashboardCard(
                             item = item,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             onClick = { navController.navigate(item.screen.route) }
                         )
                     }
@@ -295,16 +295,28 @@ fun DashboardCard(
     onClick: () -> Unit
 ) {
     Card(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = item.color.copy(alpha = 0.1f))
+        modifier = modifier.clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = item.color.copy(alpha = 0.1f)),
+        shape = MaterialTheme.shapes.medium
     ) {
         Column(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier.fillMaxSize().padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Icon(item.icon, item.title, tint = item.color, modifier = Modifier.size(32.dp))
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(item.title, style = MaterialTheme.typography.bodyMedium, color = item.color)
+            Icon(
+                imageVector = item.icon,
+                contentDescription = item.title,
+                tint = item.color,
+                modifier = Modifier.size(28.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.labelLarge,
+                color = item.color,
+                maxLines = 1
+            )
         }
     }
 }
