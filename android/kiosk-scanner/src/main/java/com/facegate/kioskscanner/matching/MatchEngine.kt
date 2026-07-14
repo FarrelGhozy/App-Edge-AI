@@ -55,6 +55,12 @@ class MatchEngine @Inject constructor(
         )
     }
 
+    /** Reset liveness state (call when pending capture is cancelled). */
+    fun resetLiveness() {
+        livenessDetector.reset()
+        livenessWindowStart = 0L
+    }
+
     /** Check if liveness window (3.5s) has expired. */
     fun isLivenessWindowExpired(currentTimeMs: Long): Boolean {
         return currentTimeMs - getLivenessWindowStart() > 3500L
