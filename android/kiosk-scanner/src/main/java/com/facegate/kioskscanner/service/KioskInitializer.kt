@@ -10,6 +10,7 @@ import com.facegate.core.data.remote.dto.LoginRequest
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.FaceMatcher
+import com.facegate.core.sync.SyncManager
 import com.facegate.kioskscanner.BuildConfig
 import com.facegate.kioskscanner.scanner.VoiceFeedback
 import com.facegate.kioskscanner.sync.DevicePingWorker
@@ -31,7 +32,8 @@ class KioskInitializer @Inject constructor(
     private val faceMatcher: FaceMatcher,
     private val faceDetector: FaceDetectorWrapper,
     private val faceEmbedder: FaceEmbedder,
-    private val voiceFeedback: VoiceFeedback
+    private val voiceFeedback: VoiceFeedback,
+    private val syncManager: SyncManager
 ) {
     companion object {
         private const val TAG = "KioskInitializer"
@@ -49,6 +51,14 @@ class KioskInitializer @Inject constructor(
                 registerDevice()
                 loadCachedFaces()
                 loadCachedRules()
+                // Immediate sync on first boot — download faces + rules
+                if (faceVectorDao.count() == 0) {
+                    Log.d(TAG, "No cached faces — performing initial sync")
+                    val deviceId = devicePreferences.getDeviceId()
+                    if (deviceId != null) {
+                        syncManager.syncAll(deviceId)
+                    }
+                }
                 scheduleWorkers(context)
                 Log.d(TAG, "Kiosk initialization complete")
             } catch (e: Exception) {
@@ -72,7 +82,6 @@ class KioskInitializer @Inject constructor(
         Log.d(TAG, "VoiceFeedback initialized")
     }
 
-    /** Auto-login using device credentials to get JWT token for API access */
     private suspend fun loginDevice() {
         try {
             val response = apiService.login(
