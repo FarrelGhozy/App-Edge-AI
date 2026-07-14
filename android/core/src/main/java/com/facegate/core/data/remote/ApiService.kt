@@ -41,6 +41,9 @@ interface ApiService {
         @Body request: UploadFaceRequest
     ): Response<Unit>
 
+    @DELETE("api/students/{id}/face")
+    suspend fun deleteFace(@Path("id") id: String): Response<Unit>
+
     @POST("api/attendance/scan")
     suspend fun scanAttendance(@Body request: ScanRequest): Response<Unit>
 
