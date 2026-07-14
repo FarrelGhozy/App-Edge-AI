@@ -105,14 +105,20 @@ export async function violationReport(from: string, to: string) {
 
   const violations = await prisma.violation.findMany({
     where: { timestamp: { gte: fromDate, lte: toDate } },
-    orderBy: { timestamp: "desc" }
+    orderBy: { timestamp: "desc" },
+    include: { student: { select: { name: true } } }
   });
+
+  const enriched = violations.map(v => ({
+    ...v,
+    studentName: v.student.name
+  }));
 
   return {
     from,
     to,
     total: violations.length,
-    violations
+    violations: enriched
   };
 }
 

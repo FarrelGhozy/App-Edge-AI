@@ -26,7 +26,10 @@ import com.facegate.adminapp.notifications.NotificationListScreen
 import com.facegate.adminapp.violations.ViolationDetailScreen
 import com.facegate.adminapp.violations.ViolationListScreen
 import com.facegate.adminapp.reports.DailyReportScreen
+import com.facegate.adminapp.reports.MonthlyReportScreen
 import com.facegate.adminapp.reports.ReportScreen
+import com.facegate.adminapp.reports.ViolationReportScreen
+import com.facegate.adminapp.reports.OutsideHoursReportScreen
 import com.facegate.adminapp.monitor.OutsideNowScreen
 import com.facegate.adminapp.register.FaceRegisterScreen
 import com.facegate.adminapp.students.ImportCsvScreen
@@ -138,6 +141,15 @@ fun AppNavigator(
         }
         composable(Screen.DailyReport.route) {
             DailyReportScreen(navController = navController)
+        }
+        composable(Screen.MonthlyReport.route) {
+            MonthlyReportScreen(navController = navController)
+        }
+        composable(Screen.ViolationReport.route) {
+            ViolationReportScreen(navController = navController)
+        }
+        composable(Screen.OutsideHoursReport.route) {
+            OutsideHoursReportScreen(navController = navController)
         }
         composable(Screen.OutsideNow.route) {
             OutsideNowScreen(navController = navController)

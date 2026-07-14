@@ -46,7 +46,7 @@ class ViolationListViewModel @Inject constructor(
                     val items = body.data.map { dto ->
                         ViolationItem(
                             id = dto.id,
-                            studentName = dto.studentId,
+                            studentName = dto.studentName,
                             type = dto.type,
                             isResolved = dto.isResolved,
                             timestamp = dto.timestamp

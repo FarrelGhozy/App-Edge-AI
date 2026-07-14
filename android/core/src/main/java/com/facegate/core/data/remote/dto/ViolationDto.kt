@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 data class ViolationDto(
     val id: String,
     @SerialName("studentId") val studentId: String,
+    @SerialName("studentName") val studentName: String = "",
     val type: String,
     val description: String? = null,
     val action: String? = null,

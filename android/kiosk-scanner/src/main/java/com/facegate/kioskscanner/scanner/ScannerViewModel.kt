@@ -275,4 +275,9 @@ class ScannerViewModel @Inject constructor(
             null
         }
     }
+
+    override fun onCleared() {
+        super.onCleared()
+        voiceFeedback.release()
+    }
 }

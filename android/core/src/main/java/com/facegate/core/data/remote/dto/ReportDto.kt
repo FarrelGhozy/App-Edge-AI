@@ -66,3 +66,24 @@ data class OutsideStudent(
     @SerialName("studyProgram") val studyProgram: String,
     @SerialName("keluarSince") val keluarSince: String? = null
 )
+
+@Serializable
+data class OutsideHoursResponse(
+    val data: OutsideHoursData
+)
+
+@Serializable
+data class OutsideHoursData(
+    val date: String,
+    val periods: List<OutsidePeriod>,
+    @SerialName("totalOutside") val totalOutside: Int
+)
+
+@Serializable
+data class OutsidePeriod(
+    @SerialName("studentId") val studentId: String,
+    @SerialName("studentName") val studentName: String,
+    @SerialName("keluarTime") val keluarTime: String,
+    @SerialName("kembaliTime") val kembaliTime: String? = null,
+    @SerialName("durationMinutes") val durationMinutes: Int? = null
+)

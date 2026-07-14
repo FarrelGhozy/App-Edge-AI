@@ -15,14 +15,18 @@ export const violationRoutes = new Elysia()
     return await listViolations(params);
   })
   .get("/api/violations/:id", async ({ params: { id } }) => {
-    const violation = await prisma.violation.findUnique({ where: { id } });
+    const violation = await prisma.violation.findUnique({
+      where: { id },
+      include: { student: { select: { name: true } } }
+    });
     if (!violation) {
       return new Response(JSON.stringify({ success: false, error: "Violation not found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" }
       });
     }
-    return { success: true, data: violation };
+    const { student, ...rest } = violation;
+    return { success: true, data: { ...rest, studentName: student.name } };
   })
   .post("/api/violations", async ({ body }) => {
     const data = body as {

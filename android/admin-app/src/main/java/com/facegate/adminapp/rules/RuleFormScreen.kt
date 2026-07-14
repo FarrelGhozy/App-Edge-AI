@@ -144,7 +144,7 @@ fun RuleFormScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
-                onClick = { viewModel.submit() },
+                onClick = { viewModel.submit(ruleId) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !state.isSubmitting
             ) {

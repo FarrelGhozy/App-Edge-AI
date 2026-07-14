@@ -74,6 +74,15 @@ interface ApiService {
     @GET("api/rules")
     suspend fun getRules(): Response<List<CampusRuleDto>>
 
+    @POST("api/rules")
+    suspend fun createRule(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    @PUT("api/rules/{id}")
+    suspend fun updateRule(
+        @Path("id") id: String,
+        @Body body: Map<String, Any>
+    ): Response<Map<String, Any>>
+
     @GET("api/settings")
     suspend fun getSettings(): Response<Map<String, String>>
 
@@ -168,6 +177,11 @@ interface ApiService {
 
     @GET("api/reports/outside-now")
     suspend fun getOutsideNow(): Response<OutsideNowResponse>
+
+    @GET("api/reports/outside-hours")
+    suspend fun getOutsideHoursReport(
+        @Query("date") date: String? = null
+    ): Response<OutsideHoursResponse>
 
     // =========== DASHBOARD ===========
     @GET("api/dashboard/summary")

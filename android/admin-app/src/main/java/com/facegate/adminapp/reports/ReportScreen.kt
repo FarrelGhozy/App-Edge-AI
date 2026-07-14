@@ -45,21 +45,21 @@ fun ReportScreen(navController: NavController) {
                 icon = Icons.Default.BarChart,
                 title = "Rekap Bulanan",
                 desc = "Statistik per program studi",
-                onClick = { /* TODO: monthly report */ }
+                onClick = { navController.navigate(Screen.MonthlyReport.route) }
             )
             Spacer(modifier = Modifier.height(12.dp))
             ReportCard(
                 icon = Icons.Default.Gavel,
                 title = "Laporan Pelanggaran",
                 desc = "Filter tipe dan tanggal",
-                onClick = { /* TODO: violation report */ }
+                onClick = { navController.navigate(Screen.ViolationReport.route) }
             )
             Spacer(modifier = Modifier.height(12.dp))
             ReportCard(
                 icon = Icons.Default.NightsStay,
                 title = "Keluar di Luar Jam Izin",
                 desc = "Mahasiswa keluar di luar jam izin",
-                onClick = { /* TODO: outside hours report */ }
+                onClick = { navController.navigate(Screen.OutsideHoursReport.route) }
             )
             Spacer(modifier = Modifier.height(12.dp))
             ReportCard(

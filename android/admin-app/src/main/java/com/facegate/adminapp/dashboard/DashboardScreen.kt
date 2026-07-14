@@ -127,27 +127,41 @@ private fun StatCards(state: DashboardState) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        StatCard(
-            title = "Mahasiswa",
-            value = state.totalStudents.toString(),
-            icon = Icons.Default.People,
-            color = Color(0xFF1976D2),
-            modifier = Modifier.weight(1f)
-        )
-        StatCard(
-            title = "Di Luar",
-            value = state.currentlyOutside.toString(),
-            icon = Icons.Default.ExitToApp,
-            color = Color(0xFFF57C00),
-            modifier = Modifier.weight(1f)
-        )
-        StatCard(
-            title = "Violasi Hari Ini",
-            value = state.violationsToday.toString(),
-            icon = Icons.Default.Gavel,
-            color = Color(0xFFC62828),
-            modifier = Modifier.weight(1f)
-        )
+        if (state.isLoading && state.totalStudents == 0) {
+            repeat(3) {
+                Card(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Memuat...", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        } else {
+            StatCard(
+                title = "Mahasiswa",
+                value = state.totalStudents.toString(),
+                icon = Icons.Default.People,
+                color = Color(0xFF1976D2),
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                title = "Di Luar",
+                value = state.currentlyOutside.toString(),
+                icon = Icons.Default.ExitToApp,
+                color = Color(0xFFF57C00),
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                title = "Violasi Hari Ini",
+                value = state.violationsToday.toString(),
+                icon = Icons.Default.Gavel,
+                color = Color(0xFFC62828),
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 

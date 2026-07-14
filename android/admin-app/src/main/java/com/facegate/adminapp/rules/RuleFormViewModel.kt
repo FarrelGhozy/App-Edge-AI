@@ -65,25 +65,44 @@ class RuleFormViewModel @Inject constructor(
     fun setStudyProgram(s: String) { _uiState.value = _uiState.value.copy(studyProgram = s) }
     fun setAcademicYear(a: String) { _uiState.value = _uiState.value.copy(academicYear = a) }
 
-    fun submit() {
+    fun submit(ruleId: String? = null) {
         val s = _uiState.value
         if (s.startTime.isBlank() || s.endTime.isBlank()) {
-            _uiState.value = s.copy(error = "Isi jam")
+            _uiState.value = s.copy(error = "Isi jam mulai dan jam selesai")
             return
         }
 
         _uiState.value = s.copy(isSubmitting = true, error = null)
         viewModelScope.launch {
             try {
-                // Backend doesn't have POST /api/rules, so skip actual API call
-                _uiState.value = _uiState.value.copy(
-                    isSubmitting = false,
-                    isSuccess = true
+                val body = mapOf<String, Any>(
+                    "dayOfWeek" to s.dayOfWeek,
+                    "startTime" to s.startTime.trim(),
+                    "endTime" to s.endTime.trim(),
+                    "isRestricted" to s.isRestricted,
+                    "studyProgram" to (s.studyProgram.ifBlank { "" }),
+                    "academicYear" to (s.academicYear.ifBlank { "" })
                 )
+                val response = if (ruleId != null) {
+                    apiService.updateRule(ruleId, body)
+                } else {
+                    apiService.createRule(body)
+                }
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(
+                        isSubmitting = false,
+                        isSuccess = true
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isSubmitting = false,
+                        error = "Gagal menyimpan aturan"
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isSubmitting = false,
-                    error = "Gagal menyimpan"
+                    error = "Gagal terhubung ke server"
                 )
             }
         }

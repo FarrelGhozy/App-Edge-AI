@@ -179,7 +179,7 @@ fun CameraPreviewWithAnalysis(
                                 imageAnalysis
                             )
                         } catch (e: Exception) {
-                            // Camera binding failed
+                            Log.e("Scanner", "Camera binding failed: ${e.message}")
                         }
                     }, mainExecutor)
                 }

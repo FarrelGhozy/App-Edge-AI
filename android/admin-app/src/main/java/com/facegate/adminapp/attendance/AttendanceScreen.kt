@@ -1,5 +1,6 @@
 package com.facegate.adminapp.attendance
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,6 +16,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.core.data.remote.dto.AttendanceLogDto
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,14 +51,57 @@ fun AttendanceScreen(
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.padding(16.dp)) {
+                var showDatePicker by remember { mutableStateOf(false) }
+                val datePickerState = rememberDatePickerState(
+                    initialSelectedDateMillis = if (state.filterDate.isNotBlank()) {
+                        try {
+                            val zdt = ZonedDateTime.parse(state.filterDate + "T00:00:00+07:00")
+                            zdt.toInstant().toEpochMilli()
+                        } catch (_: Exception) { null }
+                    } else null
+                )
+
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = state.filterDate,
-                        onValueChange = { viewModel.setFilterDate(it) },
+                        onValueChange = {},
                         label = { Text("Tanggal") },
                         modifier = Modifier.weight(1f),
-                        singleLine = true
+                        singleLine = true,
+                        readOnly = true,
+                        trailingIcon = {
+                            Icon(Icons.Default.DateRange, "Pilih tanggal",
+                                modifier = Modifier.clickable { showDatePicker = true })
+                        }
                     )
+                    if (state.filterDate.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(onClick = { viewModel.setFilterDate("") }) {
+                            Icon(Icons.Default.Close, "Hapus filter")
+                        }
+                    }
+                }
+
+                if (showDatePicker) {
+                    DatePickerDialog(
+                        onDismissRequest = { showDatePicker = false },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                datePickerState.selectedDateMillis?.let { millis ->
+                                    val date = Instant.ofEpochMilli(millis)
+                                        .atZone(ZoneId.of("Asia/Jakarta"))
+                                        .format(DateTimeFormatter.ISO_LOCAL_DATE)
+                                    viewModel.setFilterDate(date)
+                                }
+                                showDatePicker = false
+                            }) { Text("Pilih") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDatePicker = false }) { Text("Batal") }
+                        }
+                    ) {
+                        DatePicker(state = datePickerState)
+                    }
                 }
 
                 if (state.isLoading && state.logs.isEmpty()) {

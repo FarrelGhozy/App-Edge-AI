@@ -36,8 +36,25 @@ fun NotificationListScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = { viewModel.markAllRead() }) {
+                    var showConfirm by remember { mutableStateOf(false) }
+                    TextButton(onClick = { showConfirm = true }) {
                         Text("Baca Semua")
+                    }
+                    if (showConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showConfirm = false },
+                            title = { Text("Baca Semua Notifikasi") },
+                            text = { Text("Tandai semua notifikasi sebagai sudah dibaca?") },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    showConfirm = false
+                                    viewModel.markAllRead()
+                                }) { Text("Ya") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showConfirm = false }) { Text("Batal") }
+                            }
+                        )
                     }
                 }
             )

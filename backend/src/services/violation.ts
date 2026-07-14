@@ -15,9 +15,20 @@ export async function listViolations(params: {
   if (params.studentId) where.studentId = params.studentId;
 
   const [data, total] = await Promise.all([
-    prisma.violation.findMany({ where, skip, take: pageSize, orderBy: { timestamp: "desc" } }),
+    prisma.violation.findMany({
+      where,
+      skip,
+      take: pageSize,
+      orderBy: { timestamp: "desc" },
+      include: { student: { select: { name: true } } }
+    }),
     prisma.violation.count({ where })
   ]);
 
-  return { data, total, page, pageSize };
+  const enriched = data.map(v => ({
+    ...v,
+    studentName: v.student.name
+  }));
+
+  return { data: enriched, total, page, pageSize };
 }
