@@ -8,7 +8,8 @@ import {
   createStudent,
   updateStudent,
   deleteStudent,
-  uploadFace
+  uploadFace,
+  deleteFace
 } from "../services/student";
 import { authGuard } from "../guards/auth";
 
@@ -93,4 +94,14 @@ export const studentRoutes = new Elysia()
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
-  }, { body: uploadFaceSchema });
+  }, { body: uploadFaceSchema })
+  .delete("/api/students/:id/face", async ({ params: { id } }) => {
+    const result = await deleteFace(id);
+    if (!result.deleted) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Wajah tidak ditemukan" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    return { success: true };
+  });
