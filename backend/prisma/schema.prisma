@@ -70,7 +70,7 @@ model AttendanceLog {
   isSynced        Boolean  @default(true) @map("is_synced")
   createdAt       DateTime @default(now()) @map("created_at")
 
-  student         Student  @relation(fields: [studentId], references: [id])
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@index([studentId])
   @@index([timestamp])
@@ -94,7 +94,7 @@ model Permit {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  student         Student   @relation(fields: [studentId], references: [id])
+  student         Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   approvedBy      Admin?    @relation(fields: [approvedById], references: [id])
 
   @@index([studentId])
