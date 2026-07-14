@@ -17,7 +17,11 @@ data class StudentDetailState(
     val error: String? = null,
     val isDeleted: Boolean = false,
     val faceRegistered: Boolean = false,
-    val faceUpdatedAt: String? = null
+    val faceUpdatedAt: String? = null,
+    val showDeleteConfirm: Boolean = false,
+    val showDeleteFaceConfirm: Boolean = false,
+    val isDeletingFace: Boolean = false,
+    val faceDeleteError: String? = null
 )
 
 @HiltViewModel
@@ -50,8 +54,17 @@ class StudentDetailViewModel @Inject constructor(
         }
     }
 
+    fun showDeleteConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteConfirm = true)
+    }
+
+    fun hideDeleteConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteConfirm = false)
+    }
+
     fun deleteStudent(id: String) {
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(showDeleteConfirm = false)
             try {
                 apiService.deleteStudent(id)
                 _uiState.value = _uiState.value.copy(isDeleted = true)
@@ -61,7 +74,42 @@ class StudentDetailViewModel @Inject constructor(
         }
     }
 
+    fun showDeleteFaceConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteFaceConfirm = true)
+    }
+
+    fun hideDeleteFaceConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteFaceConfirm = false)
+    }
+
+    fun deleteFace(id: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                showDeleteFaceConfirm = false,
+                isDeletingFace = true,
+                faceDeleteError = null
+            )
+            try {
+                apiService.deleteFace(id)
+                _uiState.value = _uiState.value.copy(
+                    isDeletingFace = false,
+                    faceRegistered = false,
+                    faceUpdatedAt = null
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isDeletingFace = false,
+                    faceDeleteError = "Gagal menghapus wajah"
+                )
+            }
+        }
+    }
+
     fun onFaceRegistered() {
         _uiState.value = _uiState.value.copy(faceRegistered = true)
+    }
+
+    fun clearFaceDeleteError() {
+        _uiState.value = _uiState.value.copy(faceDeleteError = null)
     }
 }
