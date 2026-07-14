@@ -36,6 +36,57 @@ fun StudentDetailScreen(
         }
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(state.faceDeleteError) {
+        state.faceDeleteError?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearFaceDeleteError()
+        }
+    }
+
+    // Dialog konfirmasi hapus mahasiswa
+    if (state.showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { viewModel.hideDeleteConfirm() },
+            icon = { Icon(Icons.Default.Warning, null) },
+            title = { Text("Hapus Mahasiswa") },
+            text = {
+                Text("Yakin ingin menghapus ${state.student?.name ?: "mahasiswa ini"}? " +
+                     "Semua data absensi, izin, pelanggaran, dan wajah akan ikut terhapus.")
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.deleteStudent(studentId) }) {
+                    Text("Hapus", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.hideDeleteConfirm() }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
+    // Dialog konfirmasi hapus wajah
+    if (state.showDeleteFaceConfirm) {
+        AlertDialog(
+            onDismissRequest = { viewModel.hideDeleteFaceConfirm() },
+            icon = { Icon(Icons.Default.Face, null) },
+            title = { Text("Hapus Wajah") },
+            text = { Text("Yakin ingin menghapus data wajah ${state.student?.name ?: ""}?") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.deleteFace(studentId) }) {
+                    Text("Hapus", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.hideDeleteFaceConfirm() }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -52,13 +103,14 @@ fun StudentDetailScreen(
                         }) {
                             Icon(Icons.Default.Edit, "Edit")
                         }
-                        IconButton(onClick = { viewModel.deleteStudent(studentId) }) {
+                        IconButton(onClick = { viewModel.showDeleteConfirm() }) {
                             Icon(Icons.Default.Delete, "Hapus")
                         }
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
@@ -81,9 +133,11 @@ fun StudentDetailScreen(
                         FaceRegistrationCard(
                             isRegistered = state.faceRegistered,
                             updatedAt = state.faceUpdatedAt,
-                            onClick = {
+                            isDeletingFace = state.isDeletingFace,
+                            onRegister = {
                                 navController.navigate(Screen.FaceRegister.createRoute(studentId))
-                            }
+                            },
+                            onDelete = { viewModel.showDeleteFaceConfirm() }
                         )
                     }
                 }
@@ -99,9 +153,14 @@ fun StudentDetailScreen(
 }
 
 @Composable
-fun FaceRegistrationCard(isRegistered: Boolean, updatedAt: String? = null, onClick: () -> Unit) {
+fun FaceRegistrationCard(
+    isRegistered: Boolean,
+    updatedAt: String? = null,
+    isDeletingFace: Boolean = false,
+    onRegister: () -> Unit,
+    onDelete: () -> Unit
+) {
     Card(
-        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = if (isRegistered)
@@ -110,46 +169,94 @@ fun FaceRegistrationCard(isRegistered: Boolean, updatedAt: String? = null, onCli
                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
         )
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Face,
-                contentDescription = null,
-                tint = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer
-                       else MaterialTheme.colorScheme.onErrorContainer
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isRegistered) "Wajah Terdaftar" else "Wajah Belum Terdaftar",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer
-                           else MaterialTheme.colorScheme.onErrorContainer
-                )
-                if (isRegistered && updatedAt != null) {
-                    Text(
-                        text = "Terakhir diperbarui: ${formatDateTime(updatedAt)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+        if (isRegistered) {
+            Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Face,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
-                } else {
-                    Text(
-                        text = if (isRegistered) "Ketuk untuk merekam ulang"
-                               else "Ketuk untuk merekam wajah",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                               else MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
-                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Wajah Terdaftar",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        if (updatedAt != null) {
+                            Text(
+                                text = "Terakhir diperbarui: ${formatDateTime(updatedAt)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onRegister,
+                        modifier = Modifier.weight(1f),
+                        enabled = !isDeletingFace
+                    ) {
+                        Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Rekam Ulang")
+                    }
+                    OutlinedButton(
+                        onClick = onDelete,
+                        modifier = Modifier.weight(1f),
+                        enabled = !isDeletingFace,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        if (isDeletingFace) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text("Hapus Wajah")
+                    }
                 }
             }
-            Icon(
-                imageVector = Icons.Default.CameraAlt,
-                contentDescription = "Registrasi Wajah",
-                tint = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer
-                       else MaterialTheme.colorScheme.onErrorContainer
-            )
+        } else {
+            Row(
+                modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Face,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Wajah Belum Terdaftar",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Text(
+                        text = "Ketuk untuk merekam wajah",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                    )
+                }
+                FilledTonalButton(
+                    onClick = onRegister,
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                ) {
+                    Icon(Icons.Default.CameraAlt, "Registrasi Wajah", modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Rekam")
+                }
+            }
         }
     }
 }
@@ -161,7 +268,7 @@ fun DetailRow(label: String, value: String) {
             modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.65f))
     }
-    Divider()
+    HorizontalDivider()
 }
 
 private fun formatDateTime(isoString: String): String {
