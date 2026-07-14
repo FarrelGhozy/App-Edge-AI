@@ -142,9 +142,9 @@ class SyncManager @Inject constructor(
         return 0
     }
 
-    suspend fun checkSyncRequested(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun checkSyncRequested(deviceId: String? = null): Boolean = withContext(Dispatchers.IO) {
         try {
-            val response = apiService.checkSyncRequested()
+            val response = apiService.checkSyncRequested(deviceId)
             response.isSuccessful && response.body()?.requested == true
         } catch (_: Exception) {
             false
