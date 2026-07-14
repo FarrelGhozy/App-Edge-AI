@@ -7,8 +7,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -17,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.navigation.Screen
 import com.facegate.core.data.remote.dto.AttendanceLogDto
@@ -51,9 +53,15 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val pullRefreshState = rememberPullToRefreshState()
 
     LaunchedEffect(Unit) {
         viewModel.loadSummary()
+        viewModel.startAutoRefresh()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.stopAutoRefresh() }
     }
 
     LaunchedEffect(state.isLoggedOut) {
@@ -84,38 +92,44 @@ fun DashboardScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize().padding(padding)
         ) {
-            StatCards(state)
-            Spacer(modifier = Modifier.height(16.dp))
-            RecentScansSection(state.recentScans)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Menu", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            val rows = dashboardItems.chunked(3)
-            rows.forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().height(96.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    row.forEach { item ->
-                        DashboardCard(
-                            item = item,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            onClick = { navController.navigate(item.screen.route) }
-                        )
-                    }
-                    if (row.size < 3) {
-                        Spacer(modifier = Modifier.weight((3 - row.size).toFloat()))
-                    }
-                }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp)
+            ) {
+                StatCards(state)
+                Spacer(modifier = Modifier.height(16.dp))
+                RecentScansSection(state.recentScans)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Menu", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(12.dp))
+
+                val rows = dashboardItems.chunked(3)
+                rows.forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(96.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        row.forEach { item ->
+                            DashboardCard(
+                                item = item,
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                onClick = { navController.navigate(item.screen.route) }
+                            )
+                        }
+                        if (row.size < 3) {
+                            Spacer(modifier = Modifier.weight((3 - row.size).toFloat()))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
             }
         }
     }
