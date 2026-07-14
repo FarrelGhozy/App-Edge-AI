@@ -23,12 +23,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -38,11 +39,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.facegate.core.face.FaceDetectionResult
 import com.facegate.kioskscanner.scanner.ScannerViewModel.UIState
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
-import kotlin.math.abs
 
 @Composable
 fun ScannerScreen(
@@ -50,7 +49,9 @@ fun ScannerScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
-    val debugDetection by viewModel.debugDetection.collectAsState()
+    val isFaceDetected by viewModel.isFaceDetected.collectAsState()
+    val isFaceCentered by viewModel.isFaceCentered.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -64,37 +65,16 @@ fun ScannerScreen(
             }
         )
 
-        // Debug overlay: bounding box + eye landmarks
-        EyeDebugOverlay(
-            detection = debugDetection,
-            imageWidth = debugDetection?.imageWidth ?: 640f,
-            imageHeight = debugDetection?.imageHeight ?: 480f
+        // Guide box overlay (kotak panduan di tengah)
+        FaceGuideOverlay(
+            isDetected = isFaceDetected,
+            isCentered = isFaceCentered,
+            statusMessage = statusMessage,
+            state = state
         )
-
-        // Debug text: NO FACE / FACE OK
-        DebugTextOverlay(detection = debugDetection)
 
         // Result overlay (success/error)
         ResultOverlay(state = state)
-
-        // "Arahkan wajah" hint
-        if (state is UIState.Idle) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 80.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .padding(horizontal = 32.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text = "Arahkan wajah ke kamera",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
 
         // Sync button (top-right)
         IconButton(
@@ -274,114 +254,90 @@ fun ResultOverlay(state: UIState) {
     }
 }
 
-// ── Debug overlays (sama seperti FaceRegisterScreen) ──
+// ── Face Guide Overlay (kotak panduan di tengah) ──
 
 @Composable
-private fun EyeDebugOverlay(
-    detection: FaceDetectionResult?,
-    imageWidth: Float,
-    imageHeight: Float
+private fun FaceGuideOverlay(
+    isDetected: Boolean,
+    isCentered: Boolean,
+    statusMessage: String,
+    state: UIState
 ) {
-    if (detection == null) return
-
-    val earText = remember(detection) {
-        val leftEAR = calculateDebugEAR(detection.leftEyeContour)
-        val rightEAR = calculateDebugEAR(detection.rightEyeContour)
-        String.format("EAR L=%.2f R=%.2f blink=%d q=%.2f", leftEAR, rightEAR,
-            detection.leftEyeContour.size, detection.headEulerAngleY)
+    val guideColor = when {
+        state is UIState.Success -> Color(0xFF4CAF50)
+        state is UIState.Error -> Color(0xFFE53935)
+        isDetected && isCentered -> Color(0xFF2196F3)
+        isDetected -> Color(0xFFFFC107)
+        else -> Color.White
     }
+    val guideWidthRatio = 0.55f
+    val guideHeightRatio = 0.45f
 
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val scale = maxOf(size.width / imageWidth, size.height / imageHeight)
-        val imgW = imageWidth * scale
-        val imgH = imageHeight * scale
-        val offX = (size.width - imgW) / 2f
-        val offY = (size.height - imgH) / 2f
-
-        fun mx(x: Float) = (imageWidth - x) * scale + offX
-        fun my(y: Float) = y * scale + offY
-        fun pt(p: android.graphics.PointF) = Offset(mx(p.x), my(p.y))
-
-        // Bounding box
-        val bb = detection.boundingBox
-        val x1 = mx(bb.left.toFloat())
-        val x2 = mx(bb.right.toFloat())
-        val y1 = my(bb.top.toFloat())
-        val y2 = my(bb.bottom.toFloat())
-        drawRect(
-            color = Color.Yellow,
-            topLeft = Offset(minOf(x1, x2), minOf(y1, y2)),
-            size = Size(abs(x2 - x1), abs(y2 - y1)),
-            style = Stroke(width = 2.dp.toPx())
-        )
-
-        // Eye contour landmarks
-        drawEyePoints(detection.leftEyeContour, ::pt)
-        drawEyePoints(detection.rightEyeContour, ::pt)
-
-        // EAR text
-        drawContext.canvas.nativeCanvas.drawText(
-            earText,
-            20f,
-            size.height - 20f,
-            android.graphics.Paint().apply {
-                color = android.graphics.Color.WHITE
-                textSize = 30f
-                isAntiAlias = true
-                setShadowLayer(4f, 1f, 1f, android.graphics.Color.BLACK)
-            }
-        )
-    }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEyePoints(
-    contour: List<android.graphics.PointF>,
-    pt: (android.graphics.PointF) -> Offset
-) {
-    if (contour.size < 14) return
-    // Key landmarks
-    val keyPts = listOf(
-        contour[0] to Color.Red,
-        contour[2] to Color.Green,
-        contour[4] to Color.Green,
-        contour[6] to Color.Green,
-        contour[8] to Color.Yellow,
-        contour[10] to Color.Cyan,
-        contour[12] to Color.Cyan,
-        contour[14] to Color.Cyan,
-    )
-    for ((p, c) in keyPts) {
-        drawCircle(c, radius = 3.dp.toPx(), center = pt(p))
-    }
-    // Eye width line
-    drawLine(Color.White, pt(contour[0]), pt(contour[8]), strokeWidth = 1.dp.toPx())
-    // Vertical pairs
-    drawLine(Color.Green.copy(alpha = 0.5f), pt(contour[2]), pt(contour[14]), strokeWidth = 1.dp.toPx())
-    drawLine(Color.Green.copy(alpha = 0.5f), pt(contour[4]), pt(contour[12]), strokeWidth = 1.dp.toPx())
-    drawLine(Color.Green.copy(alpha = 0.5f), pt(contour[6]), pt(contour[10]), strokeWidth = 1.dp.toPx())
-}
-
-@Composable
-private fun DebugTextOverlay(detection: FaceDetectionResult?) {
-    val text = remember(detection) {
-        if (detection != null) {
-            "FACE OK  pts=${detection.leftEyeContour.size},${detection.rightEyeContour.size}  yaw=${"%.1f".format(detection.headEulerAngleY)}"
-        } else {
-            "NO FACE"
-        }
-    }
     Box(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = text,
-            color = Color.Red,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(8.dp)
-                .background(Color.Black.copy(alpha = 0.5f))
-                .padding(4.dp)
-        )
+        // Dark overlay with cutout + guide border
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val gw = size.width * guideWidthRatio
+            val gh = size.height * guideHeightRatio
+            val gl = (size.width - gw) / 2f
+            val gt = (size.height - gh) / 2f
+
+            val radius = CornerRadius(16.dp.toPx())
+            val path = Path().apply {
+                addRect(Rect(0f, 0f, size.width, size.height))
+                addRoundRect(
+                    RoundRect(
+                        rect = Rect(gl, gt, gl + gw, gt + gh),
+                        cornerRadius = radius
+                    )
+                )
+            }
+            clipPath(path, clipOp = ClipOp.Difference) {
+                drawRect(Color.Black.copy(alpha = 0.45f))
+            }
+
+            drawRoundRect(
+                color = guideColor,
+                topLeft = Offset(gl, gt),
+                size = Size(gw, gh),
+                cornerRadius = radius,
+                style = Stroke(width = 3.dp.toPx())
+            )
+
+            // Corner accents
+            val cornerLen = 30.dp.toPx()
+            val strokeW = 4.dp.toPx()
+            // Top-left
+            drawLine(guideColor, Offset(gl, gt + cornerLen), Offset(gl, gt), strokeW)
+            drawLine(guideColor, Offset(gl, gt), Offset(gl + cornerLen, gt), strokeW)
+            // Top-right
+            drawLine(guideColor, Offset(gl + gw - cornerLen, gt), Offset(gl + gw, gt), strokeW)
+            drawLine(guideColor, Offset(gl + gw, gt), Offset(gl + gw, gt + cornerLen), strokeW)
+            // Bottom-left
+            drawLine(guideColor, Offset(gl, gt + gh - cornerLen), Offset(gl, gt + gh), strokeW)
+            drawLine(guideColor, Offset(gl, gt + gh), Offset(gl + cornerLen, gt + gh), strokeW)
+            // Bottom-right
+            drawLine(guideColor, Offset(gl + gw - cornerLen, gt + gh), Offset(gl + gw, gt + gh), strokeW)
+            drawLine(guideColor, Offset(gl + gw, gt + gh - cornerLen), Offset(gl + gw, gt + gh), strokeW)
+        }
+
+        // Status message above guide
+        if (statusMessage.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(horizontal = 28.dp, vertical = 10.dp)
+            ) {
+                Text(
+                    text = statusMessage,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
     }
 }
 
@@ -393,17 +349,4 @@ fun AutoDismissEffect(state: UIState, onDismiss: () -> Unit) {
             onDismiss()
         }
     }
-}
-
-private fun calculateDebugEAR(contour: List<android.graphics.PointF>): Float {
-    if (contour.size < 14) return 0f
-    val outer = contour[0]; val inner = contour[8]
-    val h = kotlin.math.sqrt((outer.x - inner.x) * (outer.x - inner.x) + (outer.y - inner.y) * (outer.y - inner.y))
-    if (h < 0.001f) return 0f
-    fun d(i: Int, j: Int) = kotlin.math.sqrt(
-        (contour[i].x - contour[j].x) * (contour[i].x - contour[j].x) +
-        (contour[i].y - contour[j].y) * (contour[i].y - contour[j].y)
-    )
-    val avgV = (d(2, 14) + d(4, 12) + d(6, 10)) / 3f
-    return avgV / h
 }
