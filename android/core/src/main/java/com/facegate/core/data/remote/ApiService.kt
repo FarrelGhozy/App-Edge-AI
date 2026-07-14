@@ -66,7 +66,9 @@ interface ApiService {
     suspend fun syncRules(): Response<List<CampusRuleDto>>
 
     @GET("api/sync/requested")
-    suspend fun checkSyncRequested(): Response<SyncRequestResponse>
+    suspend fun checkSyncRequested(
+        @Query("deviceId") deviceId: String? = null
+    ): Response<SyncRequestResponse>
 
     @POST("api/sync/complete")
     suspend fun completeSync(@Body request: SyncCompleteRequest): Response<Unit>
