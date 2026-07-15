@@ -23,7 +23,7 @@ data class MatchResult(
  * Performance: ~1-2ms for 10k faces on modern smartphone CPUs.
  */
 class FaceMatcher(
-    private val threshold: Float = 0.65f   // Slightly raised from 0.6 for 10k faces
+    private val threshold: Float = 0.70f
 ) : FaceIndex {
 
     companion object {
