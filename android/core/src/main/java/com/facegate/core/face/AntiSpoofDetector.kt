@@ -7,12 +7,12 @@ import android.graphics.Rect
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.support.common.FileUtil
-import org.tensorflow.lite.support.common.ops.CastOp
-import org.tensorflow.lite.support.image.ImageProcessor
-import org.tensorflow.lite.support.image.TensorImage
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 import kotlin.math.exp
 
 /**
@@ -49,9 +49,6 @@ class AntiSpoofDetector(context: Context) {
 
     private val interpreter1: Interpreter
     private val interpreter2: Interpreter
-    private val imageProcessor = ImageProcessor.Builder()
-        .add(CastOp(DataType.FLOAT32))
-        .build()
 
     init {
         val options = Interpreter.Options().apply {
@@ -59,15 +56,16 @@ class AntiSpoofDetector(context: Context) {
             useXNNPACK = true
         }
 
-        interpreter1 = Interpreter(
-            FileUtil.loadMappedFile(context, "anti_spoof_2_7.tflite"),
-            options
-        )
-        interpreter2 = Interpreter(
-            FileUtil.loadMappedFile(context, "anti_spoof_4_0.tflite"),
-            options
-        )
+        interpreter1 = Interpreter(loadModelFile(context, "anti_spoof_2_7.tflite"), options)
+        interpreter2 = Interpreter(loadModelFile(context, "anti_spoof_4_0.tflite"), options)
         Log.d(TAG, "Anti-spoof models loaded (2.7 + 4.0)")
+    }
+
+    private fun loadModelFile(context: Context, modelName: String): MappedByteBuffer {
+        val aFd = context.assets.openFd(modelName)
+        val input = FileInputStream(aFd.fileDescriptor)
+        val channel = input.channel
+        return channel.map(FileChannel.MapMode.READ_ONLY, aFd.startOffset, aFd.declaredLength)
     }
 
     /**
@@ -88,8 +86,8 @@ class AntiSpoofDetector(context: Context) {
         val crop2 = cropAndToBgr(frameImage, faceRect, SCALE_2)
 
         // Run inference on both models
-        val input1 = imageProcessor.process(TensorImage.fromBitmap(crop1)).buffer
-        val input2 = imageProcessor.process(TensorImage.fromBitmap(crop2)).buffer
+        val input1 = bitmapToFloatBuffer(crop1)
+        val input2 = bitmapToFloatBuffer(crop2)
         val output1 = Array(1) { FloatArray(OUTPUT_DIM) }
         val output2 = Array(1) { FloatArray(OUTPUT_DIM) }
 
@@ -181,6 +179,22 @@ class AntiSpoofDetector(context: Context) {
         val exps = x.map { exp(it.toDouble()).toFloat() }
         val sum = exps.sum()
         return exps.map { it / sum }.toFloatArray()
+    }
+
+    private fun bitmapToFloatBuffer(bitmap: Bitmap): ByteBuffer {
+        val resized = Bitmap.createScaledBitmap(bitmap, INPUT_DIM, INPUT_DIM, true)
+        val buffer = ByteBuffer.allocateDirect(1 * INPUT_DIM * INPUT_DIM * 3 * 4)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        val pixels = IntArray(INPUT_DIM * INPUT_DIM)
+        resized.getPixels(pixels, 0, INPUT_DIM, 0, 0, INPUT_DIM, INPUT_DIM)
+        for (pixel in pixels) {
+            buffer.putFloat(((pixel shr 16) and 0xFF) / 255f)
+            buffer.putFloat(((pixel shr 8) and 0xFF) / 255f)
+            buffer.putFloat((pixel and 0xFF) / 255f)
+        }
+        resized.recycle()
+        buffer.rewind()
+        return buffer
     }
 
     fun release() {
