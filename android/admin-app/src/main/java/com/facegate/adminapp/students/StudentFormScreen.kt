@@ -101,7 +101,6 @@ fun StudentFormScreen(
                         onValueChange = { viewModel.updateField("nim", it) },
                         label = { Text("NIM") },
                         leadingIcon = { Icon(Icons.Default.Badge, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                        enabled = !isEdit,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
