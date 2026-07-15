@@ -10,6 +10,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
     "db:seed": "bun src/seed.ts"
   },
   "dependencies": {
