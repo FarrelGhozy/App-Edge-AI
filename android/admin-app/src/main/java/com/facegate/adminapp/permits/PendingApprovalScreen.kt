@@ -4,17 +4,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Approval
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.navigation.Screen
+import com.facegate.adminapp.ui.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,31 +42,22 @@ fun PendingApprovalScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                state.isLoading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                }
-                state.error != null -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(state.error!!, color = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(onClick = { viewModel.load() }) {
-                                Text("Coba Lagi")
-                            }
-                        }
-                    }
-                }
-                state.permits.isEmpty() -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Tidak ada izin yang perlu disetujui")
-                    }
-                }
+                state.isLoading -> LoadingState()
+                state.error != null -> ErrorState(
+                    message = state.error,
+                    onRetry = { viewModel.load() }
+                )
+                state.permits.isEmpty() -> EmptyState(
+                    icon = Icons.Default.Approval,
+                    title = "Tidak ada izin yang perlu disetujui"
+                )
                 else -> {
-                    LazyColumn {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
                         items(state.permits) { permit ->
                             Card(
                                 modifier = Modifier
@@ -70,7 +65,12 @@ fun PendingApprovalScreen(
                                     .padding(horizontal = 16.dp, vertical = 4.dp)
                                     .clickable {
                                         navController.navigate(Screen.PermitDetail.createRoute(permit.id))
-                                    }
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.padding(16.dp),
@@ -79,29 +79,26 @@ fun PendingApprovalScreen(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             permit.studentName,
-                                            style = MaterialTheme.typography.titleSmall
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold
                                         )
+                                        Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                             if (permit.type == "izin_harian") "Izin Harian" else "Pengajuan Izin",
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                        Text(
-                                            "${permit.startDate} - ${permit.endDate}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    }
-                                    Surface(
-                                        shape = MaterialTheme.shapes.small,
-                                        color = Color(0xFFFFA000).copy(alpha = 0.15f)
-                                    ) {
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            "PENDING",
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = Color(0xFFFFA000)
+                                            "${permit.startDate} - ${permit.endDate}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                         )
                                     }
+                                    StatusBadge(
+                                        text = "PENDING",
+                                        color = Color(0xFFFFA000)
+                                    )
                                 }
                             }
                         }
