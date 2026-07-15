@@ -26,7 +26,7 @@ fun PermitListScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.load() }
+    LaunchedEffect(Unit) { viewModel.loadPermits() }
 
     Scaffold(
         topBar = {
@@ -53,9 +53,9 @@ fun PermitListScreen(
     ) { padding ->
         when {
             state.isLoading -> LoadingState(modifier = Modifier.padding(padding))
-            state.error != null -> ErrorState(
+            state.                error != null -> ErrorState(
                 message = state.error,
-                onRetry = { viewModel.load() },
+                onRetry = { viewModel.loadPermits() },
                 modifier = Modifier.padding(padding)
             )
             state.permits.isEmpty() -> EmptyState(
@@ -72,7 +72,7 @@ fun PermitListScreen(
                 items(state.permits) { permit ->
                     PermitCard(
                         name = permit.studentName,
-                        purpose = permit.purpose ?: "-",
+                        purpose = permit.type,
                         status = permit.status ?: "pending",
                         onClick = { navController.navigate("permit_detail/${permit.id}") }
                     )
