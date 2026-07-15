@@ -134,9 +134,9 @@ export async function uploadFace(studentId: string, vector: number[]) {
     throw new Error("STUDENT_NOT_FOUND");
   }
 
-  // Validate vector dimension (model produces 192-d embedding)
-  if (vector.length !== 192) {
-    throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192, got ${vector.length}`);
+  // Validate vector dimension: supports both 192-d (MobileFaceNet) and 512-d (ArcFace)
+  if (vector.length !== 192 && vector.length !== 512) {
+    throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192 or 512, got ${vector.length}`);
   }
 
   const vectorStr = `[${vector.join(",")}]`;
