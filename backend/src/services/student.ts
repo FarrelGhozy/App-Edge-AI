@@ -39,7 +39,10 @@ export async function listStudents(params: {
   if (params.search) {
     where.OR = [
       { name: { contains: params.search, mode: "insensitive" } },
-      { nim: { contains: params.search } }
+      { nim: { contains: params.search } },
+      { studyProgram: { contains: params.search, mode: "insensitive" } },
+      { phone: { contains: params.search } },
+      { email: { contains: params.search, mode: "insensitive" } }
     ];
   }
   if (params.studyProgram) where.studyProgram = params.studyProgram;
