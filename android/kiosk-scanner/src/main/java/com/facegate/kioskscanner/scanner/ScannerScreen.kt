@@ -1,7 +1,10 @@
 package com.facegate.kioskscanner.scanner
 
+import android.Manifest
 import android.util.Log
 import android.util.Size as AndroidSize
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -54,15 +57,66 @@ fun ScannerScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val cameraPermissionGranted = remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> cameraPermissionGranted.value = granted }
+
+    LaunchedEffect(Unit) {
+        if (!cameraPermissionGranted.value) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
-        // Camera feed
-        CameraPreviewWithAnalysis(
-            modifier = Modifier.fillMaxSize(),
-            enabled = state is UIState.Idle && !isProcessing,
-            onFrameCaptured = { imageProxy ->
-                viewModel.onFrameCaptured(imageProxy)
+        if (cameraPermissionGranted.value) {
+            // Camera feed
+            CameraPreviewWithAnalysis(
+                modifier = Modifier.fillMaxSize(),
+                enabled = state is UIState.Idle && !isProcessing,
+                onFrameCaptured = { imageProxy ->
+                    viewModel.onFrameCaptured(imageProxy)
+                }
+            )
+        } else {
+            // Permission request UI
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    Icons.Default.CameraAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = Color.White.copy(alpha = 0.5f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Akses kamera diperlukan",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "FaceGate membutuhkan akses kamera untuk scan wajah",
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                    Text("Berikan Izin")
+                }
             }
-        )
+            return@Box
+        }
+
+        // ─── Only below when camera permission granted ───
 
         // Face guide overlay
         FaceGuideOverlay(

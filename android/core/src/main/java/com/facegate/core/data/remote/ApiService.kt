@@ -92,7 +92,7 @@ interface ApiService {
     suspend fun updateSettings(@Body body: Map<String, String>): Response<Map<String, Any>>
 
     @POST("api/devices/register")
-    suspend fun registerDevice(@Body request: Map<String, String>): Response<Map<String, String>>
+    suspend fun registerDevice(@Body request: Map<String, String>): Response<Map<String, Any>>
 
     // =========== PERMITS ===========
     @GET("api/permits")

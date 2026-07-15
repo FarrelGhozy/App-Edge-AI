@@ -182,17 +182,16 @@ class AntiSpoofDetector(context: Context) {
     }
 
     private fun bitmapToFloatBuffer(bitmap: Bitmap): ByteBuffer {
-        val resized = Bitmap.createScaledBitmap(bitmap, INPUT_DIM, INPUT_DIM, true)
+        // Bitmap is already resized to INPUT_DIM by cropAndToBgr
         val buffer = ByteBuffer.allocateDirect(1 * INPUT_DIM * INPUT_DIM * 3 * 4)
         buffer.order(ByteOrder.LITTLE_ENDIAN)
         val pixels = IntArray(INPUT_DIM * INPUT_DIM)
-        resized.getPixels(pixels, 0, INPUT_DIM, 0, 0, INPUT_DIM, INPUT_DIM)
+        bitmap.getPixels(pixels, 0, INPUT_DIM, 0, 0, INPUT_DIM, INPUT_DIM)
         for (pixel in pixels) {
-            buffer.putFloat(((pixel shr 16) and 0xFF) / 255f)
-            buffer.putFloat(((pixel shr 8) and 0xFF) / 255f)
-            buffer.putFloat((pixel and 0xFF) / 255f)
+            buffer.putFloat(((pixel shr 16) and 0xFF).toFloat())
+            buffer.putFloat(((pixel shr 8) and 0xFF).toFloat())
+            buffer.putFloat((pixel and 0xFF).toFloat())
         }
-        resized.recycle()
         buffer.rewind()
         return buffer
     }
