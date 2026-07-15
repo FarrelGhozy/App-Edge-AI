@@ -179,7 +179,7 @@ fun DashboardScreen(
                                 subtitle = "Kelola data santri",
                                 icon = Icons.Default.People,
                                 accentColor = MaterialTheme.colorScheme.primary,
-                                onClick = { navController.navigate(Screen.StudentList.route) },
+                                onClick = { navController.navigate(Screen.Students.route) },
                                 modifier = Modifier.weight(1f)
                             )
                             MenuCard(
@@ -203,7 +203,7 @@ fun DashboardScreen(
                                 subtitle = "Kelola izin keluar",
                                 icon = Icons.Default.Description,
                                 accentColor = Amber40,
-                                onClick = { navController.navigate(Screen.PermitList.route) },
+                                onClick = { navController.navigate(Screen.Permits.route) },
                                 modifier = Modifier.weight(1f)
                             )
                             MenuCard(
@@ -227,7 +227,7 @@ fun DashboardScreen(
                                 subtitle = "Data pelanggaran",
                                 icon = Icons.Default.Gavel,
                                 accentColor = ErrorRed,
-                                onClick = { navController.navigate(Screen.ViolationList.route) },
+                                onClick = { navController.navigate(Screen.Violations.route) },
                                 modifier = Modifier.weight(1f)
                             )
                             MenuCard(
