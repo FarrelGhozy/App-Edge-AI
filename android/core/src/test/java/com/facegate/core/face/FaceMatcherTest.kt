@@ -7,7 +7,7 @@ import org.junit.Test
 class FaceMatcherTest {
 
     private lateinit var matcher: FaceMatcher
-    private val threshold = 0.65f
+    private val threshold = 0.70f
 
     private fun makeVector(vararg values: Float): FloatArray {
         val arr = FloatArray(192)
