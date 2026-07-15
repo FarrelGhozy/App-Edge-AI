@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, beforeEach, mock } from "bun:test";
 
 // Use `any` mocks (Bun's mock works without strict typing at runtime)
 const mockFindUnique = mock<any>();
@@ -9,10 +9,11 @@ const mockUpdate = mock<any>();
 const mockDelete = mock<any>();
 const mockDeleteMany = mock<any>();
 const mockRawQuery = mock<any>();
+const mockExecuteRaw = mock<any>();
 
 const mockPrisma = {
   $queryRawUnsafe: mockRawQuery,
-  $executeRawUnsafe: mock<any>(),
+  $executeRawUnsafe: mockExecuteRaw,
   student: {
     findUnique: mockFindUnique,
     findMany: mockFindMany,
@@ -40,7 +41,7 @@ const { uploadFace, createStudent, listStudents, getStudent, deleteStudent, dele
 // Helpers
 // ────────────────────────────────────────────────────
 function resetMocks() {
-  [mockFindUnique, mockFindMany, mockCount, mockCreate, mockUpdate, mockDelete, mockDeleteMany, mockRawQuery].forEach(m => m.mockReset());
+  [mockFindUnique, mockFindMany, mockCount, mockCreate, mockUpdate, mockDelete, mockDeleteMany, mockRawQuery, mockExecuteRaw].forEach(m => m.mockReset());
 }
 
 function vec192() { return new Array(192).fill(0.1); }
@@ -58,17 +59,20 @@ describe("uploadFace", () => {
   });
 
   it("rejects empty vector", async () => {
+    mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
     await expect(uploadFace("s1", [])).rejects.toThrow("VECTOR_DIMENSION_MISMATCH");
   });
 
   it("accepts 192-d vector", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
+    mockExecuteRaw.mockResolvedValue({ count: 1 });
     const r = await uploadFace("s1", vec192());
     expect(r).toBeDefined();
   });
 
   it("accepts 512-d vector", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
+    mockExecuteRaw.mockResolvedValue({ count: 1 });
     const r = await uploadFace("s1", vec512());
     expect(r).toBeDefined();
   });
