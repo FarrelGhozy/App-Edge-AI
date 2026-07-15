@@ -6,7 +6,6 @@ export async function createPermit(data: {
   type?: string;
   startDate?: string;
   endDate?: string;
-  description?: string;
 }) {
   return prisma.permit.create({
     data: {
@@ -15,7 +14,6 @@ export async function createPermit(data: {
       type: data.type || "izin_harian",
       startDate: data.startDate ? new Date(data.startDate) : new Date(),
       endDate: data.endDate ? new Date(data.endDate) : new Date(),
-      description: data.description,
       status: "pending"
     }
   });
