@@ -25,6 +25,16 @@ sealed class MatchEngineResult {
     data class QualityFailed(val reason: String) : MatchEngineResult()
 }
 
+/**
+ * Face recognition pipeline orchestrator.
+ *
+ * Pipeline:
+ *   Camera frame → Face detection → Quality gate → EAR blink liveness
+ *     → (after 1s delay) Anti-spoofing → Face embedding → Matching → Toggle → Result
+ *
+ * Anti-spoofing runs ONLY on the final capture frame (not live preview)
+ * to keep the real-time analyzer lightweight.
+ */
 class MatchEngine @Inject constructor(
     private val faceDetector: FaceDetectorWrapper,
     private val faceEmbedder: FaceEmbedder,
@@ -37,16 +47,27 @@ class MatchEngine @Inject constructor(
     private val faceVectorDao: FaceVectorDao
 ) {
 
+    companion object {
+        private const val TAG = "MatchEngine"
+        // Anti-spoofing threshold — auto-proceed even if spoof detection fails via legacy
+        private const val SPOOF_CONFIDENCE_MIN = 0.3f
+    }
+
     /** Synchronous face detection from raw camera image — call on analyzer thread. */
     fun detectFromImage(mediaImage: Image, rotationDegrees: Int): FaceDetectionResult? {
         val result = faceDetector.detectImage(mediaImage, rotationDegrees)
-        Log.d("MatchEngine", "detectFromImage: ${result != null}")
+        Log.d(TAG, "detectFromImage: ${result != null}")
         return result
     }
 
-    /** Synchronous liveness check — call on analyzer thread. */
+    /**
+     * Synchronous liveness check (EAR blink) — call on analyzer thread.
+     * Runs on every frame during live preview.
+     *
+     * Full anti-spoofing (deep learning) runs later in matchAfterDetection().
+     */
     fun checkLiveness(detection: FaceDetectionResult, currentTimeMs: Long): Boolean {
-        return livenessDetector.checkLiveness(
+        return livenessDetector.checkLivenessLegacy(
             leftEyeContour = detection.leftEyeContour,
             rightEyeContour = detection.rightEyeContour,
             currentTimeMs = currentTimeMs,
@@ -67,26 +88,51 @@ class MatchEngine @Inject constructor(
     }
 
     /**
-     * Continue pipeline after detection + liveness pass.
+     * Continue pipeline after detection + EAR blink pass.
      *
-     * Steps: embed → match → toggle → violation → session
+     * Steps:
+     *   1. Anti-spoofing (deep learning) — runs on final frame
+     *   2. Face embedding (192-d/512-d)
+     *   3. Match against face index
+     *   4. Toggle (keluar/kembali)
+     *   5. Violation check
+     *   6. Session tracking
      */
     suspend fun matchAfterDetection(detection: FaceDetectionResult, bitmap: Bitmap): MatchEngineResult {
         // Reset liveness for next scan
         livenessDetector.reset()
         livenessWindowStart = 0L
 
-        // Step 4: Face embedding (128-d vector via MobileFaceNet)
+        // ─── Step 1: Anti-spoofing check (deep learning) ───
+        val antiSpoofResult = livenessDetector.checkLiveness(
+            frameImage = bitmap,
+            faceRect = detection.boundingBox,
+            leftEyeContour = detection.leftEyeContour,
+            rightEyeContour = detection.rightEyeContour,
+            currentTimeMs = System.currentTimeMillis(),
+            leftEyeOpenProb = detection.leftEyeOpenProbability,
+            rightEyeOpenProb = detection.rightEyeOpenProbability
+        )
+
+        // Check for spoof attack
+        if (antiSpoofResult.isSpoof && antiSpoofResult.realConfidence < SPOOF_CONFIDENCE_MIN) {
+            Log.w(TAG, "Spoof detected! confidence=${antiSpoofResult.realConfidence}")
+            return MatchEngineResult.QualityFailed("Deteksi wajah palsu — coba lagi")
+        }
+        Log.d(TAG, "Anti-spoof: real=(%.2f) | %s".format(antiSpoofResult.realConfidence, antiSpoofResult.details))
+
+        // ─── Step 2: Face embedding ───
         val faceCrop = cropFace(bitmap, detection.boundingBox)
         val embedding = try {
             faceEmbedder.embed(faceCrop)
         } catch (e: Exception) {
+            Log.e(TAG, "Embedding failed", e)
             null
         } finally {
             if (faceCrop !== bitmap) faceCrop.recycle()
         }
 
-        // Step 5: Match against face index
+        // ─── Step 3: Match against face index ───
         val matchResult = if (embedding != null) {
             faceMatcher.match(embedding)
         } else {
@@ -98,7 +144,7 @@ class MatchEngine @Inject constructor(
             return MatchEngineResult.Unknown(matchResult?.confidence ?: 0f)
         }
 
-        // Step 6: Get student info
+        // ─── Step 4: Get student info ───
         val student = studentDao.getById(sid)
             ?: return MatchEngineResult.Unknown(matchResult.confidence)
 
@@ -108,13 +154,13 @@ class MatchEngine @Inject constructor(
             academicYear = student.academicYear
         )
 
-        // Step 7: Toggle engine — determine keluar/kembali
+        // ─── Step 5: Toggle engine ───
         val toggle = toggleEngine.determineAction(student.id)
 
-        // Step 8: Violation check
+        // ─── Step 6: Violation check ───
         val violation = violationDetector.check(toggle.action, studentInfo)
 
-        // Step 9: Session tracking
+        // ─── Step 7: Session tracking ───
         if (toggle.action == ToggleAction.KELUAR) {
             sessionTracker.startSession(student.id, System.currentTimeMillis())
         } else {
@@ -142,7 +188,7 @@ class MatchEngine @Inject constructor(
         }
 
         val currentTime = System.currentTimeMillis()
-        val livenessPassed = livenessDetector.checkLiveness(
+        val livenessPassed = livenessDetector.checkLivenessLegacy(
             leftEyeContour = detection.leftEyeContour,
             rightEyeContour = detection.rightEyeContour,
             currentTimeMs = currentTime,

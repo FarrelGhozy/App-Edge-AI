@@ -12,8 +12,11 @@ import com.facegate.core.face.FaceDetectionResult
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.LivenessDetector
+import com.facegate.core.face.QualityAnalyzer
+import com.facegate.core.face.QualityAnalyzer.QualityReport
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +26,7 @@ import javax.inject.Inject
 
 enum class FaceRegisterStep {
     DETECTING,
-    LIVENESS,
+    COLLECTING,      // NEW: collecting N good frames
     EMBEDDING,
     UPLOADING,
     SUCCESS,
@@ -36,7 +39,12 @@ data class FaceRegisterState(
     val error: String? = null,
     val isUploading: Boolean = false,
     val isSuccess: Boolean = false,
-    val detection: FaceDetectionResult? = null
+    val detection: FaceDetectionResult? = null,
+    // Multi-frame progress
+    val framesCollected: Int = 0,
+    val framesRequired: Int = 3,
+    val currentQualityScore: Float = 0f,
+    val qualityMessages: List<String> = emptyList()
 )
 
 @HiltViewModel
@@ -47,45 +55,52 @@ class FaceRegisterViewModel @Inject constructor(
     private val apiService: ApiService
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(FaceRegisterState())
+    companion object {
+        private const val TAG = "FaceRegVM"
+        private const val REQUIRED_FRAMES = 3  // Number of quality frames to collect
+        private const val COLLECT_TIMEOUT_MS = 12_000L  // Max time to collect all frames
+        private const val QUALITY_INTERVAL_MS = 150L    // Min gap between frame captures
+    }
+
+    private val _state = MutableStateFlow(FaceRegisterState(
+        framesRequired = REQUIRED_FRAMES
+    ))
     val state: StateFlow<FaceRegisterState> = _state.asStateFlow()
 
-    private var capturedBitmap: Bitmap? = null
+    // Collected frames for multi-frame averaging
+    private val collectedBitmaps = mutableListOf<Bitmap>()
+    private val collectedRects = mutableListOf<Rect>()
     private var isProcessing = false
+    private var collectStartTime = 0L
+    private var lastCaptureTime = 0L
+    private var studentId: String = ""
 
     init {
         faceDetector.init()
         faceEmbedder.init()
     }
 
-    fun onFrameCaptured(imageProxy: ImageProxy, studentId: String) {
-        if (isProcessing) {
-            Log.d("FaceRegVM", "skip — isProcessing")
-            return
-        }
+    fun setStudentId(id: String) {
+        studentId = id
+    }
+
+    fun onFrameCaptured(imageProxy: ImageProxy, studentId: String?) {
+        if (isProcessing) return
+        this.studentId = studentId ?: this.studentId
 
         val currentStep = _state.value.step
-        if (currentStep != FaceRegisterStep.DETECTING && currentStep != FaceRegisterStep.LIVENESS) {
-            Log.d("FaceRegVM", "skip — step=$currentStep")
-            return
-        }
+        if (currentStep != FaceRegisterStep.DETECTING &&
+            currentStep != FaceRegisterStep.COLLECTING
+        ) return
 
         isProcessing = true
-        Log.d("FaceRegVM", "mulai process frame step=$currentStep")
 
-        // Run detection synchronously on analyzer thread (background).
-        // The ImageProxy will be closed by the caller after this returns.
         val mediaImage = imageProxy.image
         val rotation = imageProxy.imageInfo.rotationDegrees
-        Log.d("FaceRegVM", "imgProxy w=${imageProxy.width} h=${imageProxy.height} rot=$rotation rawImg=${mediaImage?.width}x${mediaImage?.height}")
-        val detection: FaceDetectionResult?
-        if (mediaImage != null) {
-            detection = faceDetector.detectImage(mediaImage, rotation)
-            Log.d("FaceRegVM", "detectImage: result=${detection != null}, error=${faceDetector.getLastError()}")
-        } else {
-            detection = null
-            Log.d("FaceRegVM", "mediaImage null")
-        }
+
+        val detection: FaceDetectionResult? = if (mediaImage != null) {
+            faceDetector.detectImage(mediaImage, rotation)
+        } else null
 
         if (detection == null) {
             isProcessing = false
@@ -97,9 +112,7 @@ class FaceRegisterViewModel @Inject constructor(
             return
         }
 
-        val bb = detection.boundingBox
-        Log.d("FaceRegVM", "face found: headY=${detection.headEulerAngleY} headZ=${detection.headEulerAngleZ} quality=${detection.isGoodQuality} contourL=${detection.leftEyeContour.size} contourR=${detection.rightEyeContour.size} eyeL=${detection.leftEyeOpenProbability} eyeR=${detection.rightEyeOpenProbability} bb=${bb.left},${bb.top},${bb.right},${bb.bottom} imgW=${detection.imageWidth.toInt()} imgH=${detection.imageHeight.toInt()}")
-
+        // Quick quality gate: posture check
         if (!detection.isGoodQuality) {
             isProcessing = false
             _state.value = _state.value.copy(
@@ -110,43 +123,153 @@ class FaceRegisterViewModel @Inject constructor(
             return
         }
 
-        val currentTime = System.currentTimeMillis()
-        val livenessPassed = livenessDetector.checkLiveness(
-            leftEyeContour = detection.leftEyeContour,
-            rightEyeContour = detection.rightEyeContour,
-            currentTimeMs = currentTime,
-            leftEyeOpenProb = detection.leftEyeOpenProbability,
-            rightEyeOpenProb = detection.rightEyeOpenProbability
-        )
+        // ─── Still in DETECTING → start collecting frames ───
+        if (currentStep == FaceRegisterStep.DETECTING) {
+            transitionToCollecting()
+        }
 
-        if (!livenessPassed) {
+        // ─── COLLECTING frame ───
+        val now = System.currentTimeMillis()
+        if (now - lastCaptureTime < QUALITY_INTERVAL_MS) {
             isProcessing = false
-            val blinkCount = livenessDetector.getBlinkCount()
-            _state.value = _state.value.copy(
-                step = FaceRegisterStep.LIVENESS,
-                message = "Kedipkan mata ($blinkCount/1)",
-                detection = detection
-            )
+            return // Throttle captures
+        }
+
+        // Check timeout
+        if (now - collectStartTime > COLLECT_TIMEOUT_MS) {
+            if (collectedBitmaps.isNotEmpty()) {
+                // We have at least some frames — proceed with what we have
+                Log.d(TAG, "Collect timeout with ${collectedBitmaps.size}/${REQUIRED_FRAMES} frames — proceeding")
+                proceedToEmbedding()
+            } else {
+                reset()
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.DETECTING,
+                    message = "Waktu habis, coba lagi"
+                )
+            }
+            isProcessing = false
             return
         }
 
-        // Take bitmap while ImageProxy is still valid
+        // Convert frame to bitmap for quality analysis
         val bitmap = imageProxyToBitmap(imageProxy)
         if (bitmap == null) {
             isProcessing = false
-            _state.value = _state.value.copy(
-                step = FaceRegisterStep.ERROR,
-                error = "Gagal konversi gambar"
-            )
             return
         }
 
-        // Liveness passed — launch coroutine for heavy work
+        // Quality analysis on the face region
+        val quality = QualityAnalyzer.analyze(
+            bitmap = bitmap,
+            faceRect = detection.boundingBox,
+            yawAngle = detection.headEulerAngleY,
+            pitchAngle = detection.headEulerAngleZ
+        )
+
+        lastCaptureTime = now
+
+        if (quality.isPass) {
+            collectedBitmaps.add(bitmap)
+            collectedRects.add(detection.boundingBox)
+            _state.value = _state.value.copy(
+                step = FaceRegisterStep.COLLECTING,
+                framesCollected = collectedBitmaps.size,
+                message = "Kualitas baik (${collectedBitmaps.size}/$REQUIRED_FRAMES)",
+                detection = detection,
+                currentQualityScore = quality.score,
+                qualityMessages = emptyList()
+            )
+            Log.d(TAG, "Frame ${collectedBitmaps.size}/$REQUIRED_FRAMES collected (score=${"%.3f".format(quality.score)})")
+
+            if (collectedBitmaps.size >= REQUIRED_FRAMES) {
+                proceedToEmbedding()
+            }
+        } else {
+            // Show quality feedback but don't store
+            _state.value = _state.value.copy(
+                step = FaceRegisterStep.COLLECTING,
+                message = quality.messages.firstOrNull()
+                    ?: "Perbaiki posisi wajah (${collectedBitmaps.size}/$REQUIRED_FRAMES)",
+                detection = detection,
+                currentQualityScore = quality.score,
+                qualityMessages = quality.messages
+            )
+            bitmap.recycle()
+            Log.d(TAG, "Frame rejected: ${quality.messages}")
+        }
+
+        isProcessing = false
+    }
+
+    private fun transitionToCollecting() {
+        collectStartTime = System.currentTimeMillis()
+        lastCaptureTime = 0L
+        collectedBitmaps.clear()
+        collectedRects.clear()
+        _state.value = _state.value.copy(
+            step = FaceRegisterStep.COLLECTING,
+            message = "Ambil 3 frame berkualitas... (0/$REQUIRED_FRAMES)",
+            detection = null
+        )
+    }
+
+    private fun proceedToEmbedding() {
+        val frames = collectedBitmaps.toList() // snapshot
+        isProcessing = false
+
         viewModelScope.launch {
             try {
-                processAfterLiveness(detection, bitmap, studentId)
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.EMBEDDING,
+                    message = "Memproses ${frames.size} frame wajah...",
+                    detection = null
+                )
+
+                // Embed each frame
+                val embeddings = withContext(Dispatchers.Default) {
+                    frames.map { bitmap ->
+                        faceEmbedder.embed(bitmap)
+                    }.toTypedArray()
+                }
+
+                // Average embeddings for robust template
+                val averaged = faceEmbedder.averageEmbeddings(embeddings)
+
+                // Cleanup bitmaps
+                frames.forEach { it.recycle() }
+                collectedBitmaps.clear()
+                collectedRects.clear()
+
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.UPLOADING,
+                    message = "Mengunggah data wajah..."
+                )
+
+                // Upload
+                val vector = averaged.toList()
+                val request = UploadFaceRequest(vector = vector)
+                val response = withContext(Dispatchers.IO) {
+                    apiService.uploadFace(studentId, request)
+                }
+
+                if (response.isSuccessful) {
+                    livenessDetector.reset()
+                    _state.value = _state.value.copy(
+                        step = FaceRegisterStep.SUCCESS,
+                        message = "Registrasi wajah berhasil!",
+                        isSuccess = true
+                    )
+                } else {
+                    _state.value = _state.value.copy(
+                        step = FaceRegisterStep.ERROR,
+                        error = "Gagal mengunggah: ${response.code()}"
+                    )
+                }
             } catch (e: Exception) {
-                Log.e("FaceRegVM", "exception", e)
+                Log.e(TAG, "Registration error", e)
+                frames.forEach { it.recycle() }
+                collectedBitmaps.clear()
                 _state.value = _state.value.copy(
                     step = FaceRegisterStep.ERROR,
                     error = "Terjadi kesalahan: ${e.message}"
@@ -155,97 +278,28 @@ class FaceRegisterViewModel @Inject constructor(
         }
     }
 
-    private suspend fun processAfterLiveness(detection: FaceDetectionResult, bitmap: Bitmap, studentId: String) {
-        _state.value = _state.value.copy(
-            step = FaceRegisterStep.EMBEDDING,
-            message = "Memproses wajah...",
-            detection = null
-        )
-
-        val faceCrop = cropFace(bitmap, detection.boundingBox)
-        Log.d("FaceRegVM", "crop: ${faceCrop.width}x${faceCrop.height} bb=${detection.boundingBox.toShortString()} bitmap=${bitmap.width}x${bitmap.height} rotatedImg=${detection.imageWidth}x${detection.imageHeight}")
-        capturedBitmap = faceCrop
-        bitmap.recycle()
-
-        Log.d("FaceRegVM", "starting embed... modelReady=${faceEmbedder.isReady()}")
-        val embedding = try {
-            withContext(Dispatchers.Default) {
-                faceEmbedder.embed(faceCrop)
-            }
-        } catch (e: Exception) {
-            Log.e("FaceRegVM", "embed error: ${e.message}", e)
-            faceCrop.recycle()
-            capturedBitmap = null
-            _state.value = _state.value.copy(
-                step = FaceRegisterStep.ERROR,
-                error = "Gagal memproses embedding: ${e.message}"
-            )
-            return
-        }
-
-        if (faceCrop !== bitmap) faceCrop.recycle()
-
-        _state.value = _state.value.copy(
-            step = FaceRegisterStep.UPLOADING,
-            message = "Mengunggah data wajah..."
-        )
-
-        try {
-            val vector = embedding.toList()
-            val request = UploadFaceRequest(vector = vector)
-            val response = withContext(Dispatchers.IO) {
-                apiService.uploadFace(studentId, request)
-            }
-
-            if (response.isSuccessful) {
-                livenessDetector.reset()
-                _state.value = _state.value.copy(
-                    step = FaceRegisterStep.SUCCESS,
-                    message = "Registrasi wajah berhasil!",
-                    isSuccess = true
-                )
-            } else {
-                _state.value = _state.value.copy(
-                    step = FaceRegisterStep.ERROR,
-                    error = "Gagal mengunggah: ${response.code()}"
-                )
-            }
-        } catch (e: Exception) {
-            _state.value = _state.value.copy(
-                step = FaceRegisterStep.ERROR,
-                error = "Gagal terhubung ke server"
-            )
-        }
-    }
-
     fun reset() {
         livenessDetector.reset()
-        capturedBitmap?.recycle()
-        capturedBitmap = null
+        collectedBitmaps.forEach { it.recycle() }
+        collectedBitmaps.clear()
+        collectedRects.clear()
         isProcessing = false
-        _state.value = FaceRegisterState()
+        collectStartTime = 0L
+        lastCaptureTime = 0L
+        _state.value = FaceRegisterState(framesRequired = REQUIRED_FRAMES)
     }
 
     override fun onCleared() {
         super.onCleared()
-        capturedBitmap?.recycle()
-        capturedBitmap = null
-    }
-
-    private fun cropFace(bitmap: Bitmap, boundingBox: Rect): Bitmap {
-        val margin = (boundingBox.width() * 0.3f).toInt()
-        val x = (boundingBox.left - margin).coerceAtLeast(0)
-        val y = (boundingBox.top - margin).coerceAtLeast(0)
-        val w = (boundingBox.width() + margin * 2).coerceAtMost(bitmap.width - x)
-        val h = (boundingBox.height() + margin * 2).coerceAtMost(bitmap.height - y)
-        return Bitmap.createBitmap(bitmap, x, y, w, h)
+        collectedBitmaps.forEach { it.recycle() }
+        collectedBitmaps.clear()
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
         return try {
             imageProxy.toBitmap()
         } catch (e: Exception) {
-            Log.e("FaceRegVM", "toBitmap error", e)
+            Log.e(TAG, "toBitmap error", e)
             null
         }
     }
