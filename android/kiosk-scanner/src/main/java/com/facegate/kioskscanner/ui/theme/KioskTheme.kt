@@ -58,7 +58,7 @@ fun KioskTheme(
     )
 }
 
-private val KioskShapes = shapes(
+private val KioskShapes = androidx.compose.material3.Shapes(
     small = RoundedCornerShape(8.dp),
     medium = RoundedCornerShape(12.dp),
     large = RoundedCornerShape(16.dp),
