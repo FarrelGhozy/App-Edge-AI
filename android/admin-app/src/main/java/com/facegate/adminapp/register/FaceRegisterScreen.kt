@@ -132,8 +132,8 @@ fun FaceRegisterScreen(
                 // Camera preview
                 CameraPreview(
                     modifier = Modifier.fillMaxSize(),
-                    enabled = state.step == FaceRegisterStep.DETECTING ||
-                            state.step == FaceRegisterStep.LIVENESS,
+                enabled = state.step == FaceRegisterStep.DETECTING ||
+                        state.step == FaceRegisterStep.COLLECTING,
                     onFrameCaptured = { imageProxy ->
                         viewModel.onFrameCaptured(imageProxy, studentId)
                     }
@@ -227,7 +227,7 @@ private fun StepIndicator(
     val steps = listOf("Deteksi", "Verifikasi", "Proses", "Upload")
     val currentIndex = when (currentStep) {
         FaceRegisterStep.DETECTING -> 0
-        FaceRegisterStep.LIVENESS -> 1
+        FaceRegisterStep.COLLECTING -> 1
         FaceRegisterStep.EMBEDDING -> 2
         FaceRegisterStep.UPLOADING -> 3
         else -> -1
@@ -345,7 +345,7 @@ private fun FaceOvalOverlay(state: FaceRegisterState) {
     val overlayColor = Color.Black.copy(alpha = 0.5f)
     val strokeColor = when (state.step) {
         FaceRegisterStep.DETECTING -> Color.White
-        FaceRegisterStep.LIVENESS -> Color(0xFFFFC107)
+        FaceRegisterStep.COLLECTING -> Color(0xFFFFC107)
         FaceRegisterStep.EMBEDDING -> Color(0xFF2196F3)
         FaceRegisterStep.UPLOADING -> Color(0xFF2196F3)
         FaceRegisterStep.SUCCESS -> Color(0xFF4CAF50)
