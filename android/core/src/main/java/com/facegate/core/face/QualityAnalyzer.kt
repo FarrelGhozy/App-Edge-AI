@@ -163,11 +163,11 @@ object QualityAnalyzer {
         val pixels = IntArray(w * h)
         bitmap.getPixels(pixels, 0, w, x, y, w, h)
 
-        var sum = 0L
+        var sum = 0f
         for (p in pixels) {
             sum += brightness(p)
         }
-        return sum.toFloat() / pixels.size
+        return sum / pixels.size
     }
 
     private fun brightness(pixel: Int): Float {
