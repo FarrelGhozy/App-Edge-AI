@@ -40,10 +40,11 @@ describe("attendance service", () => {
   describe("recordScan", () => {
     const scanInput = {
       studentId: "s1",
+      studentName: "Test Student",
       action: "keluar" as const,
       confidenceScore: 0.85,
       isViolation: false,
-      timestamp: new Date("2025-07-15T08:00:00Z"),
+      timestamp: Date.now(),
       deviceId: "device-1",
     };
 
