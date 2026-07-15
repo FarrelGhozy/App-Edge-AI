@@ -1,155 +1,82 @@
 package com.facegate.core.face
 
+import android.graphics.Bitmap
+import android.graphics.Rect
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.Assert.*
-import org.junit.Before
 import org.junit.Test
 
 class QualityAnalyzerTest {
 
-    private lateinit var analyzer: QualityAnalyzer
+    private val analyzer = QualityAnalyzer
 
-    @Before
-    fun setup() {
-        analyzer = QualityAnalyzer()
+    private fun mockBitmap(width: Int = 640, height: Int = 480): Bitmap {
+        val bmp = mockk<Bitmap>(relaxed = true)
+        every { bmp.width } returns width
+        every { bmp.height } returns height
+        every { bmp.getPixels(any(), any(), any(), any(), any(), any(), any()) } answers {
+            val pixels = firstArg<IntArray>()
+            for (i in pixels.indices) pixels[i] = 0xFF808080.toInt()
+        }
+        return bmp
     }
 
     @Test
-    fun `non-null bitmap should return quality result`() {
-        // With null bitmap, analyze should return null
-        val result = analyzer.analyze(null)
-        assertNull(result)
+    fun `selectBestFrame should return -1 for empty list`() {
+        val idx = analyzer.selectBestFrame(emptyList())
+        assertEquals(-1, idx)
     }
 
     @Test
-    fun `blur score range should be valid`() {
-        // Blur is calculated from Laplacian variance of the bitmap
-        // Without actual bitmap, use default
-        val result = analyzer.calculateBlurScore(null)
-        assertEquals(-1f, result, 0.001f)  // -1 indicates error/unavailable
-    }
-
-    @Test
-    fun `brightness score for null bitmap should return -1`() {
-        val result = analyzer.calculateBrightnessScore(null)
-        assertEquals(-1f, result, 0.001f)
-    }
-
-    @Test
-    fun `face angle estimation should handle null contour gracefully`() {
-        val result = analyzer.estimateAngle(null)
-        assertEquals(0f, result, 0.001f)
-    }
-
-    @Test
-    fun `quality check with null bitmap should fail`() {
-        val result = analyzer.check(null, null)
-        assertFalse(result)
-    }
-
-    @Test
-    fun `size check should reject too-small bounding boxes`() {
-        // A face that's too small (less than 80x80 recommended)
-        assertFalse(analyzer.isWellPositioned(60f, 60f))
-    }
-
-    @Test
-    fun `size check should accept adequate face size`() {
-        assertTrue(analyzer.isWellPositioned(150f, 200f))
-    }
-
-    @Test
-    fun `size check should reject zero dimensions`() {
-        assertFalse(analyzer.isWellPositioned(0f, 0f))
-        assertFalse(analyzer.isWellPositioned(100f, 0f))
-        assertFalse(analyzer.isWellPositioned(0f, 100f))
-    }
-
-    @Test
-    fun `size check should accept large face bounding boxes`() {
-        assertTrue(analyzer.isWellPositioned(500f, 500f))
-    }
-
-    @Test
-    fun `size check threshold boundary`() {
-        // Exactly at minimum boundary
-        assertFalse(analyzer.isWellPositioned(79f, 79f))
-        assertTrue(analyzer.isWellPositioned(80f, 80f))
-    }
-
-    @Test
-    fun `angle estimation with partially null landmarks should not crash`() {
-        // Landmarks with 5 points, some may be null in real scenarios
-        val landmarks = listOf(
-            null,
-            null,
-            null,
-            null,
-            null
+    fun `selectBestFrame should pick highest scoring pass`() {
+        val reports = listOf(
+            QualityAnalyzer.QualityReport(true, 0.9f, false, 100f, 120f, 0.1f, 5f, 3f),
+            QualityAnalyzer.QualityReport(true, 0.7f, false, 80f, 130f, 0.08f, 10f, 5f),
+            QualityAnalyzer.QualityReport(true, 0.5f, true, 30f, 100f, 0.03f, 20f, 15f),
         )
-        // Should handle gracefully
-        val angle = analyzer.estimateAngle(landmarks)
-        assertEquals(0f, angle, 0.001f)
+        val idx = analyzer.selectBestFrame(reports)
+        assertEquals(0, idx)
     }
 
     @Test
-    fun `angle estimation with valid landmarks`() {
-        // Simulate normal forward-facing face landmarks
-        val landmarks = listOf(
-            Pair(100f, 100f), // left eye
-            Pair(200f, 100f), // right eye
-            Pair(150f, 160f), // nose tip
-            Pair(130f, 200f), // mouth left
-            Pair(170f, 200f)  // mouth right
+    fun `selectBestFrame should prefer passing frames`() {
+        val reports = listOf(
+            QualityAnalyzer.QualityReport(false, 0.95f, false, 150f, 120f, 0.1f, 5f, 3f),
+            QualityAnalyzer.QualityReport(true, 0.85f, false, 120f, 125f, 0.1f, 5f, 3f),
         )
-
-        // These are roughly horizontal → angle should be near 0
-        val angle = analyzer.estimateAngle(landmarks)
-        assertTrue("Forward face should have near-zero angle, got $angle", kotlin.math.abs(angle) < 30f)
+        val idx = analyzer.selectBestFrame(reports)
+        assertEquals(1, idx)
     }
 
     @Test
-    fun `angle estimation with tilted face should detect rotation`() {
-        // Tilted face: left eye much lower than right eye
-        val leftEyePos = Pair(100f, 200f)
-        val rightEyePos = Pair(200f, 100f)
-
-        val angle = analyzer.estimateEyeAngle(leftEyePos, rightEyePos)
-        // Eye angle: arctan((200-100)/(100-200)) = arctan(-1) = -45 degrees
-        // Or: atan2(200-100, 100-200) = atan2(100, -100) ≈ 135° → but normalized
-        assertTrue("Tilted face should have non-zero angle, got $angle", kotlin.math.abs(angle) > 20f)
+    fun `analyze with extreme yaw should return isPass false`() {
+        val report = analyzer.analyze(mockBitmap(), Rect(200, 100, 440, 380), 45f, 0f)
+        assertFalse("Extreme yaw should fail", report.isPass)
     }
 
     @Test
-    fun `eye angle with equal positions should be zero`() {
-        val angle = analyzer.estimateEyeAngle(Pair(100f, 100f), Pair(100f, 100f))
-        assertEquals(0f, angle, 0.001f)
+    fun `analyze with extreme pitch should return isPass false`() {
+        val report = analyzer.analyze(mockBitmap(), Rect(200, 100, 440, 380), 0f, 30f)
+        assertFalse("Extreme pitch should fail", report.isPass)
     }
 
     @Test
-    fun `eye angle calculation should handle vertical differences`() {
-        // Left eye above right eye
-        val angle = analyzer.estimateEyeAngle(Pair(100f, 50f), Pair(200f, 100f))
-        // atan2(100-50, 200-100) = atan2(50, 100) ≈ 26.565°
-        assertTrue(angle > 20f && angle < 30f)
+    fun `analyze with small face rect should return isPass false`() {
+        val report = analyzer.analyze(mockBitmap(), Rect(300, 200, 310, 210), 0f, 0f)
+        assertFalse("Very small face should fail", report.isPass)
     }
 
     @Test
-    fun `minBrightness should have reasonable range`() {
-        assertTrue(analyzer.minBrightness in 30..80)
+    fun `faceSizeRatio should be between 0 and 1`() {
+        val report = analyzer.analyze(mockBitmap(), Rect(200, 100, 440, 380), 0f, 0f)
+        assertTrue(report.faceSizeRatio in 0f..1f)
     }
 
     @Test
-    fun `maxBrightness should have reasonable range`() {
-        assertTrue(analyzer.maxBrightness in 180..250)
-    }
-
-    @Test
-    fun `minBrightness should be less than maxBrightness`() {
-        assertTrue(analyzer.minBrightness < analyzer.maxBrightness)
-    }
-
-    @Test
-    fun `maxRecommendedAngle should be reasonable`() {
-        assertTrue(analyzer.maxRecommendedAngle in 15..45)
+    fun `yawAngle and pitchAngle should be preserved in report`() {
+        val report = analyzer.analyze(mockBitmap(), Rect(200, 100, 440, 380), 12f, -8f)
+        assertEquals(12f, report.yawAngle, 0.001f)
+        assertEquals(-8f, report.pitchAngle, 0.001f)
     }
 }
