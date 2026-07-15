@@ -15,10 +15,17 @@ data class SyncCompleteRequest(
     @SerialName("deviceId")
     val deviceId: String,
     val status: String,
+    @SerialName("syncType")
+    val syncType: String = "manual",
     @SerialName("logsCount")
-    val logsCount: Int,
+    val logsCount: Int = 0,
     @SerialName("facesCount")
-    val facesCount: Int
+    val facesCount: Int = 0
+)
+
+@Serializable
+data class StatusResponse(
+    val success: Boolean
 )
 
 @Serializable

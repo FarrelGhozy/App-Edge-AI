@@ -6,8 +6,10 @@ const mockCreate = mock<any>();
 const mockUpdate = mock<any>();
 const mockCount = mock<any>();
 
+const mockPermitQuotaFindUnique = mock<any>();
 const mockPrisma = {
   permit: { findMany: mockFindMany, findUnique: mockFindUnique, create: mockCreate, update: mockUpdate, count: mockCount },
+  permitQuota: { findUnique: mockPermitQuotaFindUnique },
   attendanceLog: { findMany: mockFindMany, count: mockCount },
 };
 
@@ -16,7 +18,7 @@ mock.module("../services/prisma", () => ({ default: mockPrisma }));
 const { createPermit, getPermit, listPermits, updatePermitStatus, getPermitQuota } = await import("../services/permit");
 
 function resetMocks() {
-  [mockFindMany, mockFindUnique, mockCreate, mockUpdate, mockCount].forEach(m => m.mockReset());
+  [mockFindMany, mockFindUnique, mockCreate, mockUpdate, mockCount, mockPermitQuotaFindUnique].forEach(m => m.mockReset());
 }
 
 describe("permit service", () => {
@@ -25,6 +27,7 @@ describe("permit service", () => {
   // ── getPermitQuota ────────────────────────────
   describe("getPermitQuota", () => {
     it("returns permitsUsed and maxPermits", async () => {
+      mockPermitQuotaFindUnique.mockResolvedValue(null);
       mockCount.mockResolvedValue(3);
       const result = await getPermitQuota("1");
       expect(result.permitsUsed).toBe(3);

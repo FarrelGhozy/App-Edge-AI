@@ -33,19 +33,19 @@ interface ApiService {
     ): Response<StudentDto>
 
     @DELETE("api/students/{id}")
-    suspend fun deleteStudent(@Path("id") id: String): Response<Unit>
+    suspend fun deleteStudent(@Path("id") id: String): Response<StatusResponse>
 
     @POST("api/students/{id}/face")
     suspend fun uploadFace(
         @Path("id") id: String,
         @Body request: UploadFaceRequest
-    ): Response<Unit>
+    ): Response<StatusResponse>
 
     @DELETE("api/students/{id}/face")
-    suspend fun deleteFace(@Path("id") id: String): Response<Unit>
+    suspend fun deleteFace(@Path("id") id: String): Response<StatusResponse>
 
     @POST("api/attendance/scan")
-    suspend fun scanAttendance(@Body request: ScanRequest): Response<Unit>
+    suspend fun scanAttendance(@Body request: ScanRequest): Response<StatusResponse>
 
     @GET("api/attendance")
     suspend fun getAttendanceLogs(
@@ -57,7 +57,7 @@ interface ApiService {
     ): Response<AttendanceListResponse>
 
     @POST("api/sync/attendance")
-    suspend fun syncAttendance(@Body request: AttendanceBatchRequest): Response<Unit>
+    suspend fun syncAttendance(@Body request: AttendanceBatchRequest): Response<StatusResponse>
 
     @GET("api/sync/faces")
     suspend fun syncFaces(@Query("since") since: String? = null): Response<FaceSyncResponse>
@@ -71,7 +71,7 @@ interface ApiService {
     ): Response<SyncRequestResponse>
 
     @POST("api/sync/complete")
-    suspend fun completeSync(@Body request: SyncCompleteRequest): Response<Unit>
+    suspend fun completeSync(@Body request: SyncCompleteRequest): Response<StatusResponse>
 
     @GET("api/rules")
     suspend fun getRules(): Response<List<CampusRuleDto>>
@@ -206,7 +206,7 @@ interface ApiService {
     ): Response<HolidayDto>
 
     @DELETE("api/holidays/{id}")
-    suspend fun deleteHoliday(@Path("id") id: String): Response<Unit>
+    suspend fun deleteHoliday(@Path("id") id: String): Response<StatusResponse>
 
     // =========== SYNC REQUEST ===========
     @POST("api/sync/request/{deviceId}")

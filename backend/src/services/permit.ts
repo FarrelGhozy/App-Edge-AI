@@ -32,12 +32,20 @@ export async function updatePermitStatus(id: string, status: string) {
 
 export async function getPermitQuota(studentId: string) {
   const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+
+  const existing = await prisma.permitQuota.findUnique({
+    where: { studentId_month_year: { studentId, month, year } }
+  });
+
+  if (existing) {
+    return { permitsUsed: existing.permitsUsed, maxPermits: existing.maxPermits };
+  }
+
+  const startOfMonth = new Date(year, month - 1, 1);
   const permitsUsed = await prisma.permit.count({
-    where: {
-      studentId,
-      createdAt: { gte: startOfMonth }
-    }
+    where: { studentId, startDate: { gte: startOfMonth } }
   });
   return { permitsUsed, maxPermits: 10 };
 }
