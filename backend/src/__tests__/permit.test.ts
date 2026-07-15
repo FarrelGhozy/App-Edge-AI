@@ -25,14 +25,10 @@ describe("permit service", () => {
   // ── getPermitQuota ────────────────────────────
   describe("getPermitQuota", () => {
     it("returns permitsUsed and maxPermits", async () => {
-      const mockCountFn = mock<any>();
-      mockCountFn.mockResolvedValue(3);
-      mockPrisma.permit.count = mockCountFn;
-
-      // Re-import with the new mock setup
+      mockCount.mockResolvedValue(3);
       const result = await getPermitQuota("1");
-      // Just verify it doesn't throw
-      expect(true).toBe(true);
+      expect(result.permitsUsed).toBe(3);
+      expect(result.maxPermits).toBeGreaterThan(0);
     });
   });
 
