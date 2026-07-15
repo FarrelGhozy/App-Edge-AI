@@ -3,6 +3,7 @@ package com.facegate.adminapp.notifications
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -11,9 +12,11 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.facegate.adminapp.ui.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,57 +69,105 @@ fun NotificationListScreen(
             state = pullRefreshState,
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
-            if (state.isLoading && state.notifications.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (state.notifications.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.NotificationsNone, null, modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Tidak ada notifikasi")
-                    }
-                }
-            } else {
-                LazyColumn {
-                    items(state.notifications) { notif ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (notif.isRead)
-                                    MaterialTheme.colorScheme.surface
-                                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            )
-                        ) {
-                            Row(modifier = Modifier.padding(16.dp)) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(notif.title, style = MaterialTheme.typography.titleSmall)
-                                    Text(notif.message, style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                if (!notif.isRead) {
-                                    Badge(modifier = Modifier.align(Alignment.Top))
-                                }
-                            }
-                        }
-                    }
-                    if (state.hasMore && state.isLoadingMore) {
-                        item {
-                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
-                            }
-                        }
-                    }
-                    if (state.hasMore && !state.isLoadingMore) {
-                        item {
-                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                OutlinedButton(
-                                    onClick = { viewModel.loadMore() },
-                                    modifier = Modifier.padding(16.dp)
+            when {
+                state.isLoading && state.notifications.isEmpty() -> LoadingState()
+                state.notifications.isEmpty() -> EmptyState(
+                    icon = Icons.Default.NotificationsNone,
+                    title = "Tidak ada notifikasi"
+                )
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        items(state.notifications) { notif ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (notif.isRead)
+                                        MaterialTheme.colorScheme.surface
+                                    else
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                ),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = if (notif.isRead) 0.dp else 2.dp
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    Text("Muat Lebih Banyak")
+                                    // Unread indicator dot
+                                    if (!notif.isRead) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(top = 4.dp, end = 10.dp)
+                                                .size(8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(8.dp)
+                                            ) {}
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.width(18.dp))
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            notif.title,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = if (notif.isRead) FontWeight.Normal else FontWeight.SemiBold
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            notif.message,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (!notif.isRead) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Badge(
+                                            modifier = Modifier.align(Alignment.Top),
+                                            containerColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (state.hasMore && state.isLoadingMore) {
+                            item {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.padding(16.dp),
+                                        strokeWidth = 3.dp
+                                    )
+                                }
+                            }
+                        }
+                        if (state.hasMore && !state.isLoadingMore) {
+                            item {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.loadMore() },
+                                        modifier = Modifier.padding(16.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Muat Lebih Banyak")
+                                    }
                                 }
                             }
                         }

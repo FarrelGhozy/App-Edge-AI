@@ -1,5 +1,55 @@
 import prisma from "./prisma";
 
+export async function createPermit(data: {
+  studentId: string;
+  reason: string;
+  type?: string;
+  startDate?: string;
+  endDate?: string;
+}) {
+  return prisma.permit.create({
+    data: {
+      studentId: data.studentId,
+      reason: data.reason,
+      type: data.type || "izin_harian",
+      startDate: data.startDate ? new Date(data.startDate) : new Date(),
+      endDate: data.endDate ? new Date(data.endDate) : new Date(),
+      status: "pending"
+    }
+  });
+}
+
+export async function getPermit(id: string) {
+  return prisma.permit.findUnique({ where: { id } });
+}
+
+export async function updatePermitStatus(id: string, status: string) {
+  return prisma.permit.update({
+    where: { id },
+    data: { status }
+  });
+}
+
+export async function getPermitQuota(studentId: string) {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+
+  const existing = await prisma.permitQuota.findUnique({
+    where: { studentId_month_year: { studentId, month, year } }
+  });
+
+  if (existing) {
+    return { permitsUsed: existing.permitsUsed, maxPermits: existing.maxPermits };
+  }
+
+  const startOfMonth = new Date(year, month - 1, 1);
+  const permitsUsed = await prisma.permit.count({
+    where: { studentId, startDate: { gte: startOfMonth } }
+  });
+  return { permitsUsed, maxPermits: 10 };
+}
+
 export async function listPermits(params: {
   page?: number;
   pageSize?: number;

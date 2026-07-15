@@ -1,16 +1,22 @@
 package com.facegate.adminapp.students
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.navigation.Screen
+import com.facegate.adminapp.ui.components.*
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -114,22 +120,89 @@ fun StudentDetailScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                state.isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                state.error != null -> Text(state.error!!, modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.error)
+                state.isLoading -> LoadingState()
+                state.error != null -> ErrorState(
+                    message = state.error!!,
+                    onRetry = { viewModel.loadStudent(studentId) }
+                )
                 state.student != null -> {
                     val s = state.student!!
-                    Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
-                        DetailRow("NIM", s.nim)
-                        DetailRow("Nama", s.name)
-                        DetailRow("Program Studi", s.studyProgram)
-                        DetailRow("Angkatan", s.academicYear)
-                        DetailRow("No. HP", s.phone ?: "-")
-                        DetailRow("Email", s.email ?: "-")
-                        DetailRow("Status", if (s.isActive) "Aktif" else "Nonaktif")
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        // ── Student Info Card ──
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                // Header
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.Person,
+                                                null,
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            s.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            s.nim,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                Spacer(modifier = Modifier.height(8.dp))
 
+                                // Info rows
+                                InfoRow("Program Studi", s.studyProgram)
+                                InfoRow("Angkatan", s.academicYear)
+                                InfoRow("No. HP", s.phone ?: "-")
+                                InfoRow("Email", s.email ?: "-")
+                                InfoRow(
+                                    "Status",
+                                    if (s.isActive) "Aktif" else "Nonaktif"
+                                )
+                            }
+                        }
+
+                        // ── Status Badge ──
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            StatusBadge(
+                                text = if (s.isActive) "AKTIF" else "NONAKTIF",
+                                color = if (s.isActive) Color(0xFF4CAF50) else Color(0xFFE53935)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // ── Face Registration Card ──
                         FaceRegistrationCard(
                             isRegistered = state.faceRegistered,
                             updatedAt = state.faceUpdatedAt,
@@ -139,6 +212,8 @@ fun StudentDetailScreen(
                             },
                             onDelete = { viewModel.showDeleteFaceConfirm() }
                         )
+
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
@@ -161,13 +236,17 @@ fun FaceRegistrationCard(
     onDelete: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isRegistered)
                 MaterialTheme.colorScheme.primaryContainer
             else
                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         if (isRegistered) {
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
@@ -181,7 +260,8 @@ fun FaceRegistrationCard(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Wajah Terdaftar",
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         if (updatedAt != null) {
@@ -239,7 +319,8 @@ fun FaceRegistrationCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Wajah Belum Terdaftar",
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
                     Text(
@@ -259,16 +340,6 @@ fun FaceRegistrationCard(
             }
         }
     }
-}
-
-@Composable
-fun DetailRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Text(label, style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.65f))
-    }
-    HorizontalDivider()
 }
 
 private fun formatDateTime(isoString: String): String {

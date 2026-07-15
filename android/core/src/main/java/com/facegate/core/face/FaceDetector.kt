@@ -10,6 +10,12 @@ import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 
+/**
+ * Wrapper around ML Kit Face Detection with quality assessment.
+ *
+ * Detects faces + extracts all landmarks and quality metrics
+ * needed for registration and matching pipeline.
+ */
 class FaceDetectorWrapper {
     private val detector by lazy {
         val options = FaceDetectorOptions.Builder()
@@ -39,9 +45,7 @@ class FaceDetectorWrapper {
         return try {
             val inputImage = InputImage.fromMediaImage(image, rotationDegrees)
             val faces = com.google.android.gms.tasks.Tasks.await(detector.process(inputImage))
-            Log.d("FaceDetect", "faces found=${faces.size}")
             if (faces.isEmpty()) return null
-            // ML Kit returns coords in rotated space. Swap w/h when rotated 90/270.
             val isRotated = rotationDegrees == 90 || rotationDegrees == 270
             val resultW = if (isRotated) image.height else image.width
             val resultH = if (isRotated) image.width else image.height
@@ -63,7 +67,6 @@ class FaceDetectorWrapper {
         return try {
             val image = InputImage.fromBitmap(bitmap, 0)
             val faces = com.google.android.gms.tasks.Tasks.await(detector.process(image))
-            Log.d("FaceDetect", "faces found=${faces.size}")
             if (faces.isEmpty()) return null
             toResult(bitmap.width, bitmap.height, faces)
         } catch (e: Exception) {
@@ -74,9 +77,12 @@ class FaceDetectorWrapper {
     }
 
     private fun toResult(imageWidth: Int, imageHeight: Int, faces: List<Face>): FaceDetectionResult {
+        // Pick the largest face in the frame
         val face = faces.maxByOrNull { f ->
             f.boundingBox.width() * f.boundingBox.height()
         }!!
+
+        val sm = face.smilingProbability ?: 0f
 
         return FaceDetectionResult(
             imageWidth = imageWidth.toFloat(),
@@ -87,7 +93,9 @@ class FaceDetectorWrapper {
             leftEyeContour = extractContourPoints(face, 6),
             rightEyeContour = extractContourPoints(face, 7),
             headEulerAngleY = face.headEulerAngleY,
-            headEulerAngleZ = face.headEulerAngleZ
+            headEulerAngleZ = face.headEulerAngleZ,
+            headEulerAngleX = face.headEulerAngleX,
+            smilingProbability = sm
         )
     }
 
@@ -104,6 +112,12 @@ class FaceDetectorWrapper {
     fun getLastError(): String? = lastError
 }
 
+/**
+ * Face detection result with comprehensive quality metadata.
+ *
+ * Quality fields help the registration pipeline reject bad captures
+ * before spending compute on embedding extraction.
+ */
 data class FaceDetectionResult(
     val imageWidth: Float,
     val imageHeight: Float,
@@ -112,13 +126,25 @@ data class FaceDetectionResult(
     val rightEyeOpenProbability: Float,
     val leftEyeContour: List<PointF>,
     val rightEyeContour: List<PointF>,
-    val headEulerAngleY: Float,
-    val headEulerAngleZ: Float
+    val headEulerAngleY: Float,  // Yaw (left-right)
+    val headEulerAngleZ: Float,  // Pitch (up-down)
+    val headEulerAngleX: Float = 0f,   // Roll (tilt) — NEW
+    val smilingProbability: Float = 0f // NEW
 ) {
+    /** Quick quality gate: posture check */
     val isGoodQuality: Boolean
         get() = kotlin.math.abs(headEulerAngleY) < 25f &&
                 kotlin.math.abs(headEulerAngleZ) < 25f
 
     val hasEyeContours: Boolean
         get() = leftEyeContour.size >= 6 && rightEyeContour.size >= 6
+
+    /** Face is roughly centered and properly sized */
+    val isWellPositioned: Boolean
+        get() {
+            val cx = boundingBox.exactCenterX() / imageWidth
+            val cy = boundingBox.exactCenterY() / imageHeight
+            val faceRatio = (boundingBox.width() * boundingBox.height()).toFloat() / (imageWidth * imageHeight)
+            return cx in 0.2f..0.8f && cy in 0.2f..0.8f && faceRatio >= 0.04f
+        }
 }

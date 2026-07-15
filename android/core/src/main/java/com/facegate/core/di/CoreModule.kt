@@ -13,6 +13,7 @@ import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiClient
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.AuthInterceptor
+import com.facegate.core.face.AntiSpoofDetector
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.FaceMatcher
@@ -91,8 +92,14 @@ object CoreModule {
 
     @Provides
     @Singleton
-    fun provideLivenessDetector(): LivenessDetector {
-        return LivenessDetector()
+    fun provideAntiSpoofDetector(@ApplicationContext context: Context): AntiSpoofDetector {
+        return AntiSpoofDetector(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideLivenessDetector(antiSpoofDetector: AntiSpoofDetector): LivenessDetector {
+        return LivenessDetector(antiSpoofDetector = antiSpoofDetector)
     }
 
     @Provides

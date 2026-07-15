@@ -1,30 +1,31 @@
 package com.facegate.kioskscanner.scanner
 
+import android.Manifest
 import android.util.Log
 import android.util.Size as AndroidSize
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -56,16 +57,68 @@ fun ScannerScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        CameraPreviewWithAnalysis(
-            modifier = Modifier.fillMaxSize(),
-            enabled = state is UIState.Idle && !isProcessing,
-            onFrameCaptured = { imageProxy ->
-                viewModel.onFrameCaptured(imageProxy)
-            }
-        )
+    val cameraPermissionGranted = remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> cameraPermissionGranted.value = granted }
 
-        // Guide box overlay (kotak panduan di tengah)
+    LaunchedEffect(Unit) {
+        if (!cameraPermissionGranted.value) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
+        if (cameraPermissionGranted.value) {
+            // Camera feed
+            CameraPreviewWithAnalysis(
+                modifier = Modifier.fillMaxSize(),
+                enabled = state is UIState.Idle && !isProcessing,
+                onFrameCaptured = { imageProxy ->
+                    viewModel.onFrameCaptured(imageProxy)
+                }
+            )
+        } else {
+            // Permission request UI
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    Icons.Default.CameraAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = Color.White.copy(alpha = 0.5f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Akses kamera diperlukan",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "FaceGate membutuhkan akses kamera untuk scan wajah",
+                    color = Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                    Text("Berikan Izin")
+                }
+            }
+            return@Box
+        }
+
+        // ─── Only below when camera permission granted ───
+
+        // Face guide overlay
         FaceGuideOverlay(
             isDetected = isFaceDetected,
             isCentered = isFaceCentered,
@@ -73,40 +126,90 @@ fun ScannerScreen(
             state = state
         )
 
-        // Result overlay (success/error)
-        ResultOverlay(state = state)
-
-        // Sync button (top-right)
-        IconButton(
-            onClick = { viewModel.syncNow() },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 48.dp, end = 8.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.5f))
-                .size(48.dp)
-        ) {
-            Icon(
-                Icons.Default.Refresh,
-                contentDescription = "Pull data dari server",
-                tint = Color.White,
-                modifier = Modifier.size(28.dp)
-            )
+        // Result overlay with animation
+        AnimatedContent(
+            targetState = state,
+            transitionSpec = {
+                if (targetState is UIState.Idle) {
+                    fadeIn(animationSpec = tween(300)) togetherWith
+                            fadeOut(animationSpec = tween(200))
+                } else {
+                    (fadeIn(animationSpec = tween(500)) + scaleIn(
+                        initialScale = 0.8f,
+                        animationSpec = tween(500, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+                    )) togetherWith
+                            fadeOut(animationSpec = tween(200))
+                }
+            },
+            label = "result"
+        ) { currentState ->
+            ResultOverlay(state = currentState)
         }
 
-        // Sync status text
-        if (syncStatus != null) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 100.dp, end = 8.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+        // Top bar with branding
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+                    )
+                )
+                .padding(top = 36.dp, bottom = 16.dp)
+                .padding(horizontal = 16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.White.copy(alpha = 0.15f),
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("FG", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "FaceGate Scanner",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.weight(1f))
+                // Sync button
+                IconButton(
+                    onClick = { viewModel.syncNow() },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.1f))
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Sync",
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+
+        // Sync status
+        AnimatedVisibility(
+            visible = syncStatus != null,
+            enter = fadeIn() + slideInVertically(),
+            exit = fadeOut() + slideOutVertically(),
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 88.dp, end = 16.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color.Black.copy(alpha = 0.7f)
             ) {
                 Text(
-                    text = syncStatus!!,
-                    color = if (syncStatus!!.startsWith("OK")) Color(0xFF4CAF50) else Color.White,
+                    text = syncStatus ?: "",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    color = if (syncStatus?.startsWith("OK") == true) Color(0xFF4CAF50) else Color.White,
                     fontSize = 12.sp
                 )
             }
@@ -194,36 +297,58 @@ fun ResultOverlay(state: UIState) {
     when (state) {
         is UIState.Idle -> {}
         is UIState.Success -> {
-            val bgColor = if (state.isViolation) Color(0xFFFFA000) else Color(0xFF4CAF50)
+            val bgColor = if (state.isViolation) Color(0xFFFFA000) else Color(0xFF2E7D32)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(bgColor.copy(alpha = 0.85f)),
+                    .background(bgColor.copy(alpha = 0.88f)),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.15f),
+                        modifier = Modifier.size(80.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                if (state.isViolation) Icons.Default.Warning else Icons.Default.Face,
+                                null,
+                                tint = Color.White,
+                                modifier = Modifier.size(40.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
                     Text(
                         text = state.studentName,
                         color = Color.White,
                         fontSize = 36.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = state.actionLabel,
                         color = Color.White,
-                        fontSize = 28.sp,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Medium
                     )
                     if (state.message != null) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = state.message,
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 32.dp)
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.White.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = state.message,
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -232,29 +357,46 @@ fun ResultOverlay(state: UIState) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFFE53935).copy(alpha = 0.85f)),
+                    .background(Color(0xFFC62828).copy(alpha = 0.85f)),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.15f),
+                        modifier = Modifier.size(80.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Clear,
+                                null,
+                                tint = Color.White,
+                                modifier = Modifier.size(40.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
                     Text(
                         text = "Wajah Tidak Dikenal",
                         color = Color.White,
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = state.message,
-                        color = Color.White,
-                        fontSize = 18.sp
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 18.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp)
                     )
                 }
             }
         }
     }
 }
-
-// ── Face Guide Overlay (kotak panduan di tengah) ──
 
 @Composable
 private fun FaceGuideOverlay(
@@ -274,7 +416,6 @@ private fun FaceGuideOverlay(
     val guideHeightRatio = 0.45f
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Dark overlay with cutout + guide border
         Canvas(modifier = Modifier.fillMaxSize()) {
             val gw = size.width * guideWidthRatio
             val gh = size.height * guideHeightRatio
@@ -306,29 +447,25 @@ private fun FaceGuideOverlay(
             // Corner accents
             val cornerLen = 30.dp.toPx()
             val strokeW = 4.dp.toPx()
-            // Top-left
             drawLine(guideColor, Offset(gl, gt + cornerLen), Offset(gl, gt), strokeW)
             drawLine(guideColor, Offset(gl, gt), Offset(gl + cornerLen, gt), strokeW)
-            // Top-right
             drawLine(guideColor, Offset(gl + gw - cornerLen, gt), Offset(gl + gw, gt), strokeW)
             drawLine(guideColor, Offset(gl + gw, gt), Offset(gl + gw, gt + cornerLen), strokeW)
-            // Bottom-left
             drawLine(guideColor, Offset(gl, gt + gh - cornerLen), Offset(gl, gt + gh), strokeW)
             drawLine(guideColor, Offset(gl, gt + gh), Offset(gl + cornerLen, gt + gh), strokeW)
-            // Bottom-right
             drawLine(guideColor, Offset(gl + gw - cornerLen, gt + gh), Offset(gl + gw, gt + gh), strokeW)
             drawLine(guideColor, Offset(gl + gw, gt + gh - cornerLen), Offset(gl + gw, gt + gh), strokeW)
         }
 
-        // Status message above guide
+        // Status message pill
         if (statusMessage.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 48.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(horizontal = 28.dp, vertical = 10.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .padding(horizontal = 24.dp, vertical = 10.dp)
             ) {
                 Text(
                     text = statusMessage,

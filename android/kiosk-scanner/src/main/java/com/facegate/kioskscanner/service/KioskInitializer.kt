@@ -125,7 +125,7 @@ class KioskInitializer @Inject constructor(
             val response = apiService.registerDevice(request)
             if (response.isSuccessful) {
                 val body = response.body()
-                val name = body?.get("name") as? String ?: "Kiosk Scanner"
+                val name = body?.get("name")?.toString() ?: "Kiosk Scanner"
                 devicePreferences.setDeviceName(name)
                 Log.d(TAG, "Device registered: $deviceId")
             } else {

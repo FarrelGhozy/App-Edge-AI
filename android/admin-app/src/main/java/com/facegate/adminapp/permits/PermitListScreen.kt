@@ -1,22 +1,22 @@
 package com.facegate.adminapp.permits
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
-import com.facegate.adminapp.navigation.Screen
+import com.facegate.adminapp.ui.components.*
+import com.facegate.adminapp.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -25,118 +25,112 @@ fun PermitListScreen(
     viewModel: PermitListViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    val pullRefreshState = rememberPullToRefreshState()
 
     LaunchedEffect(Unit) { viewModel.loadPermits() }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Izin") },
+                title = { Text("Izin Keluar", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
-                actions = {
-                    IconButton(onClick = { navController.navigate(Screen.PermitForm.route) }) {
-                        Icon(Icons.Default.Add, "Tambah")
-                    }
-                }
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { navController.navigate("permit_create") },
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Icon(Icons.Default.Add, "Buat Izin")
+            }
         }
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = state.isRefreshing,
-            onRefresh = { viewModel.refresh() },
-            state = pullRefreshState,
-            modifier = Modifier.fillMaxSize().padding(padding)
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = state.filterStatus == null,
-                        onClick = { viewModel.setFilter(null) },
-                        label = { Text("Semua") }
+        when {
+            state.isLoading -> LoadingState(modifier = Modifier.padding(padding))
+            state.                error != null -> ErrorState(
+                message = state.error,
+                onRetry = { viewModel.loadPermits() },
+                modifier = Modifier.padding(padding)
+            )
+            state.permits.isEmpty() -> EmptyState(
+                icon = Icons.Default.Description,
+                title = "Belum ada izin",
+                subtitle = "Ketuk + untuk membuat izin baru",
+                modifier = Modifier.padding(padding)
+            )
+            else -> LazyColumn(
+                modifier = Modifier.padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(state.permits) { permit ->
+                    PermitCard(
+                        name = permit.studentName,
+                        purpose = permit.type,
+                        status = permit.status ?: "pending",
+                        onClick = { navController.navigate("permit_detail/${permit.id}") }
                     )
-                    FilterChip(
-                        selected = state.filterStatus == "pending",
-                        onClick = { viewModel.setFilter("pending") },
-                        label = { Text("Pending") }
-                    )
-                    FilterChip(
-                        selected = state.filterStatus == "approved",
-                        onClick = { viewModel.setFilter("approved") },
-                        label = { Text("Disetujui") }
-                    )
-                    FilterChip(
-                        selected = state.filterStatus == "rejected",
-                        onClick = { viewModel.setFilter("rejected") },
-                        label = { Text("Ditolak") }
-                    )
-                }
-
-                if (state.isLoading && state.permits.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                } else if (state.permits.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Belum ada izin")
-                    }
-                } else {
-                    LazyColumn {
-                        items(state.permits) { permit ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                                    .clickable { navController.navigate(Screen.PermitDetail.createRoute(permit.id)) }
-                            ) {
-                                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(permit.studentName, style = MaterialTheme.typography.titleSmall)
-                                        Text(
-                                            if (permit.type == "izin_harian") "Izin Harian" else "Pengajuan Izin",
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                    val statusColor = when (permit.status) {
-                                        "approved" -> Color(0xFF4CAF50)
-                                        "rejected" -> Color(0xFFE53935)
-                                        else -> Color(0xFFFFA000)
-                                    }
-                                    Text(
-                                        permit.status.uppercase(),
-                                        color = statusColor,
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                }
-                            }
-                        }
-                        if (state.hasMore && state.isLoadingMore) {
-                            item {
-                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
-                                }
-                            }
-                        }
-                        if (state.hasMore && !state.isLoadingMore) {
-                            item {
-                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    OutlinedButton(
-                                        onClick = { viewModel.loadMore() },
-                                        modifier = Modifier.padding(16.dp)
-                                    ) {
-                                        Text("Muat Lebih Banyak")
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PermitCard(
+    name: String,
+    purpose: String,
+    status: String,
+    onClick: () -> Unit
+) {
+    val (statusColor, statusText) = when (status.lowercase()) {
+        "approved" -> SuccessGreen to "Disetujui"
+        "rejected" -> ErrorRed to "Ditolak"
+        "expired" -> WarningOrange to "Kadaluarsa"
+        else -> InfoBlue to "Pending"
+    }
+
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = statusColor.copy(alpha = 0.1f),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        when (status.lowercase()) {
+                            "approved" -> Icons.Default.CheckCircle
+                            "rejected" -> Icons.Default.Cancel
+                            else -> Icons.Default.Schedule
+                        },
+                        null, tint = statusColor, modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(purpose, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1)
+            }
+            StatusBadge(text = statusText, color = statusColor)
         }
     }
 }

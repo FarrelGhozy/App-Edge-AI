@@ -27,6 +27,9 @@ export async function recordScan(data: {
   photoCapture?: string;
   timestamp?: number;
 }) {
+  const student = await prisma.student.findUnique({ where: { id: data.studentId } });
+  if (!student) throw new Error("STUDENT_NOT_FOUND");
+
   return prisma.attendanceLog.create({
     data: {
       studentId: data.studentId,
@@ -73,4 +76,21 @@ export async function listAttendance(params: {
   ]);
 
   return { data, total, page, pageSize };
+}
+
+export async function getTodayAttendance() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  return prisma.attendanceLog.findMany({
+    where: {
+      timestamp: {
+        gte: today,
+        lt: tomorrow
+      }
+    },
+    orderBy: { timestamp: "desc" }
+  });
 }

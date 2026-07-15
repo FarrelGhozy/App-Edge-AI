@@ -7,10 +7,10 @@ import javax.inject.Inject
 
 @HiltAndroidApp
 class KioskScannerApp : Application() {
-    @Inject lateinit var initializer: KioskInitializer
+    @Inject lateinit var kioskInitializer: KioskInitializer
 
     override fun onCreate() {
         super.onCreate()
-        initializer.initialize(this)
+        kioskInitializer.initialize(this)
     }
 }

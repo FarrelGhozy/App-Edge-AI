@@ -1,15 +1,22 @@
 package com.facegate.adminapp.violations
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.facegate.adminapp.ui.components.*
+import androidx.compose.ui.graphics.Color
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,75 +41,127 @@ fun ViolationDetailScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
         ) {
-            if (state.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (state.error != null) {
-                Text(state.error!!, color = MaterialTheme.colorScheme.error)
-            } else if (state.violation != null) {
-                val v = state.violation!!
-
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text("Tipe", modifier = Modifier.width(120.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(typeLabel(v.type))
-                }
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text("Waktu", modifier = Modifier.width(120.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(v.timestamp.take(19).replace("T", " "))
-                }
-                val description = v.description
-                if (description != null) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Text("Keterangan", modifier = Modifier.width(120.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(description)
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text("Status", modifier = Modifier.width(120.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if (v.isResolved) "Selesai" else "Belum")
-                }
-                val resolvedAt = v.resolvedAt
-                if (resolvedAt != null) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Text("Diselesaikan", modifier = Modifier.width(120.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(resolvedAt.take(19).replace("T", " "))
-                    }
-                }
-
-                if (!v.isResolved) {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    OutlinedTextField(
-                        value = state.resolveNote,
-                        onValueChange = { viewModel.setResolveNote(it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Catatan penyelesaian (opsional)") },
-                        minLines = 2
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = { viewModel.resolve(violationId) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.isProcessing
+            when {
+                state.isLoading -> LoadingState()
+                state.error != null -> ErrorState(
+                    message = state.error,
+                    onRetry = { viewModel.load(violationId) }
+                )
+                state.violation == null -> EmptyState(
+                    icon = Icons.Default.Gavel,
+                    title = "Pelanggaran tidak ditemukan"
+                )
+                else -> {
+                    val v = state.violation!!
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp)
                     ) {
-                        Text("Selesaikan Pelanggaran")
-                    }
-                }
+                        // ── Detail Info Card ──
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                InfoRow("Tipe", typeLabel(v.type))
+                                InfoRow("Waktu", v.timestamp.take(19).replace("T", " "))
+                                if (v.description != null) {
+                                    InfoRow("Keterangan", v.description!!)
+                                }
+                                InfoRow(
+                                    "Status",
+                                    if (v.isResolved) "Selesai" else "Belum"
+                                )
+                                if (v.resolvedAt != null) {
+                                    InfoRow(
+                                        "Diselesaikan",
+                                        v.resolvedAt!!.take(19).replace("T", " ")
+                                    )
+                                }
+                            }
+                        }
 
-                if (state.actionMessage != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(state.actionMessage!!, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // ── Status Badge ──
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            StatusBadge(
+                                text = if (v.isResolved) "SELESAI" else "BELUM",
+                                color = if (v.isResolved) Color(0xFF2E7D32) else Color(0xFFE65100)
+                            )
+                        }
+
+                        if (!v.isResolved) {
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        "Selesaikan Pelanggaran",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    OutlinedTextField(
+                                        value = state.resolveNote,
+                                        onValueChange = { viewModel.setResolveNote(it) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        placeholder = { Text("Catatan penyelesaian (opsional)") },
+                                        minLines = 2,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Button(
+                                        onClick = { viewModel.resolve(violationId) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = !state.isProcessing,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Selesaikan Pelanggaran")
+                                    }
+                                }
+                            }
+                        }
+
+                        if (state.actionMessage != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                )
+                            ) {
+                                Text(
+                                    state.actionMessage!!,
+                                    modifier = Modifier.padding(12.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

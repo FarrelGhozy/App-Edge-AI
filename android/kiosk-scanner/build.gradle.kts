@@ -80,6 +80,7 @@ dependencies {
     implementation(libs.camerax.view)
 
     implementation(libs.coil.compose)
+    implementation(libs.material)
 
     debugImplementation(libs.compose.ui.tooling)
 

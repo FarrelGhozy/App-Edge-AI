@@ -6,8 +6,9 @@ import { authGuard } from "../guards/auth";
 export const deviceRoutes = new Elysia()
   .use(authGuard)
   .post("/api/devices/register", async ({ body }) => {
-    const device = await registerDevice(body as { name: string; location?: string });
-    return { success: true, data: device };
+    const req = body as { deviceId?: string; name: string; location?: string };
+    const device = await registerDevice(req);
+    return device;
   })
   .get("/api/devices", async () => {
     return await listDevices();

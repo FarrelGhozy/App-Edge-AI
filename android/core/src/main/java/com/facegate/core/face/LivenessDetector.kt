@@ -1,164 +1,224 @@
 package com.facegate.core.face
 
+import android.graphics.Bitmap
 import android.graphics.PointF
+import android.graphics.Rect
 import android.util.Log
 
 /**
- * Liveness detection using Eye Aspect Ratio (EAR).
+ * Liveness detection: Hybrid approach combining:
+ * 1. **Deep learning anti-spoofing** (primary) — MiniFASNet detects photo/video/screen attacks
+ * 2. **Eye Aspect Ratio (EAR)** (fallback) — blink detection for extra assurance
  *
- * EAR = ratio of vertical to horizontal eye landmark distances.
- * A blink is detected when EAR drops below threshold then rises again.
+ * Pipeline:
+ *   Anti-spoof check → if spoof detected → REJECT immediately
+ *   If real → EAR blink (fast, lightweight) → PASS after 1 natural blink
  *
- * Requires at least 1 natural blink within a 3-second window.
- * Based on Soukupová & Čech (2016) — Real-Time Eye Blink Detection using Facial Landmarks.
+ * Configuration:
+ * - Spoof confidence threshold: 0.5 (below = treat as spoof)
+ * - EAR blink required: 1 natural blink in 4-second window
+ * - If anti-spoof model unavailable → fallback to EAR-only mode
  */
-class LivenessDetector {
-    /** Blink threshold ratio (relative to running baseline EAR) */
-    private val blinkRatio: Float = 0.60f  // EAR < 60% of baseline = closed
+class LivenessDetector(
+    private val antiSpoofDetector: AntiSpoofDetector? = null
+) {
+    companion object {
+        private const val TAG = "LivenessDetector"
 
-    /** Maximum time (ms) to wait for a blink */
-    private val blinkWindowMs: Long = 4_000L
+        // Anti-spoof thresholds
+        private const val SPOOF_CONFIDENCE_THRESHOLD = 0.5f
 
-    /** Minimum time (ms) between blinks to avoid false double-trigger */
-    private val blinkCooldownMs: Long = 300L
+        // EAR blink detection
+        private const val BLINK_RATIO = 0.60f
+        private const val BLINK_WINDOW_MS = 4_000L
+        private const val BLINK_COOLDOWN_MS = 300L
+        private const val REQUIRED_BLINKS = 1
+    }
 
-    /** Number of blinks required to pass liveness */
-    private val requiredBlinks: Int = 1
+    // ─── EAR blink state ───
+    private var blinkCount = 0
+    private var baselineEar = 0.0f
+    private var baselineFrames = 0
+    private var lastEarValue = 1.0f
+    private var wasBelowThreshold = false
+    private var lastBlinkTime = 0L
+    private var windowStartTime = 0L
+    private var earPassed = false
 
-    // Internal state
-    private var blinkCount: Int = 0
-    private var baselineEar: Float = 0.0f     // running max EAR (open eyes baseline)
-    private var baselineFrames: Int = 0
-    private var lastEarValue: Float = 1.0f
-    private var wasBelowThreshold: Boolean = false
-    private var lastBlinkTime: Long = 0L
-    private var windowStartTime: Long = 0L
-    private var isPassed: Boolean = false
+    // ─── Anti-spoof state ───
+    private var lastSpoofResult: AntiSpoofDetector.SpoofResult? = null
+    private var antiSpoofPassed = false
 
     /**
-     * Check liveness based on eye contour points from face detection.
+     * Run full liveness check: anti-spoofing (DL) + EAR blink.
      *
-     * @param leftEyeContour  contour points around the left eye (from ML Kit)
-     * @param rightEyeContour contour points around the right eye (from ML Kit)
-     * @param currentTimeMs   current time in milliseconds
-     * @param leftEyeOpenProb ML Kit's built-in eye open probability (0-1), fallback
-     * @param rightEyeOpenProb ML Kit's built-in right eye open probability (0-1), fallback
-     * @return true if liveness check passed (enough blinks detected)
+     * @param frameImage      Full camera frame (for anti-spoof crop)
+     * @param faceRect        Face bounding box (for anti-spoof crop)
+     * @param leftEyeContour  ML Kit left eye contour points
+     * @param rightEyeContour ML Kit right eye contour points
+     * @param currentTimeMs   Current timestamp for blink windowing
+     * @param leftEyeOpenProb ML Kit eye-open probability (fallback)
+     * @param rightEyeOpenProb ML Kit eye-open probability (fallback)
+     * @return LivenessResult with pass/fail + details
      */
-    fun checkLiveness(
+    suspend fun checkLiveness(
+        frameImage: Bitmap,
+        faceRect: Rect,
+        leftEyeContour: List<PointF>?,
+        rightEyeContour: List<PointF>?,
+        currentTimeMs: Long,
+        leftEyeOpenProb: Float = 1.0f,
+        rightEyeOpenProb: Float = 1.0f
+    ): LivenessResult {
+        val detailMessages = mutableListOf<String>()
+
+        // ─── 1. Anti-spoofing (DL) ───
+        if (!antiSpoofPassed && antiSpoofDetector != null) {
+            val spoofResult = antiSpoofDetector.detectSpoof(frameImage, faceRect)
+            lastSpoofResult = spoofResult
+
+            if (!spoofResult.isSpoof && spoofResult.realConfidence >= SPOOF_CONFIDENCE_THRESHOLD) {
+                antiSpoofPassed = true
+                detailMessages.add("anti-spoof: real (%.2f)".format(spoofResult.realConfidence))
+            } else {
+                detailMessages.add("anti-spoof: SPOOF (%.2f)".format(spoofResult.realConfidence))
+                // Early reject — definitely a spoof
+                return LivenessResult(
+                    passed = false,
+                    isSpoof = true,
+                    realConfidence = spoofResult.realConfidence,
+                    blinkCount = blinkCount,
+                    details = "Spoof detected! Confidence: %.2f".format(spoofResult.realConfidence)
+                )
+            }
+        }
+
+        // ─── 2. EAR blink (secondary check) ───
+        val earOk = checkEarBlink(
+            leftEyeContour, rightEyeContour,
+            currentTimeMs, leftEyeOpenProb, rightEyeOpenProb
+        )
+        if (earOk) {
+            detailMessages.add("blink: $blinkCount/$REQUIRED_BLINKS")
+        } else {
+            detailMessages.add("blink: waiting...")
+        }
+
+        val allPassed = (antiSpoofPassed || antiSpoofDetector == null) &&
+                (earPassed || antiSpoofDetector != null)
+
+        return LivenessResult(
+            passed = allPassed,
+            isSpoof = !antiSpoofPassed && antiSpoofDetector != null,
+            realConfidence = lastSpoofResult?.realConfidence ?: 0f,
+            blinkCount = blinkCount,
+            details = detailMessages.joinToString(" | ")
+        )
+    }
+
+    /**
+     * Legacy synchronous check liveness (EAR-only) for backward compatibility.
+     * Uses same EAR logic without anti-spoofing.
+     */
+    fun checkLivenessLegacy(
         leftEyeContour: List<PointF>?,
         rightEyeContour: List<PointF>?,
         currentTimeMs: Long,
         leftEyeOpenProb: Float = 1.0f,
         rightEyeOpenProb: Float = 1.0f
     ): Boolean {
-        if (isPassed) return true
+        return checkEarBlink(
+            leftEyeContour, rightEyeContour,
+            currentTimeMs, leftEyeOpenProb, rightEyeOpenProb
+        )
+    }
 
-        // Initialize window on first call
+    private fun checkEarBlink(
+        leftEyeContour: List<PointF>?,
+        rightEyeContour: List<PointF>?,
+        currentTimeMs: Long,
+        leftEyeOpenProb: Float,
+        rightEyeOpenProb: Float
+    ): Boolean {
+        if (earPassed) return true
+
         if (windowStartTime == 0L) {
             windowStartTime = currentTimeMs
         }
 
-        // Timeout: if window expired, reset and try again
-        if (currentTimeMs - windowStartTime > blinkWindowMs) {
-            if (blinkCount >= requiredBlinks) {
-                isPassed = true
+        // Timeout: window expired
+        if (currentTimeMs - windowStartTime > BLINK_WINDOW_MS) {
+            if (blinkCount >= REQUIRED_BLINKS) {
+                earPassed = true
                 return true
             }
-            reset()
+            resetEar()
             windowStartTime = currentTimeMs
         }
 
-        // Calculate EAR from eye contours (primary method)
         val ear = if (leftEyeContour != null && rightEyeContour != null &&
             leftEyeContour.size >= 14 && rightEyeContour.size >= 14
         ) {
-            val leftEAR = calculateEAR(leftEyeContour)
-            val rightEAR = calculateEAR(rightEyeContour)
-            val avgEAR = (leftEAR + rightEAR) / 2f
-            Log.d("Liveness", "EAR left=$leftEAR right=$rightEAR avg=$avgEAR baseline=$baselineEar ratio=%.2f wasBelow=$wasBelowThreshold blink=$blinkCount".format(if (baselineEar > 0f) (avgEAR / baselineEar) else 1f))
-            avgEAR
+            (calculateEAR(leftEyeContour) + calculateEAR(rightEyeContour)) / 2f
         } else {
-            // Fallback: use ML Kit's built-in probability
-            val avgProb = (leftEyeOpenProb + rightEyeOpenProb) / 2f
-            0.10f + (avgProb * 0.25f) // Map 0→0.10, 1→0.35
+            0.10f + ((leftEyeOpenProb + rightEyeOpenProb) / 2f) * 0.25f
         }
 
         lastEarValue = ear
 
-        // Update baseline: running max of EAR (tracks open-eyes level)
+        // Running baseline (max observed)
         if (ear > baselineEar) {
             baselineEar = ear
             baselineFrames = 0
         } else {
             baselineFrames++
-            // Decay baseline slightly if it stays high for many frames (prevents stuck high baseline)
             if (baselineFrames > 30 && baselineEar > 0.15f) {
                 baselineEar *= 0.98f
             }
         }
 
-        // Blink detection: EAR drops below ratio of baseline → rises again = 1 blink
-        val dynamicThreshold = baselineEar * blinkRatio
-        if (ear < dynamicThreshold && !wasBelowThreshold) {
+        // Blink: falls below threshold then rises again
+        val threshold = baselineEar * BLINK_RATIO
+        if (ear < threshold && !wasBelowThreshold) {
             wasBelowThreshold = true
-        } else if (ear >= dynamicThreshold && wasBelowThreshold) {
-            val timeSinceLastBlink = currentTimeMs - lastBlinkTime
-            if (timeSinceLastBlink > blinkCooldownMs) {
+        } else if (ear >= threshold && wasBelowThreshold) {
+            if (currentTimeMs - lastBlinkTime > BLINK_COOLDOWN_MS) {
                 blinkCount++
                 lastBlinkTime = currentTimeMs
             }
             wasBelowThreshold = false
         }
 
-        if (blinkCount >= requiredBlinks) {
-            isPassed = true
+        if (blinkCount >= REQUIRED_BLINKS) {
+            earPassed = true
         }
-
-        return isPassed
+        return earPassed
     }
 
-    /**
-     * Calculate Eye Aspect Ratio for one eye using ML Kit's 16-point contour.
-     *
-     * ML Kit eye contour ordering (clockwise from outer corner, 16 points):
-     *   [0] = outer corner
-     *   [1..7] = upper eyelid (outer → inner)
-     *   [8] = inner corner
-     *   [9..15] = lower eyelid (inner → outer)
-     *
-     * EAR = average_vertical / horizontal
-     *
-     * Measures 3 vertical pairs (upper→lower at positions 1/4, 1/2, 3/4)
-     *   and divides by eye width (outer→inner corner).
-     */
     private fun calculateEAR(contour: List<PointF>): Float {
         if (contour.size < 14) return 1.0f
-
         val outer = contour[0]
         val inner = contour[8]
-        val horizontalDist = distance(outer, inner)
-        if (horizontalDist < 0.001f) return 1.0f
-
-        // 3 vertical pairs: upper indices 2,4,6 ↔ lower 14,12,10
+        val hDist = distance(outer, inner)
+        if (hDist < 0.001f) return 1.0f
         val v1 = distance(contour[2], contour[14])
         val v2 = distance(contour[4], contour[12])
         val v3 = distance(contour[6], contour[10])
-        val avgVertical = (v1 + v2 + v3) / 3f
-
-        return avgVertical / horizontalDist
+        return ((v1 + v2 + v3) / 3f) / hDist
     }
 
-
-
     private fun distance(a: PointF, b: PointF): Float {
-        val dx = a.x - b.x
-        val dy = a.y - b.y
+        val dx = a.x - b.x; val dy = a.y - b.y
         return kotlin.math.sqrt(dx * dx + dy * dy)
     }
 
-    /** Reset liveness state (call after successful match or timeout). */
     fun reset() {
+        resetEar()
+        antiSpoofPassed = false
+        lastSpoofResult = null
+    }
+
+    private fun resetEar() {
         blinkCount = 0
         baselineEar = 0.0f
         baselineFrames = 0
@@ -166,10 +226,18 @@ class LivenessDetector {
         wasBelowThreshold = false
         lastBlinkTime = 0L
         windowStartTime = 0L
-        isPassed = false
+        earPassed = false
     }
 
     fun getCurrentEAR(): Float = lastEarValue
     fun getBlinkCount(): Int = blinkCount
-    fun hasPassed(): Boolean = isPassed
+    fun hasPassed(): Boolean = earPassed && (antiSpoofPassed || antiSpoofDetector == null)
 }
+
+data class LivenessResult(
+    val passed: Boolean,
+    val isSpoof: Boolean = false,
+    val realConfidence: Float = 0f,
+    val blinkCount: Int = 0,
+    val details: String = ""
+)
