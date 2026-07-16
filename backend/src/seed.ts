@@ -18,18 +18,31 @@ async function main() {
   });
   console.log(`   Admin: ${admin.username} (password: admin123)`);
 
-  const device = await prisma.device.upsert({
+  const deviceAccount = await prisma.admin.upsert({
     where: { username: "kiosk-gate1" },
+    update: {},
+    create: {
+      username: "kiosk-gate1",
+      passwordHash: await bcrypt.hash("facegate-kiosk-2024", 10),
+      displayName: "Kiosk Gate 1",
+      role: "device"
+    }
+  });
+  console.log(`   Kiosk Admin: ${deviceAccount.username} (password: facegate-kiosk-2024)`);
+
+  await prisma.device.upsert({
+    where: { deviceId: "kiosk-gate1" },
     update: {},
     create: {
       deviceId: "kiosk-gate1",
       username: "kiosk-gate1",
       passwordHash: await bcrypt.hash("facegate-kiosk-2024", 10),
       name: "Kiosk Gate 1",
-      location: "Main Gate"
+      location: "Main Gate",
+      isActive: true
     }
   });
-  console.log(`   Device: ${device.username} (password: facegate-kiosk-2024)`);
+  console.log(`   Device: kiosk-gate1 (Kiosk Gate 1)`);
 
   const rules = [
     { dayOfWeek: 0, startTime: "22:00", endTime: "05:00", label: "Minggu Malam" },
