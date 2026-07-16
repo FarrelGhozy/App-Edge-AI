@@ -127,8 +127,8 @@ data class FaceDetectionResult(
     val leftEyeContour: List<PointF>,
     val rightEyeContour: List<PointF>,
     val headEulerAngleY: Float,  // Yaw (left-right)
-    val headEulerAngleZ: Float,  // Pitch (up-down)
-    val headEulerAngleX: Float = 0f,   // Roll (tilt) — NEW
+    val headEulerAngleZ: Float,  // Roll (tilt)
+    val headEulerAngleX: Float = 0f,   // Pitch (up-down)
     val smilingProbability: Float = 0f // NEW
 ) {
     /** Quick quality gate: posture check */
