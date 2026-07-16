@@ -1,6 +1,7 @@
 package com.facegate.adminapp.register
 
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.util.Log
 import androidx.camera.core.ImageProxy
@@ -38,8 +39,8 @@ enum class CapturePose(
     CENTER("Lurus", "Hadapkan wajah lurus ke kamera", 0f, 0f, 22f),
     LEFT("Kiri", "Miringkan kepala ke kiri", -30f, 0f, 12f),
     RIGHT("Kanan", "Miringkan kepala ke kanan", 30f, 0f, 12f),
-    UP("Atas", "Tengadahkan kepala ke atas", 0f, -18f, 12f),
-    DOWN("Bawah", "Tundukkan kepala ke bawah", 0f, 18f, 12f)
+    UP("Atas", "Tengadahkan kepala ke atas", 0f, 18f, 12f),
+    DOWN("Bawah", "Tundukkan kepala ke bawah", 0f, -18f, 12f)
 }
 
 data class CapturedFrameData(
@@ -53,6 +54,7 @@ enum class FaceRegisterStep {
     DETECTING,
     POSITIONING,    // guiding user to a pose
     CAPTURING,      // collecting frame for current pose
+    CONFIRM,        // showing captured face preview before next pose
     EMBEDDING,
     UPLOADING,
     SUCCESS,
@@ -100,6 +102,9 @@ class FaceRegisterViewModel @Inject constructor(
         framesRequired = CapturePose.entries.size // = 5
     ))
     val state: StateFlow<FaceRegisterState> = _state.asStateFlow()
+
+    private val _previewBitmap = MutableStateFlow<Bitmap?>(null)
+    val previewBitmap: StateFlow<Bitmap?> = _previewBitmap.asStateFlow()
 
     // Per-pose frame storage
     private val poseQueues = mutableMapOf<CapturePose, MutableList<CapturedFrameData>>()
@@ -165,7 +170,7 @@ class FaceRegisterViewModel @Inject constructor(
         }
 
         val yaw = detection.headEulerAngleY
-        val pitch = detection.headEulerAngleZ
+        val pitch = detection.headEulerAngleX
 
         // ─── Determine which pose the user is closest to ───
         val matchedPose = findClosestPose(yaw, pitch)
@@ -184,8 +189,6 @@ class FaceRegisterViewModel @Inject constructor(
             yawAngle = yaw,
             pitchAngle = pitch
         )
-
-        lastCaptureTime = System.currentTimeMillis()
 
         // ─── Update state with live feedback ───
         val currentPose = _state.value.currentPose
@@ -290,6 +293,7 @@ class FaceRegisterViewModel @Inject constructor(
                     qualityReport = quality,
                     pose = currentPose
                 ))
+                lastCaptureTime = System.currentTimeMillis()
                 val capturedPoses = _state.value.capturedPoses + currentPose
                 val totalFrames = poseQueues.values.sumOf { it.size }
 
@@ -303,8 +307,31 @@ class FaceRegisterViewModel @Inject constructor(
                 Log.d(TAG, "Frame captured for ${currentPose.name}: ${currentQueue.size}/$MAX_FRAMES_PER_POSE (score=${"%.3f".format(quality.score)})")
 
                 if (currentQueue.size >= MAX_FRAMES_PER_POSE) {
-                    // This pose is done — move to next
-                    moveToNextPose()
+                    // This pose is done — show preview before next
+                    val best = currentQueue.maxByOrNull { it.qualityReport.score }
+                    val previewBmp = best?.let {
+                        val faceRect = it.faceRect
+                        try {
+                            val crop = Bitmap.createBitmap(
+                                it.bitmap,
+                                faceRect.left.coerceAtLeast(0),
+                                faceRect.top.coerceAtLeast(0),
+                                faceRect.width().coerceAtMost(it.bitmap.width - faceRect.left.coerceAtLeast(0)),
+                                faceRect.height().coerceAtMost(it.bitmap.height - faceRect.top.coerceAtLeast(0))
+                            )
+                            if (rotation != 0) {
+                                val mat = Matrix().apply { postRotate(rotation.toFloat()) }
+                                Bitmap.createBitmap(crop, 0, 0, crop.width, crop.height, mat, true)
+                            } else crop
+                        } catch (e: Exception) { null }
+                    }
+                    _previewBitmap.value = previewBmp
+
+                    _state.value = _state.value.copy(
+                        step = FaceRegisterStep.CONFIRM,
+                        message = "Pose ${currentPose.displayName} selesai!",
+                        currentQualityScore = 0f
+                    )
                 }
             } else {
                 // Frame didn't pass quality — show feedback but stay in CAPTURING
@@ -427,6 +454,8 @@ class FaceRegisterViewModel @Inject constructor(
                 val averaged = faceEmbedder.averageEmbeddings(embeddings)
 
                 // Cleanup all bitmaps
+                _previewBitmap.value?.recycle()
+                _previewBitmap.value = null
                 poseQueues.values.forEach { queue ->
                     queue.forEach { it.bitmap.recycle() }
                     queue.clear()
@@ -452,9 +481,13 @@ class FaceRegisterViewModel @Inject constructor(
                         isSuccess = true
                     )
                 } else {
+                    val errBody = try {
+                        response.errorBody()?.string()
+                    } catch (_: Exception) { null }
+                    Log.e(TAG, "Upload gagal ${response.code()}: $errBody")
                     _state.value = _state.value.copy(
                         step = FaceRegisterStep.ERROR,
-                        error = "Gagal mengunggah: ${response.code()}"
+                        error = errBody ?: "Gagal mengunggah: ${response.code()}"
                     )
                 }
             } catch (e: Exception) {
@@ -469,6 +502,26 @@ class FaceRegisterViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    fun confirmPose() {
+        _previewBitmap.value?.recycle()
+        _previewBitmap.value = null
+        moveToNextPose()
+    }
+
+    fun retryPose() {
+        val currentPose = _state.value.currentPose
+        poseQueues[currentPose]?.clear()
+        _previewBitmap.value?.recycle()
+        _previewBitmap.value = null
+        poseStartTime = System.currentTimeMillis()
+        _state.value = _state.value.copy(
+            step = FaceRegisterStep.POSITIONING,
+            message = "Ulangi: ${currentPose.guideText}",
+            capturedPoses = _state.value.capturedPoses - currentPose,
+            currentQualityScore = 0f
+        )
     }
 
     fun skipPose() {
@@ -496,6 +549,8 @@ class FaceRegisterViewModel @Inject constructor(
 
     fun reset() {
         livenessDetector.reset()
+        _previewBitmap.value?.recycle()
+        _previewBitmap.value = null
         poseQueues.values.forEach { queue ->
             queue.forEach { it.bitmap.recycle() }
             queue.clear()
@@ -509,6 +564,8 @@ class FaceRegisterViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        _previewBitmap.value?.recycle()
+        _previewBitmap.value = null
         poseQueues.values.forEach { queue ->
             queue.forEach { it.bitmap.recycle() }
             queue.clear()
