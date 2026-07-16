@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
-import { loginSchema, loginUser } from "../services/auth";
+import { loginSchema, loginUser, loginDevice } from "../services/auth";
 import prisma from "../services/prisma";
+import bcrypt from "bcryptjs";
 
 export const authRoutes = new Elysia()
   .post("/api/auth/login", async ({ body, jwt }) => {
@@ -32,8 +33,38 @@ export const authRoutes = new Elysia()
       }
     };
   }, { body: loginSchema })
+
+  .post("/api/auth/device-login", async ({ body, jwt }) => {
+    const { username, password } = body;
+    const device = await loginDevice(username, password);
+    if (!device) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid credentials" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const token = await jwt.sign({
+      id: device.id,
+      username: device.username,
+      role: device.role
+    });
+
+    return {
+      success: true,
+      data: {
+        token,
+        admin: {
+          id: device.id,
+          username: device.username,
+          displayName: device.displayName,
+          role: device.role
+        }
+      }
+    };
+  }, { body: loginSchema })
+
   .post("/api/auth/device-register", async ({ body }) => {
-    // Admin-only: register a new device account for kiosk
     const { adminUsername, adminPassword, deviceUsername, devicePassword } = body as {
       adminUsername: string;
       adminPassword: string;
@@ -47,22 +78,22 @@ export const authRoutes = new Elysia()
         headers: { "Content-Type": "application/json" }
       });
     }
-    const exists = await prisma.admin.findUnique({ where: { username: deviceUsername } });
+    const exists = await prisma.device.findUnique({ where: { username: deviceUsername } });
     if (exists) {
       return { success: true, message: "Device account already exists", username: deviceUsername };
     }
-    const bcrypt = await import("bcryptjs");
     const hash = await bcrypt.hash(devicePassword, 10);
-    await prisma.admin.create({
+    await prisma.device.create({
       data: {
+        deviceId: deviceUsername,
         username: deviceUsername,
         passwordHash: hash,
-        displayName: deviceUsername,
-        role: "device"
+        name: deviceUsername,
       }
     });
     return { success: true, message: "Device account created", username: deviceUsername };
   })
+
   .post("/api/auth/refresh", async ({ body, jwt }) => {
     const { token } = body as { token: string };
     const payload = await jwt.verify(token);

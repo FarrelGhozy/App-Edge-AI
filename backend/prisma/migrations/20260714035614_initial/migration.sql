@@ -153,6 +153,8 @@ CREATE TABLE "violations" (
 -- CreateTable
 CREATE TABLE "devices" (
     "device_id" TEXT NOT NULL,
+    "username" TEXT NOT NULL,
+    "password_hash" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "location" TEXT,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
@@ -163,7 +165,8 @@ CREATE TABLE "devices" (
 
     CONSTRAINT "devices_pkey" PRIMARY KEY ("device_id")
 );
-
+CREATE UNIQUE INDEX "devices_username_key" ON "devices"("username");
+CREATE INDEX "devices_username_idx" ON "devices"("username");
 -- CreateTable
 CREATE TABLE "sync_requests" (
     "id" TEXT NOT NULL,

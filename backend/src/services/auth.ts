@@ -21,3 +21,18 @@ export async function loginUser(username: string, password: string) {
     role: admin.role
   };
 }
+
+export async function loginDevice(username: string, password: string) {
+  const device = await prisma.device.findUnique({ where: { username } });
+  if (!device) return null;
+
+  const valid = await bcrypt.compare(password, device.passwordHash);
+  if (!valid) return null;
+
+  return {
+    id: device.deviceId,
+    username: device.username,
+    displayName: device.name,
+    role: "device"
+  };
+}

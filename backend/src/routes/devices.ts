@@ -5,9 +5,11 @@ import { authGuard } from "../guards/auth";
 
 export const deviceRoutes = new Elysia()
   .use(authGuard)
-  .post("/api/devices/register", async ({ body }) => {
+  .post("/api/devices/register", async ({ body, store }) => {
+    const admin = store?.admin as { id: string; role: string } | undefined;
     const req = body as { deviceId?: string; name: string; location?: string };
-    const device = await registerDevice(req);
+    const authenticatedDeviceId = admin?.role === "device" ? admin.id : undefined;
+    const device = await registerDevice(req, authenticatedDeviceId);
     return device;
   })
   .get("/api/devices", async () => {

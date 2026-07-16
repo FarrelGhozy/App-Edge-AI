@@ -84,7 +84,7 @@ class KioskInitializer @Inject constructor(
 
     private suspend fun loginDevice() {
         try {
-            val response = apiService.login(
+            val response = apiService.deviceLogin(
                 LoginRequest(
                     username = BuildConfig.DEVICE_USERNAME,
                     password = BuildConfig.DEVICE_PASSWORD
@@ -97,9 +97,9 @@ class KioskInitializer @Inject constructor(
                     adminId = loginData.admin.id,
                     username = loginData.admin.username,
                     displayName = loginData.admin.displayName,
-                    role = loginData.admin.role
+                    role = "device"
                 )
-                Log.d(TAG, "Device logged in: ${loginData.admin.username} (${loginData.admin.role})")
+                Log.d(TAG, "Device logged in: ${loginData.admin.username} (device)")
             } else {
                 Log.w(TAG, "Device login failed: ${response.code()} — ${response.errorBody()?.string()}")
             }

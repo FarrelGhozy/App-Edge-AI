@@ -186,6 +186,8 @@ model Violation {
 
 model Device {
   deviceId    String    @id @map("device_id")
+  username    String    @unique
+  passwordHash String   @map("password_hash")
   name        String
   location    String?
   isActive    Boolean   @default(true) @map("is_active")
@@ -197,6 +199,7 @@ model Device {
   syncRequests SyncRequest[]
   syncLogs     SyncLog[]
 
+  @@index([username])
   @@map("devices")
 }
 

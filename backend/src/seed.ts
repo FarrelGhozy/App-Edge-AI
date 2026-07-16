@@ -18,14 +18,15 @@ async function main() {
   });
   console.log(`   Admin: ${admin.username} (password: admin123)`);
 
-  const device = await prisma.admin.upsert({
+  const device = await prisma.device.upsert({
     where: { username: "kiosk-gate1" },
     update: {},
     create: {
+      deviceId: "kiosk-gate1",
       username: "kiosk-gate1",
       passwordHash: await bcrypt.hash("facegate-kiosk-2024", 10),
-      displayName: "Kiosk Gate 1",
-      role: "device"
+      name: "Kiosk Gate 1",
+      location: "Main Gate"
     }
   });
   console.log(`   Device: ${device.username} (password: facegate-kiosk-2024)`);
