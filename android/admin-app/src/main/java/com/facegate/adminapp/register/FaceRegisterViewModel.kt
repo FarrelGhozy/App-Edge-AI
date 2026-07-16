@@ -8,7 +8,8 @@ import androidx.camera.core.ImageProxy
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.remote.ApiService
-import com.facegate.core.data.remote.dto.UploadFaceRequest
+import com.facegate.core.data.remote.dto.BatchUploadFacesRequest
+import com.facegate.core.data.remote.dto.PoseVectorEntry
 import com.facegate.core.face.FaceDetectionResult
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
@@ -450,9 +451,6 @@ class FaceRegisterViewModel @Inject constructor(
                     }.toTypedArray()
                 }
 
-                // ─── Average embeddings for robust template ───
-                val averaged = faceEmbedder.averageEmbeddings(embeddings)
-
                 // Cleanup all bitmaps
                 _previewBitmap.value?.recycle()
                 _previewBitmap.value = null
@@ -466,11 +464,18 @@ class FaceRegisterViewModel @Inject constructor(
                     message = "Mengunggah data wajah..."
                 )
 
-                // Upload
-                val vector = averaged.toList()
-                val request = UploadFaceRequest(vector = vector)
+                // ─── Build per-pose vector list ───
+                val poseVectors = finalFrames.mapIndexed { index, frameData ->
+                    PoseVectorEntry(
+                        pose = frameData.pose.name,
+                        vector = embeddings[index].toList()
+                    )
+                }
+
+                // ─── Upload all 5 pose vectors in one batch ───
+                val batchRequest = BatchUploadFacesRequest(vectors = poseVectors)
                 val response = withContext(Dispatchers.IO) {
-                    apiService.uploadFace(studentId, request)
+                    apiService.uploadFaces(studentId, batchRequest)
                 }
 
                 if (response.isSuccessful) {

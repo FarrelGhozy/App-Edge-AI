@@ -25,6 +25,7 @@ fun StudentDto.toEntity() = StudentEntity(
 
 fun FaceVectorDto.toEntity() = FaceVectorEntity(
     studentId = studentId,
+    pose = pose,
     vector = vector.toFloatArray(),
     updatedAt = parseIsoToMillis(updatedAt)
 )

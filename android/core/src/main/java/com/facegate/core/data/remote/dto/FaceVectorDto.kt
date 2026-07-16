@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 data class FaceVectorDto(
     @SerialName("studentId")
     val studentId: String,
+    val pose: String = "",
     val vector: List<Float>,
     @SerialName("updatedAt")
     val updatedAt: String? = null,
@@ -28,5 +29,17 @@ data class FaceSyncResponse(
 
 @Serializable
 data class UploadFaceRequest(
+    val pose: String,
     val vector: List<Float>
+)
+
+@Serializable
+data class PoseVectorEntry(
+    val pose: String,
+    val vector: List<Float>
+)
+
+@Serializable
+data class BatchUploadFacesRequest(
+    val vectors: List<PoseVectorEntry>
 )

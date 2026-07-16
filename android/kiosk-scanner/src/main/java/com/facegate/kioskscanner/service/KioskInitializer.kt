@@ -139,7 +139,7 @@ class KioskInitializer @Inject constructor(
     private suspend fun loadCachedFaces() {
         val vectors = faceVectorDao.getAll()
         if (vectors.isNotEmpty()) {
-            faceMatcher.buildIndex(vectors.associate { it.studentId to it.vector })
+            faceMatcher.buildIndex(vectors.map { it.toIndexEntry() })
             Log.d(TAG, "Loaded ${vectors.size} cached faces into matcher")
         } else {
             Log.d(TAG, "No cached faces — will download on first sync")

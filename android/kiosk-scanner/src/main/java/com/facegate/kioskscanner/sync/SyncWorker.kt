@@ -216,8 +216,8 @@ class SyncWorker @AssistedInject constructor(
                     // Rebuild face index in RAM
                     val allVectors = faceVectorDao.getAll()
                     if (allVectors.isNotEmpty()) {
-                        faceMatcher.buildIndex(allVectors.associate { it.studentId to it.vector })
-                        Log.d(TAG, "Face index rebuilt: ${allVectors.size} faces in RAM")
+                        faceMatcher.buildIndex(allVectors.map { it.toIndexEntry() })
+                        Log.d(TAG, "Face index rebuilt: ${allVectors.size} vectors for ${faceVectorDao.countDistinctStudents()} students in RAM")
                     }
 
                     Log.d(TAG, "Synced ${faces.size} faces + ${studentEntities.size} students")

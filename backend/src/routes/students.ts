@@ -3,12 +3,14 @@ import {
   createStudentSchema,
   updateStudentSchema,
   uploadFaceSchema,
+  batchUploadFacesSchema,
   listStudents,
   getStudent,
   createStudent,
   updateStudent,
   deleteStudent,
   uploadFace,
+  batchUploadFaces,
   deleteFace
 } from "../services/student";
 import { authGuard } from "../guards/auth";
@@ -60,15 +62,22 @@ export const studentRoutes = new Elysia()
     await deleteStudent(id);
     return { success: true };
   })
+  // ─── Upload single pose vector ───
   .post("/api/students/:id/face", async ({ params: { id }, body }) => {
     try {
-      await uploadFace(id, body.vector);
+      await uploadFace(id, body.pose, body.vector);
       return { success: true };
     } catch (error: any) {
       if (error.message === "STUDENT_NOT_FOUND") {
         return new Response(
           JSON.stringify({ success: false, error: "Mahasiswa tidak ditemukan" }),
           { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (error.message === "INVALID_POSE") {
+        return new Response(
+          JSON.stringify({ success: false, error: "Pose tidak valid" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }
       if (error.message?.startsWith("VECTOR_DIMENSION_MISMATCH")) {
@@ -95,6 +104,48 @@ export const studentRoutes = new Elysia()
       );
     }
   }, { body: uploadFaceSchema })
+  // ─── Upload all 5 pose vectors in batch ───
+  .post("/api/students/:id/faces", async ({ params: { id }, body }) => {
+    try {
+      const result = await batchUploadFaces(id, body.vectors);
+      return { success: true, ...result };
+    } catch (error: any) {
+      if (error.message === "STUDENT_NOT_FOUND") {
+        return new Response(
+          JSON.stringify({ success: false, error: "Mahasiswa tidak ditemukan" }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (error.message === "EMPTY_VECTORS") {
+        return new Response(
+          JSON.stringify({ success: false, error: "Setidaknya satu pose vector diperlukan" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (error.message?.startsWith("INVALID_POSE")) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Pose tidak valid" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (error.message?.startsWith("VECTOR_DIMENSION_MISMATCH")) {
+        return new Response(
+          JSON.stringify({ success: false, error: `Dimensi vector tidak sesuai: ${error.message}` }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (error.message?.startsWith("PGVECTOR_ERROR")) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Gagal menyimpan ke database vector" }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: false, error: "Gagal mengunggah wajah" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  }, { body: batchUploadFacesSchema })
   .delete("/api/students/:id/face", async ({ params: { id } }) => {
     const result = await deleteFace(id);
     if (!result.deleted) {

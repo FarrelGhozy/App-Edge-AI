@@ -12,15 +12,14 @@ data class MatchResult(
 )
 
 /**
- * Optimized face matcher using cosine similarity.
+ * Optimized face matcher using cosine similarity with multi-vector per student support.
  *
- * Optimizations for 10k-50k faces:
- * 1. **L2 normalization guaranteed** — all embeddings stored pre-normalized
- * 2. **Early termination** — dot product on unit vectors = cosine similarity directly
- * 3. **Batch-aware** — pre-normalized storage for O(1) query with dot product
- * 4. **Second-best tracking** — detects ambiguous matches (top-1 vs top-2 too close)
+ * Each student can have multiple pose vectors (CENTER, LEFT, RIGHT, UP, DOWN).
+ * Matching scans ALL vectors and returns the student with the best match across any pose.
  *
- * Performance: ~1-2ms for 10k faces on modern smartphone CPUs.
+ * Optimizations:
+ * 1. Pre-normalized storage — dot product = cosine similarity directly
+ * 2. Second-best tracking — detects ambiguous matches
  */
 class FaceMatcher(
     private val threshold: Float = 0.70f
@@ -28,19 +27,21 @@ class FaceMatcher(
 
     companion object {
         private const val TAG = "FaceMatcher"
-        private const val AMBIGUITY_RATIO = 0.15f  // top-2 within 15% of top-1 = ambiguous
+        private const val AMBIGUITY_RATIO = 0.15f
     }
 
-    // Maps studentId → L2-normalized embedding vector
-    private val faceIndex = mutableMapOf<String, FloatArray>()
+    // Flat list of (studentId, normalizedVector) — one entry per pose vector
+    private val faceIndex = mutableListOf<IndexEntry>()
 
-    override fun buildIndex(vectors: Map<String, FloatArray>) {
+    override fun buildIndex(vectors: List<IndexEntry>) {
         faceIndex.clear()
-        // Pre-normalize on insert — saves time during match
-        for ((id, vec) in vectors) {
-            faceIndex[id] = if (vec.isL2Normalized()) vec else normalize(vec)
+        for (entry in vectors) {
+            val normalized = if (entry.vector.isL2Normalized()) entry.vector
+                             else normalize(entry.vector.clone())
+            faceIndex.add(entry.copy(vector = normalized))
         }
-        Log.d(TAG, "Index built: ${faceIndex.size} faces, dim=${vectors.values.firstOrNull()?.size ?: 0}")
+        val studentCount = faceIndex.map { it.studentId }.distinct().size
+        Log.d(TAG, "Index built: ${faceIndex.size} vectors for $studentCount students, dim=${vectors.firstOrNull()?.vector?.size ?: 0}")
     }
 
     override fun match(embedding: FloatArray): MatchResult {
@@ -49,30 +50,29 @@ class FaceMatcher(
         }
 
         val startTime = System.nanoTime()
-        val query = if (embedding.isL2Normalized()) embedding else normalize(embedding)
+        val query = if (embedding.isL2Normalized()) embedding else normalize(embedding.clone())
 
         var bestId: String? = null
         var bestScore = -1f
         var secondId: String? = null
         var secondScore = -1f
 
-        for ((studentId, vector) in faceIndex) {
-            // Since both are L2-normalized, dot product = cosine similarity
-            val sim = dotProduct(query, vector)
+        for (entry in faceIndex) {
+            val sim = dotProduct(query, entry.vector)
             if (sim > bestScore) {
                 secondScore = bestScore
                 secondId = bestId
                 bestScore = sim
-                bestId = studentId
+                bestId = entry.studentId
             } else if (sim > secondScore) {
                 secondScore = sim
-                secondId = studentId
+                secondId = entry.studentId
             }
         }
 
         val elapsedMs = (System.nanoTime() - startTime) / 1_000_000L
 
-        // Ambiguity check: top-2 too close → reduce confidence
+        // Ambiguity check
         val diff = bestScore - secondScore
         val adjustedScore = if (diff < AMBIGUITY_RATIO && bestScore > 0) {
             bestScore - (AMBIGUITY_RATIO - diff) * 0.5f
@@ -90,10 +90,6 @@ class FaceMatcher(
         )
     }
 
-    /**
-     * Batch match: find best match for each query embedding.
-     * More efficient than individual calls when processing multiple faces.
-     */
     fun matchBatch(embeddings: List<FloatArray>): List<MatchResult> {
         return embeddings.map { match(it) }
     }
@@ -104,7 +100,7 @@ class FaceMatcher(
 
     override fun size(): Int = faceIndex.size
 
-    // ─── Math helpers ───
+    // ─── Old Map-based buildIndex removed — use List<IndexEntry> instead ───
 
     private fun dotProduct(a: FloatArray, b: FloatArray): Float {
         var sum = 0f

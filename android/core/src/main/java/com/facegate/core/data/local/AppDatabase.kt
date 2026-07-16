@@ -20,7 +20,7 @@ import com.facegate.core.data.local.converter.Converters
         AttendanceLogEntity::class,
         CampusRuleEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

@@ -41,6 +41,12 @@ interface ApiService {
         @Body request: UploadFaceRequest
     ): Response<StatusResponse>
 
+    @POST("api/students/{id}/faces")
+    suspend fun uploadFaces(
+        @Path("id") id: String,
+        @Body request: BatchUploadFacesRequest
+    ): Response<StatusResponse>
+
     @DELETE("api/students/{id}/face")
     suspend fun deleteFace(@Path("id") id: String): Response<StatusResponse>
 

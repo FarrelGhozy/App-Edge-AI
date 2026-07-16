@@ -20,10 +20,11 @@ CREATE TABLE "students" (
 -- CreateTable
 CREATE TABLE "face_vectors" (
     "student_id" TEXT NOT NULL,
+    "pose" TEXT NOT NULL,
     "vector" vector(512) NOT NULL,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "face_vectors_pkey" PRIMARY KEY ("student_id")
+    CONSTRAINT "face_vectors_pkey" PRIMARY KEY ("student_id", "pose")
 );
 
 -- CreateTable

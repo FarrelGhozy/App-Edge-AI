@@ -31,12 +31,14 @@ model Student {
 }
 
 model FaceVector {
-  studentId String   @id @map("student_id")
+  studentId String   @map("student_id")
+  pose      String   // pose name: CENTER, LEFT, RIGHT, UP, DOWN
   vector    Unsupported("vector(512)")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
+  @@id([studentId, pose])
   @@map("face_vectors")
 }
 

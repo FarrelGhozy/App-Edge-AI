@@ -118,11 +118,7 @@ class SyncManager @Inject constructor(
                 }
 
                 // Rebuild face index in RAM
-                val faceMap = mutableMapOf<String, FloatArray>()
-                for (v in vectors) {
-                    faceMap[v.studentId] = v.vector
-                }
-                faceMatcher.buildIndex(faceMap)
+                faceMatcher.buildIndex(vectors.map { it.toIndexEntry() })
 
                 syncMetadata.setLastFaceSync(faceSync.since ?: "")
             }

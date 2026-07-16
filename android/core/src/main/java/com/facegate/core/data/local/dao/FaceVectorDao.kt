@@ -11,8 +11,11 @@ interface FaceVectorDao {
     @Query("SELECT * FROM face_vectors")
     suspend fun getAll(): List<FaceVectorEntity>
 
-    @Query("SELECT * FROM face_vectors WHERE studentId = :studentId")
-    suspend fun getByStudentId(studentId: String): FaceVectorEntity?
+    @Query("SELECT * FROM face_vectors WHERE studentId = :studentId ORDER BY pose")
+    suspend fun getByStudentId(studentId: String): List<FaceVectorEntity>
+
+    @Query("SELECT * FROM face_vectors WHERE studentId = :studentId AND pose = :pose")
+    suspend fun getByStudentIdAndPose(studentId: String, pose: String): FaceVectorEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(vectors: List<FaceVectorEntity>)
@@ -28,4 +31,7 @@ interface FaceVectorDao {
 
     @Query("SELECT COUNT(*) FROM face_vectors")
     suspend fun count(): Int
+
+    @Query("SELECT COUNT(DISTINCT studentId) FROM face_vectors")
+    suspend fun countDistinctStudents(): Int
 }

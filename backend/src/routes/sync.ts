@@ -10,6 +10,7 @@ export const syncRoutes = new Elysia()
 
     const rows = await prisma.$queryRawUnsafe<Array<{
       student_id: string;
+      pose: string;
       vector: string;
       updated_at: Date;
       name: string;
@@ -19,6 +20,7 @@ export const syncRoutes = new Elysia()
     }>>(
       `SELECT
         fv.student_id,
+        fv.pose,
         fv.vector::text,
         fv.updated_at,
         s.name,
@@ -37,6 +39,7 @@ export const syncRoutes = new Elysia()
 
       return {
         studentId: r.student_id,
+        pose: r.pose,
         studentName: r.name,
         nim: r.nim,
         studyProgram: r.study_program,

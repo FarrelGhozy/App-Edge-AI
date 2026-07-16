@@ -21,8 +21,21 @@ export const updateStudentSchema = t.Object({
 });
 
 export const uploadFaceSchema = t.Object({
+  pose: t.String(),       // CENTER, LEFT, RIGHT, UP, DOWN
   vector: t.Array(t.Number())
 });
+
+export const batchUploadFacesSchema = t.Object({
+  vectors: t.Array(
+    t.Object({
+      pose: t.String(),
+      vector: t.Array(t.Number())
+    })
+  )
+});
+
+// Valid pose names
+const VALID_POSES = new Set(["CENTER", "LEFT", "RIGHT", "UP", "DOWN"]);
 
 export async function listStudents(params: {
   page?: number;
@@ -48,13 +61,15 @@ export async function listStudents(params: {
   if (params.studyProgram) where.studyProgram = params.studyProgram;
   if (params.academicYear) where.academicYear = params.academicYear;
 
-  const [data, total, faceStudentIds] = await Promise.all([
+  const [data, total, faceStudents] = await Promise.all([
     prisma.student.findMany({ where, skip, take: pageSize, orderBy: { name: "asc" } }),
     prisma.student.count({ where }),
-    prisma.faceVector.findMany({ select: { studentId: true } })
+    prisma.$queryRawUnsafe<Array<{ student_id: string }>>(
+      `SELECT DISTINCT student_id FROM face_vectors`
+    )
   ]);
 
-  const faceSet = new Set(faceStudentIds.map(f => f.studentId));
+  const faceSet = new Set(faceStudents.map(f => f.student_id));
   const enriched = data.map(s => ({
     ...s,
     faceRegistered: faceSet.has(s.id)
@@ -66,18 +81,31 @@ export async function listStudents(params: {
 export async function getStudent(id: string) {
   const student = await prisma.student.findUnique({ where: { id } });
   if (!student) return null;
-  const [faceCount, faceVectors] = await Promise.all([
-    prisma.faceVector.count({ where: { studentId: id } }),
-    prisma.$queryRawUnsafe<Array<{ student_id: string; updated_at: Date }>>(
-      `SELECT student_id, updated_at FROM face_vectors WHERE student_id = $1`,
-      id
-    )
-  ]);
-  const enrichedVectors = faceVectors.map(fv => ({
-    studentId: fv.student_id,
-    updatedAt: fv.updated_at.toISOString()
-  }));
-  return { ...student, faceRegistered: faceCount > 0, faceVectors: enrichedVectors };
+  const faceVectors = await prisma.$queryRawUnsafe<Array<{
+    student_id: string;
+    pose: string;
+    vector: string;
+    updated_at: Date;
+  }>>(
+    `SELECT student_id, pose, vector::text, updated_at FROM face_vectors WHERE student_id = $1 ORDER BY pose`,
+    id
+  );
+  const enrichedVectors = faceVectors.map(fv => {
+    const vectorStr = fv.vector?.replace(/[\[\]]/g, "") || "";
+    const vector = vectorStr ? vectorStr.split(",").map(Number) : [];
+    return {
+      studentId: fv.student_id,
+      pose: fv.pose,
+      vector,
+      updatedAt: fv.updated_at.toISOString()
+    };
+  });
+  return {
+    ...student,
+    faceRegistered: faceVectors.length > 0,
+    faceVectors: enrichedVectors,
+    posesCompleted: faceVectors.length
+  };
 }
 
 async function triggerSyncForAllDevices() {
@@ -92,7 +120,7 @@ async function triggerSyncForAllDevices() {
       });
     }
   } catch (_) {
-    // Silently fail — trigger is best-effort, doesn't block the main operation
+    // Silently fail
   }
 }
 
@@ -130,14 +158,19 @@ export async function deleteFace(studentId: string) {
   return { deleted: result.count > 0 };
 }
 
-export async function uploadFace(studentId: string, vector: number[]) {
+export async function uploadFace(studentId: string, pose: string, vector: number[]) {
   // Validate student exists
   const student = await prisma.student.findUnique({ where: { id: studentId } });
   if (!student) {
     throw new Error("STUDENT_NOT_FOUND");
   }
 
-  // Validate vector dimension: supports both 192-d (MobileFaceNet) and 512-d (ArcFace)
+  // Validate pose
+  if (!VALID_POSES.has(pose)) {
+    throw new Error(`INVALID_POSE: expected one of ${[...VALID_POSES].join(", ")}, got ${pose}`);
+  }
+
+  // Validate vector dimension
   if (vector.length !== 192 && vector.length !== 512) {
     throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192 or 512, got ${vector.length}`);
   }
@@ -145,16 +178,60 @@ export async function uploadFace(studentId: string, vector: number[]) {
   const vectorStr = `[${vector.join(",")}]`;
   try {
     const result = await prisma.$executeRawUnsafe(
-      `INSERT INTO face_vectors (student_id, vector, updated_at) VALUES ($1, $2::vector, NOW())
-       ON CONFLICT (student_id) DO UPDATE SET vector = $2::vector, updated_at = NOW()`,
+      `INSERT INTO face_vectors (student_id, pose, vector, updated_at) VALUES ($1, $2, $3::vector, NOW())
+       ON CONFLICT (student_id, pose) DO UPDATE SET vector = $3::vector, updated_at = NOW()`,
       studentId,
+      pose,
       vectorStr
     );
-    // Trigger sync so kiosks download the new face vector
     await triggerSyncForAllDevices();
     return result;
   } catch (error: any) {
-    // Catch pgvector-specific errors
+    if (error.message?.includes("vector")) {
+      throw new Error(`PGVECTOR_ERROR: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
+export async function batchUploadFaces(studentId: string, vectors: { pose: string; vector: number[] }[]) {
+  // Validate student exists
+  const student = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!student) {
+    throw new Error("STUDENT_NOT_FOUND");
+  }
+
+  if (vectors.length === 0) {
+    throw new Error("EMPTY_VECTORS: at least one pose vector is required");
+  }
+
+  // Validate all poses and vectors
+  for (const v of vectors) {
+    if (!VALID_POSES.has(v.pose)) {
+      throw new Error(`INVALID_POSE: expected one of ${[...VALID_POSES].join(", ")}, got ${v.pose}`);
+    }
+    if (v.vector.length !== 512) {
+      throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 512, got ${v.vector.length} for pose ${v.pose}`);
+    }
+  }
+
+  try {
+    // Use a transaction for atomicity
+    await prisma.$transaction(
+      vectors.map(v => {
+        const vectorStr = `[${v.vector.join(",")}]`;
+        return prisma.$executeRawUnsafe(
+          `INSERT INTO face_vectors (student_id, pose, vector, updated_at) VALUES ($1, $2, $3::vector, NOW())
+           ON CONFLICT (student_id, pose) DO UPDATE SET vector = $3::vector, updated_at = NOW()`,
+          studentId,
+          v.pose,
+          vectorStr
+        );
+      })
+    );
+    await triggerSyncForAllDevices();
+    return { uploaded: vectors.length };
+  } catch (error: any) {
     if (error.message?.includes("vector")) {
       throw new Error(`PGVECTOR_ERROR: ${error.message}`);
     }

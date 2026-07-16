@@ -36,7 +36,7 @@ object CoreModule {
             context,
             AppDatabase::class.java,
             "facegate.db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides
