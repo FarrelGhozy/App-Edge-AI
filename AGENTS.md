@@ -38,7 +38,7 @@ FaceGateApp/
 ## Database (PostgreSQL + pgvector)
 Key models (see `prisma/schema.prisma`):
 - `Student` — master data with `nim`, `studyProgram`, `academicYear`
-- `FaceVector` — `vector(192)` via pgvector extension (MobileFaceNet 192-d embedding)
+- `FaceVector` — `vector(512)` via pgvector extension (ArcFace 512-d embedding)
 - `AttendanceLog` — scan logs with `action: "keluar" | "kembali"`
 - `Permit` — `type: "izin_harian" | "pengajuan_izin"` (harian auto-approved)
 - `CampusRule` — restricted hours configuration
@@ -59,13 +59,13 @@ Key models (see `prisma/schema.prisma`):
 ```
 CameraX → MediaPipe FaceDetection → Face Landmarks (468pts)
   → EAR Liveness (blink detection, 3s window)
-  → MobileFaceNet TFLite (192-d embedding) 
+  → ArcFace TFLite (512-d embedding) 
   → Brute-force cosine similarity match (10k faces in RAM, ~3ms)
   → Threshold: 0.6 (configurable)
 ```
 Total pipeline: ~25ms per face. All models cached locally in RAM.
 
-**IMPORTANT**: FaceVector uses `vector(128)` in PostgreSQL. MobileFaceNet produces exactly 128-dimensional embeddings. If upload fails with dimension mismatch, verify the TFLite model outputs 128 floats.
+**IMPORTANT**: FaceVector uses `vector(512)` in PostgreSQL. ArcFace produces exactly 512-dimensional embeddings. If upload fails with dimension mismatch, verify the TFLite model outputs 512 floats.
 
 ## Realtime Data Architecture
 
@@ -123,13 +123,13 @@ Two types:
 - TypeScript: Elysia routes grouped by resource, Zod schemas in service files
 - All UI in Jetpack Compose (no XML)
 - Face vector stored as Blob in Room (FloatArray → ByteArray via TypeConverter)
-- In-memory FaceIndex: `Map<String, FloatArray>` (studentId → 192-d vector)
+- In-memory FaceIndex: `Map<String, FloatArray>` (studentId → 512-d vector)
 
 ## Common Issues & Fixes
 
 ### Error :500 saat upload face
 1. Pastikan ekstensi `pgvector` sudah aktif: `CREATE EXTENSION IF NOT EXISTS vector;`
-2. Model TFLite menghasilkan **192-dimensi** — schema harus `vector(192)`, cek `FaceEmbedder.kt: embeddingDim = 192`
+2. Model TFLite menghasilkan **512-dimensi** — schema harus `vector(512)`, cek `FaceEmbedder.kt: embeddingDim = 512`
 3. Jalankan `npx prisma db push` setelah mengubah schema
 4. Cek error detail di log backend — sekarang uploadFace memberikan pesan error spesifik
 
