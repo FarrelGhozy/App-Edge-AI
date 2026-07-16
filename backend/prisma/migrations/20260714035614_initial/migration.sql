@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- CreateTable
 CREATE TABLE "students" (
     "id" TEXT NOT NULL,
@@ -18,7 +20,7 @@ CREATE TABLE "students" (
 -- CreateTable
 CREATE TABLE "face_vectors" (
     "student_id" TEXT NOT NULL,
-    "vector" vector(192) NOT NULL,
+    "vector" vector(512) NOT NULL,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "face_vectors_pkey" PRIMARY KEY ("student_id")

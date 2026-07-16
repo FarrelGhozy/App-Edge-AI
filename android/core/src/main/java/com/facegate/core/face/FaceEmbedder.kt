@@ -3,6 +3,7 @@ package com.facegate.core.face
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.ByteBuffer
@@ -12,39 +13,35 @@ import java.nio.channels.FileChannel
 
 /**
  * Face embedding extractor using a TFLite model.
+ * Supports both quantized (INT8) and float models automatically.
  *
- * Supports both:
- *   - **MobileFaceNet** (192-d, 112×112 input) — lightweight, default
- *   - **ArcFace / FaceNet512** (512-d, 112×112 or 160×160 input) — higher accuracy
- *
- * The model config is controlled by `init(modelName, embeddingDim, inputSize)`.
- * To switch to a 512-d model, just change the parameters:
- *
+ * Default: ArcFace 512-d model (quantized or float).
+ * To switch back to MobileFaceNet 192-d:
  * ```kotlin
- * faceEmbedder.init("arcface_512.tflite", embeddingDim = 512, inputSize = 112)
+ * faceEmbedder.init("mobilefacenet.tflite", embeddingDim = 192, inputSize = 112)
  * ```
- *
- * Normalization: [-1, 1] after centering around 127.5
- * Output: L2-normalized embedding vector
  */
 class FaceEmbedder(private val context: Context) {
     companion object {
         private const val TAG = "FaceEmbedder"
-        private const val DEFAULT_MODEL = "mobilefacenet.tflite"
-        private const val DEFAULT_DIM = 192
+        private const val DEFAULT_MODEL = "arcface_512.tflite"
+        private const val DEFAULT_DIM = 512
         private const val DEFAULT_INPUT_SIZE = 112
+        private const val IMAGE_MEAN = 127.5f
+        private const val IMAGE_STD = 127.5f
     }
 
     private var interpreter: Interpreter? = null
     private var embeddingDim: Int = DEFAULT_DIM
     private var inputSize: Int = DEFAULT_INPUT_SIZE
+    private var isQuantized: Boolean = false
     private var initError: String? = null
 
     /**
      * Initialize the TFLite interpreter.
      *
-     * @param modelName    TFLite file in assets (default: mobilefacenet.tflite)
-     * @param embeddingDim Output dimension: 128, 192, 512 (default: 192)
+     * @param modelName    TFLite file in assets (default: arcface_512.tflite)
+     * @param embeddingDim Output dimension: 192, 512 (default: 512)
      * @param inputSize    Model input image size (default: 112)
      */
     fun init(
@@ -58,8 +55,13 @@ class FaceEmbedder(private val context: Context) {
             interpreter = Interpreter(modelBuffer)
             this.embeddingDim = embeddingDim
             this.inputSize = inputSize
+
+            // Auto-detect quantized model via input tensor type
+            val inputType = interpreter!!.getInputTensor(0).dataType()
+            isQuantized = inputType == DataType.UINT8
+
             initError = null
-            Log.d(TAG, "Embedder initialized: model=$modelName dim=$embeddingDim input=$inputSize")
+            Log.d(TAG, "Embedder initialized: model=$modelName dim=$embeddingDim input=$inputSize quantized=$isQuantized")
             true
         } catch (e: Exception) {
             interpreter = null
@@ -90,9 +92,23 @@ class FaceEmbedder(private val context: Context) {
         }
 
         val inputBuffer = preprocess(bitmap)
-        val outputBuffer = Array(1) { FloatArray(embeddingDim) }
-        interpreter!!.run(inputBuffer, outputBuffer)
-        return l2Normalize(outputBuffer[0])
+
+        return if (isQuantized) {
+            // Quantized model: input=uint8, output=uint8 (byte[])
+            val outputBuffer = Array(1) { ByteArray(embeddingDim) }
+            interpreter!!.run(inputBuffer, outputBuffer)
+            // Convert byte[] (uint8 0-255) → float → L2 normalize
+            val raw = FloatArray(embeddingDim)
+            for (i in 0 until embeddingDim) {
+                raw[i] = (outputBuffer[0][i].toInt() and 0xFF).toFloat()
+            }
+            l2Normalize(raw)
+        } else {
+            // Float model: input=float32, output=float32
+            val outputBuffer = Array(1) { FloatArray(embeddingDim) }
+            interpreter!!.run(inputBuffer, outputBuffer)
+            l2Normalize(outputBuffer[0])
+        }
     }
 
     /**
@@ -110,7 +126,7 @@ class FaceEmbedder(private val context: Context) {
 
     /**
      * Average multiple embeddings into one template.
-     * Useful for multi-frame registration: embed 3 frames → average → store.
+     * Useful for multi-frame registration: embed 5 frames → centroid → store.
      */
     fun averageEmbeddings(embeddings: Array<FloatArray>): FloatArray {
         if (embeddings.isEmpty()) return FloatArray(embeddingDim)
@@ -122,26 +138,39 @@ class FaceEmbedder(private val context: Context) {
         return l2Normalize(result)
     }
 
+    /**
+     * Preprocess Bitmap into ByteBuffer matching model input type.
+     * - Float models: normalized to [-1, 1] range
+     * - Quantized models: raw uint8 [0, 255]
+     */
     private fun preprocess(bitmap: Bitmap): ByteBuffer {
         val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
-        val buffer = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4)
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
-
         val pixels = IntArray(inputSize * inputSize)
         resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
 
-        for (pixel in pixels) {
-            // [-1, 1] normalization around 127.5
-            val r = ((pixel shr 16) and 0xFF) / 127.5f - 1.0f
-            val g = ((pixel shr 8) and 0xFF) / 127.5f - 1.0f
-            val b = (pixel and 0xFF) / 127.5f - 1.0f
-            buffer.putFloat(r)
-            buffer.putFloat(g)
-            buffer.putFloat(b)
+        if (isQuantized) {
+            val buffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3)
+            for (pixel in pixels) {
+                buffer.put(((pixel shr 16) and 0xFF).toByte()) // R
+                buffer.put(((pixel shr 8) and 0xFF).toByte())  // G
+                buffer.put((pixel and 0xFF).toByte())           // B
+            }
+            resized.recycle()
+            return buffer
+        } else {
+            val buffer = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4)
+            buffer.order(ByteOrder.LITTLE_ENDIAN)
+            for (pixel in pixels) {
+                val r = ((pixel shr 16) and 0xFF) / IMAGE_MEAN - 1.0f
+                val g = ((pixel shr 8) and 0xFF) / IMAGE_MEAN - 1.0f
+                val b = (pixel and 0xFF) / IMAGE_MEAN - 1.0f
+                buffer.putFloat(r)
+                buffer.putFloat(g)
+                buffer.putFloat(b)
+            }
+            resized.recycle()
+            return buffer
         }
-
-        resized.recycle()
-        return buffer
     }
 
     private fun l2Normalize(vector: FloatArray): FloatArray {
@@ -156,6 +185,7 @@ class FaceEmbedder(private val context: Context) {
 
     fun isReady(): Boolean = interpreter != null
     fun getEmbeddingDim(): Int = embeddingDim
+    fun isModelQuantized(): Boolean = isQuantized
 
     fun release() {
         interpreter?.close()

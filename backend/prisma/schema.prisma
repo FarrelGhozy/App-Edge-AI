@@ -32,7 +32,7 @@ model Student {
 
 model FaceVector {
   studentId String   @id @map("student_id")
-  vector    Unsupported("vector(192)")
+  vector    Unsupported("vector(512)")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
