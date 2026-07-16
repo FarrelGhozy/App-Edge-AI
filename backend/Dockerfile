@@ -27,4 +27,4 @@ RUN bunx prisma generate
 
 EXPOSE 8150
 
-CMD ["sh", "-c", "bunx prisma migrate deploy && bun dist/index.js"]
+CMD ["sh", "-c", "bunx prisma db push --accept-data-loss && bun dist/index.js"]

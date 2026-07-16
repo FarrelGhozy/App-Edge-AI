@@ -66,12 +66,18 @@ CameraX → ML Kit Face Detection → Face Landmarks (468pts)
 ```
 Total pipeline: ~25ms per face. All models cached locally in RAM.
 
-**Model change (Jul 2026)**: Switched from `arcface_512.tflite` (FP16, broken architecture in conversion script) to `mobilefacenet.tflite` (proven model from GitHub release).  
-- Input: 112×112 RGB, normalized to [-1, 1]  
+**Model change (Jul 2026)**:  
+- **Old**: `arcface_512.tflite` — FP16, **broken architecture** (conversion script was a skeleton, not real Inception-ResNet v1). Produced non-discriminative embeddings → false positive 100%.  
+- **New**: `mobilefacenet.tflite` — proven model from GitHub release, **5 MB**, LFW 99.4%  
+
+**Preprocessing fix**: Changed from `pixel / 127.5 - 1.0` (range [-1, 1]) to `pixel / 255.0` (range [0, 1]). ArcFace ResNet100 from PINTO model zoo uses `data / 255` normalization — previous [-1, 1] caused poor accuracy.  
+
+**Specifications**:
+- Input: 112×112 RGB, normalized to [0, 1] (pixel/255.0)
 - Output: 192-d L2-normalized float vector  
 - Database: `vector(192)` in PostgreSQL  
 
-**IMPORTANT**: If upload fails with dimension mismatch, verify vector is 192-d (not 512-d). The old `arcface_512.tflite` model had an incomplete conversion script (`backend/scripts/convert_arcface_tflite.py` was a skeleton, not the real Inception-ResNet v1).
+**IMPORTANT**: If upload fails with dimension mismatch, verify vector is **192-d** (not 512-d). The old `arcface_512.tflite` model had an incomplete conversion script (`backend/scripts/convert_arcface_tflite.py` was a skeleton, not the real Inception-ResNet v1).
 
 ## Realtime Data Architecture
 
@@ -137,7 +143,13 @@ Two types:
 1. Pastikan ekstensi `pgvector` sudah aktif: `CREATE EXTENSION IF NOT EXISTS vector;`
 2. Model TFLite (MobileFaceNet) menghasilkan **192-dimensi** — schema harus `vector(192)`, cek `FaceEmbedder.kt: embeddingDim = 192`
 3. Jalankan `npx prisma db push` setelah mengubah schema
-4. Cek error detail di log backend — uploadFace memberikan pesan error spesifik
+4. Cek error detail di log backend — sekarang uploadFace memberikan pesan error spesifik
+
+### Masalah akurasi face recognition
+1. **Preprocessing salah** — Pastikan FaceEmbedder pakai `pixel/255.0` (range [0,1]), bukan `pixel/127.5-1` ([-1,1])
+2. **Model rusak** — Jangan gunakan `arcface_512.tflite` (dari conversion script skeleton). Pakai `mobilefacenet.tflite`
+3. **Enrollment tidak crop** — Pastikan admin app crop wajah sebelum embed (fix ada di FaceRegisterViewModel.kt)
+4. **SyncWorker missing pose** — Semua 5 pose harus tersimpan dengan label CENTER/LEFT/RIGHT/UP/DOWN
 
 ### Error :500 lainnya
 - Pastikan semua relasi model di schema.prisma lengkap (Student ↔ Violation, CourseSchedule, PermitQuota)
@@ -151,3 +163,16 @@ cd backend
 npx prisma db push          # Update database tanpa migration
 npx prisma generate         # Regenerate Prisma client
 ```
+
+## Fix History (Jul 2026)
+| # | File | Perubahan |
+|---|---|---|
+| 1 | `FaceEmbedder.kt` | Model default: `arcface_512.tflite` (broken) → `mobilefacenet.tflite` (proven) |
+| 2 | `FaceEmbedder.kt` | Preprocessing: `pixel/127.5-1` ([-1,1]) → `pixel/255.0` ([0,1]) |
+| 3 | `FaceEmbedder.kt` | Dequantization: output quantized sekarang di-dequantize pakai scale + zeroPoint |
+| 4 | `SyncWorker.kt` | FaceVectorEntity dibuat dengan `pose` field (sebelumnya empty → PK conflict → 1 vector per student) |
+| 5 | `SyncWorker.kt` | Ganti insert loop dengan `deleteAll()` + `insertAll()` batch |
+| 6 | `FaceRegisterViewModel.kt` | Crop wajah sebelum embed (konsisten dengan kiosk) |
+| 7 | `student.ts` | Backend validation: menerima 192-d (sebelumnya cuma 512) |
+| 8 | `schema.prisma` | `vector(512)` → `vector(192)` |
+| 9 | Database | pgvector extension + prisma db push |
