@@ -36,8 +36,8 @@ object QualityAnalyzer {
     private const val MIN_BRIGHTNESS = 40f             // [0, 255]
     private const val MAX_BRIGHTNESS = 215f
     private const val MIN_FACE_SIZE_RATIO = 0.05f      // at least 5% of image
-    private const val MAX_YAW_ANGLE = 25f               // degrees
-    private const val MAX_PITCH_ANGLE = 20f
+    private const val MAX_YAW_ANGLE = 35f               // degrees
+    private const val MAX_PITCH_ANGLE = 25f
 
     // Weighting for composite score
     private const val W_BLUR = 0.25f
