@@ -22,11 +22,37 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import javax.inject.Inject
+
+// ──────────────────────────────────────────────
+// Angle positions to cover during registration
+// ──────────────────────────────────────────────
+enum class CapturePose(
+    val displayName: String,
+    val guideText: String,
+    val targetYaw: Float,     // target yaw (degrees)
+    val targetPitch: Float,   // target pitch (degrees)
+    val tolerance: Float      // acceptance range around target
+) {
+    CENTER("Lurus", "Hadapkan wajah lurus ke kamera", 0f, 0f, 22f),
+    LEFT("Kiri", "Miringkan kepala ke kiri", -30f, 0f, 12f),
+    RIGHT("Kanan", "Miringkan kepala ke kanan", 30f, 0f, 12f),
+    UP("Atas", "Tengadahkan kepala ke atas", 0f, -18f, 12f),
+    DOWN("Bawah", "Tundukkan kepala ke bawah", 0f, 18f, 12f)
+}
+
+data class CapturedFrameData(
+    val bitmap: Bitmap,
+    val faceRect: Rect,
+    val qualityReport: QualityReport,
+    val pose: CapturePose
+)
 
 enum class FaceRegisterStep {
     DETECTING,
-    COLLECTING,      // NEW: collecting N good frames
+    POSITIONING,    // guiding user to a pose
+    CAPTURING,      // collecting frame for current pose
     EMBEDDING,
     UPLOADING,
     SUCCESS,
@@ -40,11 +66,18 @@ data class FaceRegisterState(
     val isUploading: Boolean = false,
     val isSuccess: Boolean = false,
     val detection: FaceDetectionResult? = null,
-    // Multi-frame progress
-    val framesCollected: Int = 0,
-    val framesRequired: Int = 3,
+
+    // Multi-pose progress
+    val currentPose: CapturePose = CapturePose.CENTER,
+    val capturedPoses: Set<CapturePose> = emptySet(),
+    val totalFramesCollected: Int = 0,
+    val framesRequired: Int = 5,
+
+    // Quality feedback for live display
     val currentQualityScore: Float = 0f,
-    val qualityMessages: List<String> = emptyList()
+    val qualityMessages: List<String> = emptyList(),
+    val currentYaw: Float = 0f,
+    val currentPitch: Float = 0f
 )
 
 @HiltViewModel
@@ -57,40 +90,57 @@ class FaceRegisterViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "FaceRegVM"
-        private const val REQUIRED_FRAMES = 3  // Number of quality frames to collect
-        private const val COLLECT_TIMEOUT_MS = 12_000L  // Max time to collect all frames
-        private const val QUALITY_INTERVAL_MS = 150L    // Min gap between frame captures
+        private const val MAX_FRAMES_PER_POSE = 2       // collect up to 2 per pose
+        private const val PER_POSE_TIMEOUT_MS = 15_000L // max time per pose
+        private const val QUALITY_INTERVAL_MS = 150L
+        private const val TRANSITION_DELAY_MS = 600L    // delay before next pose
     }
 
     private val _state = MutableStateFlow(FaceRegisterState(
-        framesRequired = REQUIRED_FRAMES
+        framesRequired = CapturePose.entries.size // = 5
     ))
     val state: StateFlow<FaceRegisterState> = _state.asStateFlow()
 
-    // Collected frames for multi-frame averaging
-    private val collectedBitmaps = mutableListOf<Bitmap>()
-    private val collectedRects = mutableListOf<Rect>()
+    // Per-pose frame storage
+    private val poseQueues = mutableMapOf<CapturePose, MutableList<CapturedFrameData>>()
     private var isProcessing = false
-    private var collectStartTime = 0L
+    private var poseStartTime = 0L
     private var lastCaptureTime = 0L
+    private var lastPoseCaptureCount = 0
+    private var isTransitionScheduled = false
     private var studentId: String = ""
+
+    // Ordered list of poses to go through
+    private val poseOrder = listOf(
+        CapturePose.CENTER,
+        CapturePose.LEFT,
+        CapturePose.RIGHT,
+        CapturePose.UP,
+        CapturePose.DOWN
+    )
 
     init {
         faceDetector.init()
         faceEmbedder.init()
+        // Initialize empty queues for all poses
+        for (pose in CapturePose.entries) {
+            poseQueues[pose] = mutableListOf()
+        }
     }
 
     fun setStudentId(id: String) {
         studentId = id
     }
 
-    fun onFrameCaptured(imageProxy: ImageProxy, studentId: String?) {
+    fun onFrameCaptured(imageProxy: ImageProxy, studentIdParam: String?) {
         if (isProcessing) return
-        this.studentId = studentId ?: this.studentId
+        this.studentId = studentIdParam ?: this.studentId
+        if (isTransitionScheduled) return
 
         val currentStep = _state.value.step
         if (currentStep != FaceRegisterStep.DETECTING &&
-            currentStep != FaceRegisterStep.COLLECTING
+            currentStep != FaceRegisterStep.POSITIONING &&
+            currentStep != FaceRegisterStep.CAPTURING
         ) return
 
         isProcessing = true
@@ -107,139 +157,280 @@ class FaceRegisterViewModel @Inject constructor(
             _state.value = _state.value.copy(
                 step = FaceRegisterStep.DETECTING,
                 message = "Tidak ada wajah terdeteksi",
-                detection = null
+                detection = null,
+                currentYaw = 0f,
+                currentPitch = 0f
             )
             return
         }
 
-        // Quick quality gate: posture check
-        if (!detection.isGoodQuality) {
-            isProcessing = false
-            _state.value = _state.value.copy(
-                step = FaceRegisterStep.DETECTING,
-                message = "Hadapkan wajah lurus ke kamera",
-                detection = detection
-            )
-            return
-        }
+        val yaw = detection.headEulerAngleY
+        val pitch = detection.headEulerAngleZ
 
-        // ─── Still in DETECTING → start collecting frames ───
-        if (currentStep == FaceRegisterStep.DETECTING) {
-            transitionToCollecting()
-        }
+        // ─── Determine which pose the user is closest to ───
+        val matchedPose = findClosestPose(yaw, pitch)
 
-        // ─── COLLECTING frame ───
-        val now = System.currentTimeMillis()
-        if (now - lastCaptureTime < QUALITY_INTERVAL_MS) {
-            isProcessing = false
-            return // Throttle captures
-        }
-
-        // Check timeout
-        if (now - collectStartTime > COLLECT_TIMEOUT_MS) {
-            if (collectedBitmaps.isNotEmpty()) {
-                // We have at least some frames — proceed with what we have
-                Log.d(TAG, "Collect timeout with ${collectedBitmaps.size}/${REQUIRED_FRAMES} frames — proceeding")
-                proceedToEmbedding()
-            } else {
-                reset()
-                _state.value = _state.value.copy(
-                    step = FaceRegisterStep.DETECTING,
-                    message = "Waktu habis, coba lagi"
-                )
-            }
-            isProcessing = false
-            return
-        }
-
-        // Convert frame to bitmap for quality analysis
+        // Convert frame to bitmap for quality analysis & embedding
         val bitmap = imageProxyToBitmap(imageProxy)
         if (bitmap == null) {
             isProcessing = false
             return
         }
 
-        // Quality analysis on the face region
+        // Quality analysis
         val quality = QualityAnalyzer.analyze(
             bitmap = bitmap,
             faceRect = detection.boundingBox,
-            yawAngle = detection.headEulerAngleY,
-            pitchAngle = detection.headEulerAngleZ
+            yawAngle = yaw,
+            pitchAngle = pitch
         )
 
-        lastCaptureTime = now
+        lastCaptureTime = System.currentTimeMillis()
 
-        if (quality.isPass) {
-            collectedBitmaps.add(bitmap)
-            collectedRects.add(detection.boundingBox)
-            _state.value = _state.value.copy(
-                step = FaceRegisterStep.COLLECTING,
-                framesCollected = collectedBitmaps.size,
-                message = "Kualitas baik (${collectedBitmaps.size}/$REQUIRED_FRAMES)",
-                detection = detection,
-                currentQualityScore = quality.score,
-                qualityMessages = emptyList()
-            )
-            Log.d(TAG, "Frame ${collectedBitmaps.size}/$REQUIRED_FRAMES collected (score=${"%.3f".format(quality.score)})")
+        // ─── Update state with live feedback ───
+        val currentPose = _state.value.currentPose
 
-            if (collectedBitmaps.size >= REQUIRED_FRAMES) {
-                proceedToEmbedding()
+        _state.value = _state.value.copy(
+            detection = detection,
+            currentYaw = yaw,
+            currentPitch = pitch,
+            currentQualityScore = quality.score,
+            qualityMessages = quality.messages
+        )
+
+        // ─── Phase: DETECTING → start first pose when face detected ───
+        if (currentStep == FaceRegisterStep.DETECTING) {
+            if (quality.isPass) {
+                startNextPose()
+            } else {
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.DETECTING,
+                    message = quality.messages.firstOrNull()
+                        ?: "Hadapkan wajah lurus ke kamera"
+                )
             }
-        } else {
-            // Show quality feedback but don't store
-            _state.value = _state.value.copy(
-                step = FaceRegisterStep.COLLECTING,
-                message = quality.messages.firstOrNull()
-                    ?: "Perbaiki posisi wajah (${collectedBitmaps.size}/$REQUIRED_FRAMES)",
-                detection = detection,
-                currentQualityScore = quality.score,
-                qualityMessages = quality.messages
-            )
             bitmap.recycle()
-            Log.d(TAG, "Frame rejected: ${quality.messages}")
+            isProcessing = false
+            return
         }
 
+        // ─── Check timeout for current pose ───
+        val now = System.currentTimeMillis()
+        if (now - poseStartTime > PER_POSE_TIMEOUT_MS) {
+            if (poseQueues[currentPose]!!.isNotEmpty()) {
+                // We have frames — proceed even if incomplete set
+                Log.d(TAG, "Pose ${currentPose.name} timeout with ${poseQueues[currentPose]!!.size} frames")
+                moveToNextPose()
+            } else {
+                // No frames at all — reset to detecting
+                reset()
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.DETECTING,
+                    message = "Waktu habis, coba lagi"
+                )
+            }
+            bitmap.recycle()
+            isProcessing = false
+            return
+        }
+
+        // ─── Phase: POSITIONING — wait for user to match pose ───
+        if (currentStep == FaceRegisterStep.POSITIONING) {
+            val isInPose = matchedPose == currentPose && abs(yaw - currentPose.targetYaw) < currentPose.tolerance &&
+                    abs(pitch - currentPose.targetPitch) < currentPose.tolerance
+
+            if (isInPose && quality.isPass && !quality.isBlurry) {
+                // Entered the correct pose — switch to CAPTURING
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.CAPTURING,
+                    message = "Pertahankan posisi... (${poseQueues[currentPose]!!.size + 1}/$MAX_FRAMES_PER_POSE)"
+                )
+            } else {
+                // Guide user toward correct pose
+                val guide = buildPoseGuidance(currentPose, yaw, pitch)
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.POSITIONING,
+                    message = guide,
+                    currentPose = currentPose
+                )
+            }
+            bitmap.recycle()
+            isProcessing = false
+            return
+        }
+
+        // ─── Phase: CAPTURING — collect frames for current pose ───
+        if (currentStep == FaceRegisterStep.CAPTURING) {
+            val currentQueue = poseQueues[currentPose]!!
+            val isInPose = matchedPose == currentPose && abs(yaw - currentPose.targetYaw) < currentPose.tolerance &&
+                    abs(pitch - currentPose.targetPitch) < currentPose.tolerance
+
+            if (!isInPose) {
+                // User moved out of pose — warn them
+                val guide = buildPoseGuidance(currentPose, yaw, pitch)
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.POSITIONING,
+                    message = guide
+                )
+                bitmap.recycle()
+                isProcessing = false
+                return
+            }
+
+            if (now - lastCaptureTime < QUALITY_INTERVAL_MS) {
+                bitmap.recycle()
+                isProcessing = false
+                return // throttle
+            }
+
+            if (quality.isPass && currentQueue.size < MAX_FRAMES_PER_POSE) {
+                currentQueue.add(CapturedFrameData(
+                    bitmap = bitmap,
+                    faceRect = detection.boundingBox,
+                    qualityReport = quality,
+                    pose = currentPose
+                ))
+                val capturedPoses = _state.value.capturedPoses + currentPose
+                val totalFrames = poseQueues.values.sumOf { it.size }
+
+                _state.value = _state.value.copy(
+                    step = FaceRegisterStep.CAPTURING,
+                    capturedPoses = capturedPoses,
+                    totalFramesCollected = totalFrames,
+                    message = "Pertahankan posisi... (${currentQueue.size}/$MAX_FRAMES_PER_POSE)"
+                )
+
+                Log.d(TAG, "Frame captured for ${currentPose.name}: ${currentQueue.size}/$MAX_FRAMES_PER_POSE (score=${"%.3f".format(quality.score)})")
+
+                if (currentQueue.size >= MAX_FRAMES_PER_POSE) {
+                    // This pose is done — move to next
+                    moveToNextPose()
+                }
+            } else {
+                // Frame didn't pass quality — show feedback but stay in CAPTURING
+                _state.value = _state.value.copy(
+                    message = quality.messages.firstOrNull()
+                        ?: "Tunggu... (${currentQueue.size}/$MAX_FRAMES_PER_POSE)"
+                )
+                bitmap.recycle()
+            }
+
+            isProcessing = false
+            return
+        }
+
+        bitmap.recycle()
         isProcessing = false
     }
 
-    private fun transitionToCollecting() {
-        collectStartTime = System.currentTimeMillis()
-        lastCaptureTime = 0L
-        collectedBitmaps.clear()
-        collectedRects.clear()
+    private fun findClosestPose(yaw: Float, pitch: Float): CapturePose {
+        return CapturePose.entries.minByOrNull { pose ->
+            val dy = (yaw - pose.targetYaw) / pose.tolerance
+            val dp = (pitch - pose.targetPitch) / pose.tolerance
+            dy * dy + dp * dp
+        } ?: CapturePose.CENTER
+    }
+
+    private fun buildPoseGuidance(target: CapturePose, yaw: Float, pitch: Float): String {
+        val dyaw = target.targetYaw - yaw
+        val dpitch = target.targetPitch - pitch
+        return when {
+            abs(dyaw) > 15 && dyaw > 0 -> "Miringkan kepala ke kiri"
+            abs(dyaw) > 15 && dyaw < 0 -> "Miringkan kepala ke kanan"
+            dpitch > 10 -> "Tundukkan kepala"
+            dpitch < -10 -> "Tengadahkan kepala"
+            abs(dyaw) > 8 -> if (dyaw > 0) "Sedikit ke kiri" else "Sedikit ke kanan"
+            abs(dpitch) > 6 -> if (dpitch > 0) "Sedikit tunduk" else "Sedikit tengadah"
+            else -> target.guideText
+        }
+    }
+
+    private fun startNextPose() {
+        poseStartTime = System.currentTimeMillis()
+        val firstPose = poseOrder.first()
         _state.value = _state.value.copy(
-            step = FaceRegisterStep.COLLECTING,
-            message = "Ambil 3 frame berkualitas... (0/$REQUIRED_FRAMES)",
-            detection = null
+            step = FaceRegisterStep.POSITIONING,
+            currentPose = firstPose,
+            message = firstPose.guideText
         )
     }
 
+    private fun moveToNextPose() {
+        val currentPose = _state.value.currentPose
+        val currentIdx = poseOrder.indexOf(currentPose)
+        val nextIdx = currentIdx + 1
+
+        if (nextIdx >= poseOrder.size) {
+            // All poses done — process
+            proceedToEmbedding()
+            return
+        }
+
+        val nextPose = poseOrder[nextIdx]
+        isTransitionScheduled = true
+        _state.value = _state.value.copy(
+            step = FaceRegisterStep.POSITIONING,
+            currentPose = nextPose,
+            message = "Bagus! Sekarang: ${nextPose.guideText}",
+            currentQualityScore = 0f
+        )
+
+        // Brief delay so user can see success before next instruction
+        viewModelScope.launch {
+            delay(TRANSITION_DELAY_MS)
+            poseStartTime = System.currentTimeMillis()
+            isTransitionScheduled = false
+        }
+    }
+
     private fun proceedToEmbedding() {
-        val frames = collectedBitmaps.toList() // snapshot
         isProcessing = false
 
         viewModelScope.launch {
             try {
                 _state.value = _state.value.copy(
                     step = FaceRegisterStep.EMBEDDING,
-                    message = "Memproses ${frames.size} frame wajah...",
+                    message = "Memproses ${_state.value.framesRequired} frame wajah...",
                     detection = null
                 )
 
-                // Embed each frame
+                // ─── Select best 1 frame per pose (total = 5) ───
+                val selectedFrames = mutableListOf<CapturedFrameData>()
+                for (pose in poseOrder) {
+                    val queue = poseQueues[pose]!!
+                    if (queue.isEmpty()) continue
+                    // Pick the frame with highest quality score for this pose
+                    val best = queue.maxByOrNull { it.qualityReport.score }!!
+                    selectedFrames.add(best)
+                }
+
+                if (selectedFrames.isEmpty()) {
+                    _state.value = _state.value.copy(
+                        step = FaceRegisterStep.ERROR,
+                        error = "Tidak ada frame yang valid"
+                    )
+                    return@launch
+                }
+
+                // Take top N up to framesRequired
+                val sortedFrames = selectedFrames.sortedByDescending { it.qualityReport.score }
+                val finalFrames = sortedFrames.take(_state.value.framesRequired)
+
+                // ─── Embed each selected frame ───
                 val embeddings = withContext(Dispatchers.Default) {
-                    frames.map { bitmap ->
-                        faceEmbedder.embed(bitmap)
+                    finalFrames.map { data ->
+                        faceEmbedder.embed(data.bitmap)
                     }.toTypedArray()
                 }
 
-                // Average embeddings for robust template
+                // ─── Average embeddings for robust template ───
                 val averaged = faceEmbedder.averageEmbeddings(embeddings)
 
-                // Cleanup bitmaps
-                frames.forEach { it.recycle() }
-                collectedBitmaps.clear()
-                collectedRects.clear()
+                // Cleanup all bitmaps
+                poseQueues.values.forEach { queue ->
+                    queue.forEach { it.bitmap.recycle() }
+                    queue.clear()
+                }
 
                 _state.value = _state.value.copy(
                     step = FaceRegisterStep.UPLOADING,
@@ -268,8 +459,10 @@ class FaceRegisterViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Registration error", e)
-                frames.forEach { it.recycle() }
-                collectedBitmaps.clear()
+                poseQueues.values.forEach { queue ->
+                    queue.forEach { it.bitmap.recycle() }
+                    queue.clear()
+                }
                 _state.value = _state.value.copy(
                     step = FaceRegisterStep.ERROR,
                     error = "Terjadi kesalahan: ${e.message}"
@@ -278,21 +471,48 @@ class FaceRegisterViewModel @Inject constructor(
         }
     }
 
+    fun skipPose() {
+        val currentStep = _state.value.step
+        val currentPose = _state.value.currentPose
+        Log.d(TAG, "User skipped pose ${currentPose.name}")
+
+        // If still in DETECTING, start the pose flow first
+        if (currentStep == FaceRegisterStep.DETECTING) {
+            startNextPose()
+            // Skip again after starting (moves to next pose)
+            val newPose = _state.value.currentPose
+            val newIdx = poseOrder.indexOf(newPose)
+            val nextIdx = newIdx + 1
+            if (nextIdx < poseOrder.size) {
+                _state.value = _state.value.copy(
+                    currentPose = poseOrder[nextIdx],
+                    message = poseOrder[nextIdx].guideText
+                )
+            }
+            return
+        }
+        moveToNextPose()
+    }
+
     fun reset() {
         livenessDetector.reset()
-        collectedBitmaps.forEach { it.recycle() }
-        collectedBitmaps.clear()
-        collectedRects.clear()
+        poseQueues.values.forEach { queue ->
+            queue.forEach { it.bitmap.recycle() }
+            queue.clear()
+        }
         isProcessing = false
-        collectStartTime = 0L
+        isTransitionScheduled = false
+        poseStartTime = 0L
         lastCaptureTime = 0L
-        _state.value = FaceRegisterState(framesRequired = REQUIRED_FRAMES)
+        _state.value = FaceRegisterState(framesRequired = CapturePose.entries.size)
     }
 
     override fun onCleared() {
         super.onCleared()
-        collectedBitmaps.forEach { it.recycle() }
-        collectedBitmaps.clear()
+        poseQueues.values.forEach { queue ->
+            queue.forEach { it.bitmap.recycle() }
+            queue.clear()
+        }
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {

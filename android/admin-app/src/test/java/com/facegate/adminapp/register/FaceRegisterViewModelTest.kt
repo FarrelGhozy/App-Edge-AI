@@ -6,6 +6,7 @@ import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.LivenessDetector
 import com.facegate.core.data.remote.dto.UploadFaceRequest
+import android.util.Log
 import io.mockk.*
 import io.mockk.impl.annotations.MockK
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,10 @@ class FaceRegisterViewModelTest {
     @Before
     fun setup() {
         MockKAnnotations.init(this, relaxed = true)
+        mockkStatic(Log::class)
+        every { Log.d(any(), any()) } returns 0
+        every { Log.e(any(), any()) } returns 0
+        every { Log.e(any(), any(), any()) } returns 0
 
         every { faceDetector.init() } returns Unit
         every { faceEmbedder.init() } returns true
@@ -65,8 +70,8 @@ class FaceRegisterViewModelTest {
         val state = viewModel.state.value
         assertEquals(FaceRegisterStep.DETECTING, state.step)
         assertFalse(state.isSuccess)
-        assertEquals(0, state.framesCollected)
-        assertEquals(3, state.framesRequired)
+        assertEquals(0, state.totalFramesCollected)
+        assertEquals(5, state.framesRequired) // 5 poses: CENTER, LEFT, RIGHT, UP, DOWN
     }
 
     @Test
@@ -80,7 +85,7 @@ class FaceRegisterViewModelTest {
         viewModel.reset()
         val state = viewModel.state.value
         assertEquals(FaceRegisterStep.DETECTING, state.step)
-        assertEquals(0, state.framesCollected)
+        assertEquals(0, state.totalFramesCollected)
         assertNull(state.error)
         assertFalse(state.isSuccess)
     }
@@ -94,9 +99,64 @@ class FaceRegisterViewModelTest {
         assertFalse(state.isUploading)
         assertFalse(state.isSuccess)
         assertNull(state.detection)
-        assertEquals(0, state.framesCollected)
-        assertEquals(3, state.framesRequired)
+        assertEquals(0, state.totalFramesCollected)
+        assertEquals(5, state.framesRequired)
         assertEquals(0f, state.currentQualityScore)
         assertTrue(state.qualityMessages.isEmpty())
+        assertEquals(CapturePose.CENTER, state.currentPose)
+        assertTrue(state.capturedPoses.isEmpty())
+        assertEquals(0f, state.currentYaw)
+        assertEquals(0f, state.currentPitch)
+    }
+
+    @Test
+    fun `skipPose should move to next pose`() {
+        // After reset, current pose is CENTER
+        viewModel.setStudentId("test-123")
+        viewModel.skipPose()
+        val state = viewModel.state.value
+        assertEquals(CapturePose.LEFT, state.currentPose)
+        assertEquals(FaceRegisterStep.POSITIONING, state.step)
+    }
+
+    @Test
+    fun `skipPose through all 5 poses should start embedding`() {
+        viewModel.setStudentId("test-123")
+        // Skip CENTER -> LEFT -> RIGHT -> UP -> DOWN -> (should proceed to embedding but fail with empty queues)
+        viewModel.skipPose() // skip CENTER
+        viewModel.skipPose() // skip LEFT
+        viewModel.skipPose() // skip RIGHT
+        viewModel.skipPose() // skip UP
+        viewModel.skipPose() // skip DOWN — should trigger proceedToEmbedding
+        testDispatcher.scheduler.advanceUntilIdle()
+        // Since all queues are empty, state should be ERROR
+        val state = viewModel.state.value
+        assertEquals(FaceRegisterStep.ERROR, state.step)
+        assertNotNull(state.error)
+    }
+
+    @Test
+    fun `reset should clear after partial capture`() {
+        viewModel.setStudentId("test-123")
+        viewModel.skipPose() // move to LEFT
+        viewModel.reset()
+        val state = viewModel.state.value
+        assertEquals(FaceRegisterStep.DETECTING, state.step)
+        assertEquals(CapturePose.CENTER, state.currentPose)
+        assertTrue(state.capturedPoses.isEmpty())
+        assertEquals(0, state.totalFramesCollected)
+    }
+
+    @Test
+    fun `poseOrder should contain all 5 poses`() {
+        viewModel.setStudentId("test-123")
+        viewModel.skipPose()
+        assertEquals(CapturePose.LEFT, viewModel.state.value.currentPose)
+        viewModel.skipPose()
+        assertEquals(CapturePose.RIGHT, viewModel.state.value.currentPose)
+        viewModel.skipPose()
+        assertEquals(CapturePose.UP, viewModel.state.value.currentPose)
+        viewModel.skipPose()
+        assertEquals(CapturePose.DOWN, viewModel.state.value.currentPose)
     }
 }
