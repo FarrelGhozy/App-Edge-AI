@@ -38,7 +38,7 @@ FaceGateApp/
 ## Database (PostgreSQL + pgvector)
 Key models (see `prisma/schema.prisma`):
 - `Student` — master data with `nim`, `studyProgram`, `academicYear`
-- `FaceVector` — `vector(512)` via pgvector extension (ArcFace 512-d embedding)
+- `FaceVector` — `vector(192)` via pgvector extension (MobileFaceNet 192-d embedding)
 - `AttendanceLog` — scan logs with `action: "keluar" | "kembali"`
 - `Permit` — `type: "izin_harian" | "pengajuan_izin"` (harian auto-approved)
 - `CampusRule` — restricted hours configuration
@@ -57,15 +57,21 @@ Key models (see `prisma/schema.prisma`):
 
 ## Face Recognition Pipeline
 ```
-CameraX → MediaPipe FaceDetection → Face Landmarks (468pts)
-  → EAR Liveness (blink detection, 3s window)
-  → ArcFace TFLite (512-d embedding) 
+CameraX → ML Kit Face Detection → Face Landmarks (468pts)
+  → EAR Liveness (blink detection, 3.5s window)
+  → Anti-spoofing (MiniFASNet ensemble)
+  → MobileFaceNet TFLite (192-d embedding) — previously ArcFace 512-d (broken)
   → Brute-force cosine similarity match (10k faces in RAM, ~3ms)
-  → Threshold: 0.6 (configurable)
+  → Threshold: 0.7 (configurable)
 ```
 Total pipeline: ~25ms per face. All models cached locally in RAM.
 
-**IMPORTANT**: FaceVector uses `vector(512)` in PostgreSQL. ArcFace produces exactly 512-dimensional embeddings. If upload fails with dimension mismatch, verify the TFLite model outputs 512 floats.
+**Model change (Jul 2026)**: Switched from `arcface_512.tflite` (FP16, broken architecture in conversion script) to `mobilefacenet.tflite` (proven model from GitHub release).  
+- Input: 112×112 RGB, normalized to [-1, 1]  
+- Output: 192-d L2-normalized float vector  
+- Database: `vector(192)` in PostgreSQL  
+
+**IMPORTANT**: If upload fails with dimension mismatch, verify vector is 192-d (not 512-d). The old `arcface_512.tflite` model had an incomplete conversion script (`backend/scripts/convert_arcface_tflite.py` was a skeleton, not the real Inception-ResNet v1).
 
 ## Realtime Data Architecture
 
@@ -123,15 +129,15 @@ Two types:
 - TypeScript: Elysia routes grouped by resource, Zod schemas in service files
 - All UI in Jetpack Compose (no XML)
 - Face vector stored as Blob in Room (FloatArray → ByteArray via TypeConverter)
-- In-memory FaceIndex: `Map<String, FloatArray>` (studentId → 512-d vector)
+- In-memory FaceIndex: `Map<String, FloatArray>` (studentId → 192-d vector)
 
 ## Common Issues & Fixes
 
 ### Error :500 saat upload face
 1. Pastikan ekstensi `pgvector` sudah aktif: `CREATE EXTENSION IF NOT EXISTS vector;`
-2. Model TFLite menghasilkan **512-dimensi** — schema harus `vector(512)`, cek `FaceEmbedder.kt: embeddingDim = 512`
+2. Model TFLite (MobileFaceNet) menghasilkan **192-dimensi** — schema harus `vector(192)`, cek `FaceEmbedder.kt: embeddingDim = 192`
 3. Jalankan `npx prisma db push` setelah mengubah schema
-4. Cek error detail di log backend — sekarang uploadFace memberikan pesan error spesifik
+4. Cek error detail di log backend — uploadFace memberikan pesan error spesifik
 
 ### Error :500 lainnya
 - Pastikan semua relasi model di schema.prisma lengkap (Student ↔ Violation, CourseSchedule, PermitQuota)

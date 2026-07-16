@@ -444,10 +444,13 @@ class FaceRegisterViewModel @Inject constructor(
                 val sortedFrames = selectedFrames.sortedByDescending { it.qualityReport.score }
                 val finalFrames = sortedFrames.take(_state.value.framesRequired)
 
-                // ─── Embed each selected frame ───
+                // ─── Embed each selected frame (crop face first, consistent with kiosk) ───
                 val embeddings = withContext(Dispatchers.Default) {
                     finalFrames.map { data ->
-                        faceEmbedder.embed(data.bitmap)
+                        val faceCrop = cropFace(data.bitmap, data.faceRect)
+                        val emb = faceEmbedder.embed(faceCrop)
+                        if (faceCrop !== data.bitmap) faceCrop.recycle()
+                        emb
                     }.toTypedArray()
                 }
 
@@ -575,6 +578,16 @@ class FaceRegisterViewModel @Inject constructor(
             queue.forEach { it.bitmap.recycle() }
             queue.clear()
         }
+    }
+
+    /** Crop face region from bitmap using bounding box, with margin. */
+    private fun cropFace(bitmap: Bitmap, boundingBox: Rect): Bitmap {
+        val margin = (boundingBox.width() * 0.3f).toInt()
+        val x = (boundingBox.left - margin).coerceAtLeast(0)
+        val y = (boundingBox.top - margin).coerceAtLeast(0)
+        val w = (boundingBox.width() + margin * 2).coerceAtMost(bitmap.width - x)
+        val h = (boundingBox.height() + margin * 2).coerceAtMost(bitmap.height - y)
+        return Bitmap.createBitmap(bitmap, x, y, w, h)
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {

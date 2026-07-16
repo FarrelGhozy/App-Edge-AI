@@ -170,9 +170,9 @@ export async function uploadFace(studentId: string, pose: string, vector: number
     throw new Error(`INVALID_POSE: expected one of ${[...VALID_POSES].join(", ")}, got ${pose}`);
   }
 
-  // Validate vector dimension
-  if (vector.length !== 192 && vector.length !== 512) {
-    throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192 or 512, got ${vector.length}`);
+  // Validate vector dimension (MobileFaceNet = 192-d)
+  if (vector.length !== 192) {
+    throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192 (MobileFaceNet), got ${vector.length}`);
   }
 
   const vectorStr = `[${vector.join(",")}]`;
@@ -210,8 +210,8 @@ export async function batchUploadFaces(studentId: string, vectors: { pose: strin
     if (!VALID_POSES.has(v.pose)) {
       throw new Error(`INVALID_POSE: expected one of ${[...VALID_POSES].join(", ")}, got ${v.pose}`);
     }
-    if (v.vector.length !== 512) {
-      throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 512, got ${v.vector.length} for pose ${v.pose}`);
+    if (v.vector.length !== 192) {
+      throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192 (MobileFaceNet), got ${v.vector.length} for pose ${v.pose}`);
     }
   }
 

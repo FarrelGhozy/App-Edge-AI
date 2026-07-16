@@ -33,7 +33,7 @@ model Student {
 model FaceVector {
   studentId String   @map("student_id")
   pose      String   // pose name: CENTER, LEFT, RIGHT, UP, DOWN
-  vector    Unsupported("vector(512)")
+  vector    Unsupported("vector(192)")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)

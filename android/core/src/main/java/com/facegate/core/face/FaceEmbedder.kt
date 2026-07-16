@@ -15,17 +15,17 @@ import java.nio.channels.FileChannel
  * Face embedding extractor using a TFLite model.
  * Supports both quantized (INT8) and float models automatically.
  *
- * Default: ArcFace 512-d model (quantized or float).
- * To switch back to MobileFaceNet 192-d:
+ * Uses MobileFaceNet by default (192-d, 112×112 input).
+ * To switch to ArcFace 512-d:
  * ```kotlin
- * faceEmbedder.init("mobilefacenet.tflite", embeddingDim = 192, inputSize = 112)
+ * faceEmbedder.init("arcface_512.tflite", embeddingDim = 512, inputSize = 112)
  * ```
  */
 class FaceEmbedder(private val context: Context) {
     companion object {
         private const val TAG = "FaceEmbedder"
-        private const val DEFAULT_MODEL = "arcface_512.tflite"
-        private const val DEFAULT_DIM = 512
+        private const val DEFAULT_MODEL = "mobilefacenet.tflite"
+        private const val DEFAULT_DIM = 192
         private const val DEFAULT_INPUT_SIZE = 112
         private const val IMAGE_MEAN = 127.5f
         private const val IMAGE_STD = 127.5f
@@ -34,14 +34,15 @@ class FaceEmbedder(private val context: Context) {
     private var interpreter: Interpreter? = null
     private var embeddingDim: Int = DEFAULT_DIM
     private var inputSize: Int = DEFAULT_INPUT_SIZE
-    private var isQuantized: Boolean = false
+    private var isInputQuantized: Boolean = false
+    private var isOutputQuantized: Boolean = false
     private var initError: String? = null
 
     /**
      * Initialize the TFLite interpreter.
      *
-     * @param modelName    TFLite file in assets (default: arcface_512.tflite)
-     * @param embeddingDim Output dimension: 192, 512 (default: 512)
+     * @param modelName    TFLite file in assets (default: mobilefacenet.tflite)
+     * @param embeddingDim Output dimension: 192 (MobileFaceNet) or 512 (ArcFace)
      * @param inputSize    Model input image size (default: 112)
      */
     fun init(
@@ -56,12 +57,13 @@ class FaceEmbedder(private val context: Context) {
             this.embeddingDim = embeddingDim
             this.inputSize = inputSize
 
-            // Auto-detect quantized model via input tensor type
             val inputType = interpreter!!.getInputTensor(0).dataType()
-            isQuantized = inputType == DataType.UINT8
+            isInputQuantized = inputType == DataType.UINT8
+            val outputType = interpreter!!.getOutputTensor(0).dataType()
+            isOutputQuantized = outputType == DataType.UINT8
 
             initError = null
-            Log.d(TAG, "Embedder initialized: model=$modelName dim=$embeddingDim input=$inputSize quantized=$isQuantized")
+            Log.d(TAG, "Embedder initialized: model=$modelName dim=$embeddingDim input=$inputSize inputQuantized=$isInputQuantized outputQuantized=$isOutputQuantized")
             true
         } catch (e: Exception) {
             interpreter = null
@@ -93,21 +95,22 @@ class FaceEmbedder(private val context: Context) {
 
         val inputBuffer = preprocess(bitmap)
 
-        return if (isQuantized) {
-            // Quantized model: input=uint8, output=uint8 (byte[])
+        if (isOutputQuantized) {
             val outputBuffer = Array(1) { ByteArray(embeddingDim) }
             interpreter!!.run(inputBuffer, outputBuffer)
-            // Convert byte[] (uint8 0-255) → float → L2 normalize
+            val quant = interpreter!!.getOutputTensor(0).quantizationParams()
+            val zeroPoint = quant.zeroPoint.toFloat()
+            val scale = quant.scale
             val raw = FloatArray(embeddingDim)
             for (i in 0 until embeddingDim) {
-                raw[i] = (outputBuffer[0][i].toInt() and 0xFF).toFloat()
+                val uint8 = outputBuffer[0][i].toInt() and 0xFF
+                raw[i] = (uint8 - zeroPoint) * scale
             }
-            l2Normalize(raw)
+            return l2Normalize(raw)
         } else {
-            // Float model: input=float32, output=float32
             val outputBuffer = Array(1) { FloatArray(embeddingDim) }
             interpreter!!.run(inputBuffer, outputBuffer)
-            l2Normalize(outputBuffer[0])
+            return l2Normalize(outputBuffer[0])
         }
     }
 
@@ -148,7 +151,7 @@ class FaceEmbedder(private val context: Context) {
         val pixels = IntArray(inputSize * inputSize)
         resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
 
-        if (isQuantized) {
+        if (isInputQuantized) {
             val buffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3)
             for (pixel in pixels) {
                 buffer.put(((pixel shr 16) and 0xFF).toByte()) // R
@@ -185,7 +188,7 @@ class FaceEmbedder(private val context: Context) {
 
     fun isReady(): Boolean = interpreter != null
     fun getEmbeddingDim(): Int = embeddingDim
-    fun isModelQuantized(): Boolean = isQuantized
+    fun isModelQuantized(): Boolean = isInputQuantized
 
     fun release() {
         interpreter?.close()

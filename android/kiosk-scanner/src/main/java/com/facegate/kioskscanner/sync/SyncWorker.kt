@@ -182,17 +182,17 @@ class SyncWorker @AssistedInject constructor(
                 val faces = syncData.data
 
                 if (faces.isNotEmpty()) {
-                    // Save face vectors
+                    // Save face vectors — delete stale, then insert all fresh
                     val faceEntities = faces.map { dto ->
                         com.facegate.core.data.local.entity.FaceVectorEntity(
                             studentId = dto.studentId,
+                            pose = dto.pose,
                             vector = dto.vector.toFloatArray()
                         )
                     }
 
-                    for (fv in faceEntities) {
-                        faceVectorDao.insert(fv)
-                    }
+                    faceVectorDao.deleteAll()
+                    faceVectorDao.insertAll(faceEntities)
 
                     // Save student data from joined query
                     val studentEntities = faces.mapNotNull { dto ->
@@ -213,12 +213,9 @@ class SyncWorker @AssistedInject constructor(
                         Log.d(TAG, "Saved ${studentEntities.size} students")
                     }
 
-                    // Rebuild face index in RAM
-                    val allVectors = faceVectorDao.getAll()
-                    if (allVectors.isNotEmpty()) {
-                        faceMatcher.buildIndex(allVectors.map { it.toIndexEntry() })
-                        Log.d(TAG, "Face index rebuilt: ${allVectors.size} vectors for ${faceVectorDao.countDistinctStudents()} students in RAM")
-                    }
+                    // Rebuild face index in RAM from downloaded data
+                    faceMatcher.buildIndex(faceEntities.map { it.toIndexEntry() })
+                    Log.d(TAG, "Face index rebuilt: ${faceEntities.size} vectors for ${faceEntities.map { it.studentId }.distinct().size} students in RAM")
 
                     Log.d(TAG, "Synced ${faces.size} faces + ${studentEntities.size} students")
                 }
