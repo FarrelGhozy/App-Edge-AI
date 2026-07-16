@@ -1,5 +1,6 @@
 package com.facegate.adminapp.register
 
+import android.graphics.Bitmap
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,6 +13,8 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -32,6 +35,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -56,6 +60,7 @@ fun FaceRegisterScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
+    val previewBitmap by viewModel.previewBitmap.collectAsState()
 
     val cameraPermissionGranted = remember {
         mutableStateOf(
@@ -153,6 +158,82 @@ fun FaceRegisterScreen(
                 )
             }
 
+            // Confirm pose overlay — preview + next button
+            AnimatedVisibility(
+                visible = state.step == FaceRegisterStep.CONFIRM,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xCC000000)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "Pose ${state.currentPose.displayName} selesai!",
+                            color = Color(0xFF4CAF50),
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        previewBitmap?.let { bmp ->
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(200.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .border(2.dp, Color(0xFF4CAF50), RoundedCornerShape(16.dp))
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "${state.capturedPoses.size} / 5 pose",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Button(
+                            onClick = { viewModel.confirmPose() },
+                            modifier = Modifier
+                                .width(220.dp)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF4CAF50)
+                            )
+                        ) {
+                            Text(
+                                "Lanjut ke pose berikutnya",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.retryPose() },
+                            modifier = Modifier
+                                .width(220.dp)
+                                .height(44.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color.White
+                            ),
+                            border = BorderStroke(
+                                1.dp, Color.White.copy(alpha = 0.6f)
+                            )
+                        ) {
+                            Text(
+                                "Ulangi pose ini",
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             // Success overlay
             AnimatedVisibility(
                 visible = state.step == FaceRegisterStep.SUCCESS,
@@ -236,7 +317,7 @@ private fun StepIndicator(
     val steps = listOf("Deteksi", "Pose", "Proses", "Upload")
     val currentIndex = when (currentStep) {
         FaceRegisterStep.DETECTING -> 0
-        FaceRegisterStep.POSITIONING, FaceRegisterStep.CAPTURING -> 1
+        FaceRegisterStep.POSITIONING, FaceRegisterStep.CAPTURING, FaceRegisterStep.CONFIRM -> 1
         FaceRegisterStep.EMBEDDING -> 2
         FaceRegisterStep.UPLOADING -> 3
         else -> -1
@@ -278,9 +359,10 @@ private fun StepIndicator(
             }
         }
 
-        // Pose progress dots (only during POSITIONING/CAPTURING)
+        // Pose progress dots (only during POSITIONING/CAPTURING/CONFIRM)
         if (currentStep == FaceRegisterStep.POSITIONING ||
-            currentStep == FaceRegisterStep.CAPTURING
+            currentStep == FaceRegisterStep.CAPTURING ||
+            currentStep == FaceRegisterStep.CONFIRM
         ) {
             Spacer(modifier = Modifier.height(6.dp))
             Row(
@@ -330,6 +412,7 @@ private fun PoseAwareOverlay(
         FaceRegisterStep.DETECTING -> Color.White
         FaceRegisterStep.POSITIONING -> Color(0xFFFFC107)
         FaceRegisterStep.CAPTURING -> Color(0xFF4CAF50)
+        FaceRegisterStep.CONFIRM -> Color(0xFF4CAF50)
         FaceRegisterStep.EMBEDDING -> Color(0xFF2196F3)
         FaceRegisterStep.UPLOADING -> Color(0xFF2196F3)
         FaceRegisterStep.SUCCESS -> Color(0xFF4CAF50)
