@@ -150,7 +150,7 @@ FaceGateApp/
 | Bahasa | Kotlin | 2.0.x |
 | UI | Jetpack Compose + Material 3 | |
 | Kamera | CameraX | 1.4.x |
-| Face Embedding | TensorFlow Lite (ArcFace 512-d) | |
+| Face Embedding | TensorFlow Lite (MobileFaceNet 192-d) | |
 | Database Lokal | Room | 2.6.x |
 | Background Sync | WorkManager | 2.9.x |
 | Networking | Retrofit + OkHttp + Kotlinx Serialization | |
@@ -185,8 +185,8 @@ FaceGateApp/
      ↓                                                    ↓
   Crop face ROI                             468 titik landmark wajah
      ↓                                                    ↓
-  [Liveness: Eye Aspect Ratio]              [ArcFace Embedding]
-  Hitung EAR dari landmark mata              Ekstrak 512-d vector
+  [Liveness: Eye Aspect Ratio]              [MobileFaceNet Embedding]
+  Hitung EAR dari landmark mata              Ekstrak 192-d vector (MobileFaceNet)
   Kedipan = EAR turun drastis                      ↓
      ↓                                       Brute-force match di RAM
   Jika tidak ada kedipan → tolak             Cosine similarity
@@ -206,8 +206,8 @@ FaceGateApp/
 | Face Detection | **MediaPipe FaceDetector** (via ML Kit CameraX) | ~350 KB | < 5ms |
 | Face Landmarks | **MediaPipe Face Landmarks** (468 titik) | ~0 KB (bundle) | < 2ms |
 | Liveness | **Eye Aspect Ratio (EAR)** — rule-based dari landmark mata | 0 KB | < 2ms |
-| Face Embedding | **ArcFace** .tflite — 512-d vector | ~4-5 MB | ~15ms |
-| Matching | Brute-force cosine similarity di RAM | 10.000 × 512 = ~20 MB | ~3ms |
+| Face Embedding | **MobileFaceNet** .tflite — 192-d vector | ~5 MB | ~15ms |
+| Matching | Brute-force cosine similarity di RAM | 10.000 × 192 = ~7.5 MB | ~3ms |
 | **Total** | | **~9-10 MB** | **~25ms per face** |
 
 - **Threshold**: 0.6 (default, bisa di-tuning)
@@ -410,7 +410,7 @@ model Student {
 
 model FaceVector {
   studentId String   @id @map("student_id")
-  vector    Unsupported("vector(512)")
+  vector    Unsupported("vector(192)")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -1574,7 +1574,7 @@ Cahaya dari depan (searah mahasiswa)
 | No | Pertanyaan | Keputusan |
 |---|---|---|
 | 1 | Model Face Detection | ✅ **MediaPipe FaceDetector** |
-| 2 | Model Face Embedding | ✅ **ArcFace 512-d** |
+| 2 | Model Face Embedding | ✅ **MobileFaceNet 192-d** |
 | 3 | Liveness Detection | ✅ **Eye Aspect Ratio (EAR)** — rule-based, 0 KB |
 | 4 | Backend Framework | ✅ **Elysia** (Bun-native) |
 | 5 | CSV Import Format | ✅ NIM, Nama, Prodi, Angkatan, No HP, Email |

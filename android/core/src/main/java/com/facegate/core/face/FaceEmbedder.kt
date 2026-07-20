@@ -15,11 +15,10 @@ import java.nio.channels.FileChannel
  * Face embedding extractor using a TFLite model.
  * Supports both quantized (INT8) and float models automatically.
  *
- * Uses MobileFaceNet by default (192-d, 112×112 input).
- * To switch to ArcFace 512-d:
- * ```kotlin
- * faceEmbedder.init("arcface_512.tflite", embeddingDim = 512, inputSize = 112)
- * ```
+ * Normalization: pixel / 255.0 ([0, 1] range) — standard for face recognition models.
+ * Previously used [-1, 1] range which caused poor accuracy.
+ *
+ * To switch model: faceEmbedder.init("other.tflite", embeddingDim = N, inputSize = N)
  */
 class FaceEmbedder(private val context: Context) {
     companion object {
@@ -27,9 +26,10 @@ class FaceEmbedder(private val context: Context) {
         private const val DEFAULT_MODEL = "mobilefacenet.tflite"
         private const val DEFAULT_DIM = 192
         private const val DEFAULT_INPUT_SIZE = 112
-        private const val IMAGE_MEAN = 127.5f
-        private const val IMAGE_STD = 127.5f
+        private const val NORMALIZE_01 = true
     }
+
+    private var isNormalized01: Boolean = true
 
     private var interpreter: Interpreter? = null
     private var embeddingDim: Int = DEFAULT_DIM
@@ -41,14 +41,17 @@ class FaceEmbedder(private val context: Context) {
     /**
      * Initialize the TFLite interpreter.
      *
-     * @param modelName    TFLite file in assets (default: mobilefacenet.tflite)
-     * @param embeddingDim Output dimension: 192 (MobileFaceNet) or 512 (ArcFace)
-     * @param inputSize    Model input image size (default: 112)
+     * @param modelName         TFLite file in assets (default: mobilefacenet.tflite)
+     * @param embeddingDim      Output dimension: 192 (MobileFaceNet) or 512 (ArcFace)
+     * @param inputSize         Model input image size (default: 112)
+     * @param normalize01       If true, normalize pixel to [0,1] (pixel/255.0).
+     *                          If false, normalize to [-1,1] (pixel/127.5-1.0).
      */
     fun init(
         modelName: String = DEFAULT_MODEL,
         embeddingDim: Int = DEFAULT_DIM,
-        inputSize: Int = DEFAULT_INPUT_SIZE
+        inputSize: Int = DEFAULT_INPUT_SIZE,
+        normalize01: Boolean = true
     ): Boolean {
         if (interpreter != null) return true
         return try {
@@ -61,9 +64,10 @@ class FaceEmbedder(private val context: Context) {
             isInputQuantized = inputType == DataType.UINT8
             val outputType = interpreter!!.getOutputTensor(0).dataType()
             isOutputQuantized = outputType == DataType.UINT8
+            isNormalized01 = normalize01
 
             initError = null
-            Log.d(TAG, "Embedder initialized: model=$modelName dim=$embeddingDim input=$inputSize inputQuantized=$isInputQuantized outputQuantized=$isOutputQuantized")
+            Log.d(TAG, "Embedder initialized: model=$modelName dim=$embeddingDim input=$inputSize normalize01=$normalize01 inputQuantized=$isInputQuantized outputQuantized=$isOutputQuantized")
             true
         } catch (e: Exception) {
             interpreter = null
@@ -143,7 +147,7 @@ class FaceEmbedder(private val context: Context) {
 
     /**
      * Preprocess Bitmap into ByteBuffer matching model input type.
-     * - Float models: normalized to [-1, 1] range
+     * - Float models: normalized to [0, 1] (pixel/255) or [-1, 1] based on isNormalized01
      * - Quantized models: raw uint8 [0, 255]
      */
     private fun preprocess(bitmap: Bitmap): ByteBuffer {
@@ -163,10 +167,12 @@ class FaceEmbedder(private val context: Context) {
         } else {
             val buffer = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4)
             buffer.order(ByteOrder.LITTLE_ENDIAN)
+            val divisor = if (isNormalized01) 255.0f else 127.5f
+            val offset = if (isNormalized01) 0.0f else -1.0f
             for (pixel in pixels) {
-                val r = ((pixel shr 16) and 0xFF) / IMAGE_MEAN - 1.0f
-                val g = ((pixel shr 8) and 0xFF) / IMAGE_MEAN - 1.0f
-                val b = (pixel and 0xFF) / IMAGE_MEAN - 1.0f
+                val r = ((pixel shr 16) and 0xFF) / divisor + offset
+                val g = ((pixel shr 8) and 0xFF) / divisor + offset
+                val b = (pixel and 0xFF) / divisor + offset
                 buffer.putFloat(r)
                 buffer.putFloat(g)
                 buffer.putFloat(b)
