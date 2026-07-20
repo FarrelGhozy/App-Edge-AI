@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(curl -L -o /home/fazy/Documents/01_Semester5/PemrogramanAndroid/App-Edge-AI/android/core/src/main/assets/mobilefacenet.tflite \"https://github.com/synonymdev/MobileFaceNet-TFLite/releases/download/v1.0/mobilefacenet.tflite\")",
+      "Bash(curl -L -o /home/fazy/Documents/01_Semester5/PemrogramanAndroid/App-Edge-AI/android/core/src/main/assets/mobilefacenet.tflite \"https://raw.githubusercontent.com/alfredr1990/MobileFaceNet_TF/master/model/mobilefacenet.tflite\")",
+      "Bash(./gradlew :kiosk-scanner:assembleDebug)"
+    ]
+  }
+}
