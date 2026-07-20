@@ -10,6 +10,12 @@
 1. [Ringkasan Proyek](#1-ringkasan-proyek)
 2. [Struktur Monorepo](#2-struktur-monorepo)
 3. [Tech Stack Detail](#3-tech-stack-detail)
+   - 3.1 Android
+   - 3.2 Backend
+   - 3.3 AI Pipeline (Face Detection, Liveness, Embedding, Matching)
+   - 3.4 Student Face Registration Pipeline
+   - 3.5 Verification & Quality Assurance
+   - 3.6 Metrics Collection & Monitoring
 4. [Arsitektur Sistem](#4-arsitektur-sistem)
 5. [Data Model & Database](#5-data-model--database)
 6. [API Endpoints](#6-api-endpoints)
@@ -23,7 +29,9 @@
 14. [UI Screen Map](#14-ui-screen-map)
 15. [Hardware Requirement](#15-hardware-requirement)
 16. [Phase / Milestone Pengembangan](#16-phase--milestone-pengembangan)
-17. [Keputusan Final](#17-keputusan-final)
+17. [Troubleshooting & Debug Guide](#17-troubleshooting--debug-guide)
+18. [Face Recognition Implementation Decisions](#18-face-recognition-implementation-decisions)
+19. [Keputusan Final](#19-keputusan-final)
 
 ---
 
@@ -150,13 +158,14 @@ FaceGateApp/
 | Bahasa | Kotlin | 2.0.x |
 | UI | Jetpack Compose + Material 3 | |
 | Kamera | CameraX | 1.4.x |
-| Face Embedding | TensorFlow Lite (MobileFaceNet 192-d) | |
+| Face Detection | **YOLOv8 Face** (primary) / MediaPipe FaceDetector (fallback) | |
+| Face Embedding | TensorFlow Lite (**MobileFaceNet 192-d**) | |
 | Database Lokal | Room | 2.6.x |
 | Background Sync | WorkManager | 2.9.x |
 | Networking | Retrofit + OkHttp + Kotlinx Serialization | |
 | DI | Hilt | 2.50+ |
 | Coroutines | Kotlinx Coroutines | 1.8.x |
-| Vector Storage | FloatArray di RAM | |
+| Vector Storage | FloatArray di RAM (centroid per student) | |
 | Excel/CSV | Apache POI / OpenCSV | |
 | PDF | iText / Android PDF API | |
 | Min SDK | **Android 12 (API 31)** | |
@@ -178,41 +187,411 @@ FaceGateApp/
 | Hosting | **Home server** — server sendiri di rumah, di-tunnel dengan Cloudflare Tunnel, port dibelokkan via web panel server |
 | Domain | **https://facegate.utc.web.id** — domain yang sudah terhubung ke home server via Cloudflare Tunnel |
 
-### 3.3 AI Pipeline
+### 3.2.1 TensorFlow / TFLite
 
 ```
-[CameraX frame] → [MediaPipe Face Detection] → [MediaPipe Face Landmarks]
-     ↓                                                    ↓
-  Crop face ROI                             468 titik landmark wajah
-     ↓                                                    ↓
-  [Liveness: Eye Aspect Ratio]              [MobileFaceNet Embedding]
-  Hitung EAR dari landmark mata              Ekstrak 192-d vector (MobileFaceNet)
-  Kedipan = EAR turun drastis                      ↓
-     ↓                                       Brute-force match di RAM
-  Jika tidak ada kedipan → tolak             Cosine similarity
-     ↓                                               ↓
-  Lolos liveness                          [Match ≥ threshold 0.6?]
-                                               ↓
-                                        YES → Dapatkan identitas
-                                        NO  → Wajah tidak dikenal
-                                               ↓
-                                        Tentukan aksi toggle:
-                                        Jika sebelumnya "di_kampus" → "keluar"
-                                        Jika sebelumnya "di_luar"   → "kembali"
+TensorFlow: 2.16+ (latest stable)
+TFLite: ensure model compatibility dengan Android 12+ (API 31+)
+
+VALIDATE:
+  - MobileFaceNet .tflite model inference di emulator
+  - Verify output: 192-d float array
+  - Check quantization (FP32? INT8? FP16?)
+    → Recommend FP32 untuk accuracy, INT8 kalau resource ketat
 ```
+
+### 3.3 AI Pipeline
+
+#### 3.3.1 Face Detection & ROI Extraction
+
+**Model**: YOLOv8 Face (primary) / MediaPipe FaceDetector (fallback)
+
+| Komponen | Pilihan 1: YOLOv8 Face | Pilihan 2: MediaPipe |
+|---|---|---|
+| Akurasi deteksi | 98-99% | 95-97% |
+| Bounding box konsistensi | Sangat presisi, tight | Kadang loose |
+| Confidence score reliable | Ya | Kadang tinggi palsu |
+| Multi-face handling | Excellent | Good |
+| Model size (TFLite) | ~6-8 MB | ~350 KB |
+| Recommended | **PILIH INI** | Fallback jika resource ketat |
+
+**Decision**: Gunakan **YOLOv8 Face** untuk production-grade cropping accuracy.
+
+**Quality Checks pada Detection**:
+```
+IF detection.confidence < 0.85:
+    REJECT frame → ask user untuk re-scan
+ELSE:
+    Continue ke ROI extraction
+```
+
+**ROI Extraction & Normalization**:
+```
+1. Dari bounding box YOLOv8, expand 15% (untuk margin)
+2. Crop ke standard size: 112 × 112 pixel (sesuai MobileFaceNet input)
+3. Normalize input: pixel / 255.0 (range [0, 1])
+4. Check image blur/noise (Laplacian variance > threshold 100)
+   IF blur: REJECT
+```
+
+#### 3.3.2 Liveness Detection
+
+**Metode**: Eye Aspect Ratio (EAR) — rule-based dari landmark mata (MediaPipe 468 titik)
+
+**Improvements**:
+```
+1. Require 2+ blinks dalam 3 detik window
+2. Track EAR trend (bukan hanya threshold jump)
+3. Anti-spoofing score: combine EAR + face symmetry check
+4. IF liveness_score < 0.70:
+    REJECT → ask untuk natural blink
+5. IF user take >5 seconds:
+    TIMEOUT → retry from start
+```
+
+#### 3.3.3 Face Embedding Extraction
+
+**Model**: MobileFaceNet 192-d (TFLite)
+
+**Input Requirements**:
+- Size: 112 × 112 pixel
+- Format: float32, normalized [0, 1] (pixel / 255.0)
+- Ensure: ROI harus **tight crop** (bukan ada background)
+
+**Output Processing**:
+```
+1. Raw output: [192] float array
+2. L2 normalize: vector / ||vector||
+3. Quality check:
+   - Norm validation: norm harus ~1.0 (setelah normalize)
+   - Embedding entropy: jangan flat vectors
+   IF norm < 0.1 or entropy too low:
+      REJECT → re-scan
+```
+
+#### 3.3.4 Matching Strategy — Adaptive Threshold
+
+**CRITICAL CHANGE**: Replace fixed 0.6 threshold dengan adaptive gap-based matching.
+
+```
+ALGORITHM: Top-K Ranking + Gap Analysis
+
+Input: scan_embedding (192-d float)
+
+STEP 1: Brute-force similarity
+FOR each student_id in database:
+    stored_embedding = get_centroid_embedding(student_id)
+    score[student_id] = cosine_similarity(scan_embedding, stored_embedding)
+
+STEP 2: Top-3 ranking
+top_3 = sort_descending(score).take(3)
+top_score = top_3[0].score
+runner_up = top_3[1].score  (atau 0 jika hanya ada 1)
+gap = top_score - runner_up
+
+STEP 3: Adaptive decision
+IF top_score >= 0.90 AND gap >= 0.08:
+    CONFIDENCE = 0.98
+    DECISION = "MATCH_CONFIDENT"
+    ACTION = approve_toggle
+    
+ELIF top_score >= 0.85 AND gap >= 0.05:
+    CONFIDENCE = 0.90
+    DECISION = "MATCH_MEDIUM"
+    ACTION = approve_toggle
+    
+ELIF top_score >= 0.80 AND gap >= 0.03:
+    CONFIDENCE = 0.75
+    DECISION = "MATCH_WEAK"
+    ACTION = FLAG_FOR_REVIEW  # Human verification later
+    
+ELSE:
+    CONFIDENCE = 0
+    DECISION = "NO_MATCH"
+    ACTION = reject_scan
+    
+RETURN {
+    matched: bool,
+    student_id: string,
+    top_score: float,
+    gap: float,
+    confidence: float,
+    decision: string
+}
+```
+
+**Tuning Schedule**:
+- Week 1-2 (MVP): Start dengan default thresholds
+- Week 3-4: Measure real FPR/FNR, adjust gap threshold
+- Week 5+: Lock thresholds after <1% FPR/FNR validated
+
+| Fase | top_score >= | gap >= | Action |
+|---|---|---|---|
+| MVP (Week 1-2) | 0.82 | 0.02 | Approve all |
+| Validation (Week 3-4) | 0.85 | 0.04 | Monitor & flag weak |
+| Production (Week 5+) | 0.85-0.90 | 0.04-0.08 | Locked |
+
+**Fallback Options**:
+```
+IF no confident match found:
+  1. Log frame + embedding untuk manual review
+  2. Benarkan dengan face ID confirmation (manual input)
+  3. Update centroid embedding dengan scan result (optional)
+```
+
+**Penjelasan**:
+- Threshold 0.6 → 0.85-0.90 (more realistic)
+- Gap analysis mencegah ambiguity ketika ada 2 orang mirip
+- Confidence score jadi transparent
+- WEAK matches bisa di-flag untuk human review (audit trail)
 
 | Komponen | Model / Metode | Ukuran | Kecepatan |
 |---|---|---|---|
-| Face Detection | **MediaPipe FaceDetector** (via ML Kit CameraX) | ~350 KB | < 5ms |
-| Face Landmarks | **MediaPipe Face Landmarks** (468 titik) | ~0 KB (bundle) | < 2ms |
-| Liveness | **Eye Aspect Ratio (EAR)** — rule-based dari landmark mata | 0 KB | < 2ms |
-| Face Embedding | **MobileFaceNet** .tflite — 192-d vector | ~5 MB | ~15ms |
-| Matching | Brute-force cosine similarity di RAM | 10.000 × 192 = ~7.5 MB | ~3ms |
-| **Total** | | **~9-10 MB** | **~25ms per face** |
+| Face Detection | **YOLOv8 Face** (primary) / MediaPipe (fallback) | ~6-8 MB / ~350 KB | < 5ms |
+| Liveness | **Eye Aspect Ratio (EAR)** — 2+ blinks dalam 3 detik | 0 KB | < 2ms |
+| Face Embedding | **MobileFaceNet** .tflite — 192-d vector, normalized [0,1] | ~5 MB | ~15ms |
+| Matching | Top-K ranking + gap analysis di RAM | 10.000 × 192 = ~7.5 MB | ~30ms |
+| **Total** | | **~13-14 MB** | **~50ms per face** |
 
-- **Threshold**: 0.6 (default, bisa di-tuning)
-- **Anti-spoofing**: Deteksi kedipan via EAR — pengguna harus berkedip alami dalam 3 detik
-- **Target performa**: < 50ms per face (terpenuhi dengan margin lebar)
+- **Threshold**: Adaptive 0.80-0.90 dengan gap analysis (bukan fixed 0.6)
+- **Anti-spoofing**: Deteksi 2+ kedipan via EAR dalam 3 detik
+- **Target performa**: < 100ms per face (termasuk QA checks)
+
+### 3.4 Student Face Registration Pipeline
+
+#### 3.4.1 Registration Flow
+
+```
+USER: Mahasiswa scan wajah (registrasi awal)
+  ↓
+[CameraX video stream — 3-5 detik @ 30fps]
+  ↓
+[Frame extraction: setiap frame]
+  ├─ YOLOv8 detect: confidence < 0.85? → skip frame
+  ├─ Crop ROI + quality check (blur, lighting)
+  ├─ Liveness check: blink? → if no, reject
+  └─ Store 1 embedding per frame
+  ↓
+[Quality validation cluster]
+  ├─ Collect all embeddings dari 5-10 good frames
+  ├─ Compute centroid = mean(embeddings)
+  ├─ Compute consistency = min(cosine_sim(frame_i, centroid))
+  ├─ IF min_consistency < 0.80:
+  │    → Signal: "Registrasi tidak stabil, coba lagi"
+  │    → Ask untuk re-register dalam kondisi lebih stabil
+  └─ IF min_consistency >= 0.80:
+       → Proceed ke save
+  ↓
+[Save to database]
+  ├─ StudentFaceRegistration.centroidEmbedding = centroid
+  ├─ StudentFaceRegistration.allEmbeddings = [all 5-10 frames]
+  ├─ StudentFaceRegistration.consistency = mean consistency
+  ├─ StudentFaceRegistration.sampleCount = 10
+  └─ StudentFaceRegistration.status = "active"
+  ↓
+[Success message]
+  → Show consistency score (transparency)
+  → "Registered dengan 10 samples, quality score: 0.88"
+```
+
+#### 3.4.2 Registration Quality Thresholds
+
+| Metrik | Threshold | Action Jika Gagal |
+|---|---|---|
+| Detection confidence | >= 0.85 | Skip frame, retry |
+| Liveness score | >= 0.70 | Reject, ask blink naturally |
+| Sample count | >= 5 | Need at least 5 good frames |
+| Min consistency | >= 0.80 | Re-register, more stable environment |
+| Blur detection (Laplacian) | >= 100 | Skip, ask for better lighting |
+
+#### 3.4.3 Registration Retry Strategy
+
+```
+Attempt 1: Ask untuk capture video 3-5 detik, normal pose
+  IF fail (min_consistency < 0.80):
+    Attempt 2: Try dengan berbeda pose (left, right, neutral)
+  IF fail again:
+    Attempt 3: Different location (better lighting)
+  IF all fail:
+    Status = "flagged_retrain"
+    Admin review: kemungkinan masalah foto ID atau gesture
+
+Max retries = 3 per student
+```
+
+#### 3.4.4 Incremental Learning (Optional)
+
+```
+AFTER successful scan in production:
+  IF confidence >= 0.90:
+    Alpha = 0.05
+    centroid_new = centroid_old * (1 - alpha) + scan_embedding * alpha
+    Save centroid_new (continuous adaptation)
+  
+  IF confidence < 0.75:
+    Flag untuk manual review (jangan auto-update)
+```
+
+### 3.5 Verification & Quality Assurance
+
+#### 3.5.1 Scan Verification Pipeline
+
+```
+[Kiosk: User scan wajah]
+  ↓
+[YOLOv8 Face Detection]
+  IF confidence < 0.85:
+    → REJECT (not a face or too unclear)
+    → UI: "Wajah tidak terdeteksi, coba lagi"
+  ↓
+[Liveness Check (EAR-based)]
+  IF no blink dalam 3 detik:
+    → REJECT (might be photo)
+    → UI: "Berkedip untuk verifikasi hidup"
+  ↓
+[MobileFaceNet Embedding]
+  Extract 192-d vector dari ROI
+  ↓
+[Matching: Top-K + Gap Analysis]
+  Compute similarity ke semua centroid di database
+  Top-3 ranking + gap check (lihat section 3.3.4)
+  ↓
+[Decision Output]
+  {
+    matched: bool,
+    studentId: string,
+    confidence: float,
+    decision: MATCH_CONFIDENT | MATCH_MEDIUM | MATCH_WEAK | NO_MATCH
+  }
+  ↓
+[Action dispatch]
+  IF decision = MATCH_CONFIDENT:
+    → Allow toggle (keluar/kembali) immediately
+    → Log success
+  
+  ELIF decision = MATCH_MEDIUM:
+    → Allow toggle, pero mark untuk review
+    → Log: "medium confidence"
+  
+  ELIF decision = MATCH_WEAK:
+    → Ask untuk manual confirmation (Show photo + allow/reject)
+    → Log: "weak - manual override"
+  
+  ELSE (NO_MATCH):
+    → REJECT
+    → UI: "Wajah tidak dikenali"
+    → Log failure untuk analytics
+```
+
+#### 3.5.2 Quality Assurance Checks
+
+| Stage | Check | Threshold | Action |
+|---|---|---|---|
+| Detection | Confidence | >= 0.85 | If fail: reject, retry |
+| Liveness | EAR blink | 2+ dalam 3s | If fail: reject, retry |
+| Embedding | Norm validation | 0.9-1.1 | If fail: re-extract |
+| Matching | Top score | >= 0.80 | If fail: no match |
+| Matching | Gap | Based on tier | If fail: check tier down |
+| Confidence | Final score | >= 0.75 | If < 0.75: manual review |
+
+#### 3.5.3 Fallback & Manual Override
+
+```
+IF system cannot decide:
+  1. Show face photo + top 3 candidates
+  2. Admin/guard tap "Accept" atau "Reject"
+  3. Log manual override (audit trail)
+  4. Flag untuk post-analysis (why did system fail?)
+
+IF network down (offline mode):
+  1. Use local centroid embeddings (synced daily)
+  2. Allow matching with stale data
+  3. Queue results untuk sync ketika online
+  4. Mark: "offline_sync_pending"
+```
+
+### 3.6 Metrics Collection & Monitoring
+
+#### 3.6.1 Per-Scan Metrics
+
+Setiap scan log:
+```json
+{
+  "timestamp": "2026-07-21T10:30:45Z",
+  "scannedAt": "2026-07-21T10:30:45Z",
+  "deviceId": "kiosk_001",
+  "detectionConfidence": 0.94,
+  "livenessScore": 0.88,
+  "topSimilarity": 0.89,
+  "gap": 0.06,
+  "confidence": 0.92,
+  "decision": "MATCH_CONFIDENT",
+  "predictedStudentId": "STU-2024-0001",
+  "actualStudentId": "STU-2024-0001",
+  "isCorrect": true,
+  "modelVersion": "mobilefacenet_192d_v1",
+  "responseTime_ms": 145
+}
+```
+
+#### 3.6.2 Daily Aggregation
+
+Setiap hari, hitung:
+
+```
+Total scans: N
+Successful matches: N_match
+Failed matches: N_fail = N - N_match
+Rejected by QA: N_qa
+
+Distribution:
+  MATCH_CONFIDENT: X%
+  MATCH_MEDIUM: Y%
+  MATCH_WEAK: Z%
+  NO_MATCH: W%
+
+Accuracy (after manual review):
+  True positives: TP
+  False positives: FP  (wrong person matched)
+  True negatives: TN
+  False negatives: FN  (right person rejected)
+  
+  FPR = FP / (FP + TN)  [false positive rate]
+  FNR = FN / (FN + TP)  [false negative rate]
+  Accuracy = (TP + TN) / (TP + TN + FP + FN)
+```
+
+#### 3.6.3 Alert Thresholds
+
+```
+IF FPR > 1.0%:
+  → Alert: "High false positive rate"
+  → Action: Review last 100 scans, re-check threshold
+  
+IF FNR > 2.0%:
+  → Alert: "High false negative rate"
+  → Action: Check lighting, camera, rerun registration
+  
+IF median(confidence) < 0.80:
+  → Warning: "Embeddings quality degrading"
+  → Action: Check camera quality, lighting changes
+  
+IF >20% scans = MATCH_WEAK:
+  → Warning: "Too many marginal matches"
+  → Action: Increase threshold, tighten gap requirement
+```
+
+#### 3.6.4 Monitoring Dashboard (Admin App)
+
+```
+Dashboard harus show:
+  • Real-time scan counter
+  • Today's FPR / FNR trends (hourly)
+  • Decision distribution pie chart
+  • Response time histogram
+  • Device health (kiosk online/offline)
+  • Flagged scans untuk manual review
+```
 
 ---
 
@@ -376,6 +755,29 @@ SAAT ADA PERUBAHAN DB:
 - Setiap `createStudent`, `updateStudent`, `deleteStudent`, `uploadFace`, `approvePermit`, `rejectPermit`, `createRule`, `updateRule`, `deleteRule`, `createHoliday`, `deleteHoliday` → otomatis set `syncRequested = true` untuk **semua device aktif**.
 - Kiosk mendeteksi perubahan dalam waktu < 10 detik.
 
+### 4.5 Offline-First Face Matching
+
+```
+At startup (sync):
+  1. :kiosk-scanner download: StudentFaceRegistration.centroidEmbedding x N
+  2. Store di local Room database + FloatArray cache
+  3. Size: 10,000 students × 192 float × 4 bytes = ~7.5 MB
+  4. Cache di RAM untuk fast cosine similarity
+
+At runtime:
+  1. User scan wajah
+  2. Extract embedding (local MobileFaceNet model)
+  3. Matching: Brute-force cosine similarity di RAM (~30ms)
+  4. Decide + toggle
+  5. Log ScanMetric ke local queue
+  
+At sync (nightly atau manual):
+  1. Push queued ScanMetric ke backend
+  2. Backend: compute DailyMetrics, detect anomalies
+  3. Pull updated StudentFaceRegistration (jika ada re-register)
+  4. Merge + update local cache
+```
+
 ---
 
 ## 5. Data Model & Database
@@ -398,7 +800,8 @@ model Student {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  faceVectors   FaceVector[]
+  faceRegistration StudentFaceRegistration?
+  scans            ScanMetric[]
   attendanceLogs AttendanceLog[]
   permits       Permit[]
   violations    Violation[]
@@ -408,14 +811,97 @@ model Student {
   @@map("students")
 }
 
-model FaceVector {
-  studentId String   @id @map("student_id")
-  vector    Unsupported("vector(192)")
-  updatedAt DateTime @updatedAt @map("updated_at")
+model StudentFaceRegistration {
+  id                String       @id @default(uuid())
+  studentId         String       @unique
+  student           Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  // Centroid (mean embedding dari semua samples)
+  centroidEmbedding Unsupported("vector(192)")
+  
+  // All samples untuk flexibility matching (optional tapi recommended)
+  allEmbeddings     String?      // JSON array dari semua 192-d vectors
+  
+  // Quality metrics
+  sampleCount       Int
+  consistency       Float        // Rata-rata similarity dari sample ke centroid (0.0-1.0)
+  minConsistency    Float        // Minimum similarity (early warning jika ada outlier)
+  
+  // Metadata
+  registeredAt      DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  modelVersion      String       // "mobilefacenet_192d_v1"
+  
+  // Lifecycle
+  status            String       @default("active")  // active, flagged_retrain, archived
+  retryCount        Int          @default(0)
+  notes             String?
+  
+  // Audit
+  lastSuccessfulScanAt DateTime?
+  lastFailedScanAt      DateTime?
+  
+  @@index([studentId])
+  @@index([registeredAt])
+  @@map("student_face_registrations")
+}
 
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+model ScanMetric {
+  id                String       @id @default(uuid())
+  timestamp         DateTime     @default(now())
+  
+  // Predicted vs actual
+  predictedStudentId String?
+  actualStudentId    String
+  
+  // Scores
+  topSimilarity     Float
+  gap               Float
+  confidence        Float
+  decision          String       // MATCH_CONFIDENT, MATCH_MEDIUM, MATCH_WEAK, NO_MATCH
+  
+  // Detection quality
+  detectionConfidence Float
+  livenessScore     Float
+  
+  // Metadata
+  scannedAt         DateTime
+  deviceId          String?
+  isCorrect         Boolean?     // Filled after human review (nullable = not yet verified)
+  
+  @@index([timestamp])
+  @@index([actualStudentId])
+  @@index([predictedStudentId])
+  @@index([decision])
+  @@map("scan_metrics")
+}
 
-  @@map("face_vectors")
+model DailyMetrics {
+  id                String       @id @default(uuid())
+  date              DateTime     @unique
+  
+  // Counts
+  totalScans        Int
+  successfulMatches Int
+  failedMatches     Int
+  rejectedByQA      Int
+  
+  // Distribution
+  matchConfidentCount Int
+  matchMediumCount    Int
+  matchWeakCount      Int
+  noMatchCount        Int
+  
+  // Accuracy
+  falsePositiveRate Float
+  falseNegativeRate Float
+  accuracy          Float
+  
+  // Metadata
+  notes             String?
+  
+  @@index([date])
+  @@map("daily_metrics")
 }
 
 model Admin {
@@ -709,13 +1195,31 @@ model Notification {
 
 ```kotlin
 data class FaceIndex(
-    val embeddings: Map<String, FloatArray>,  // studentId → vector
+    val centroids: Map<String, FloatArray>,  // studentId → centroid embedding (192-d)
     val studentMap: Map<String, StudentBrief>
 )
 
 data class StudentBrief(
     val id: String, val nim: String, val name: String
 )
+
+// Match result dari adaptive threshold algorithm
+data class MatchResult(
+    val matched: Boolean,
+    val studentId: String?,
+    val topScore: Float,
+    val runnerUpScore: Float,
+    val gap: Float,
+    val confidence: Float,
+    val decision: MatchDecision
+)
+
+enum class MatchDecision {
+    MATCH_CONFIDENT,  // score >= 0.90, gap >= 0.08 → auto approve
+    MATCH_MEDIUM,     // score >= 0.85, gap >= 0.05 → approve + mark review
+    MATCH_WEAK,       // score >= 0.80, gap >= 0.03 → manual confirmation
+    NO_MATCH          // below thresholds → reject
+}
 
 // State toggle per mahasiswa hari ini
 data class ToggleState(
@@ -726,6 +1230,20 @@ data class ToggleState(
 )
 
 enum class State { DI_KAMPUS, DI_LUAR }
+
+// Scan metric untuk logging ke backend
+data class ScanMetricLog(
+    val timestamp: Long,
+    val deviceId: String,
+    val detectionConfidence: Float,
+    val livenessScore: Float,
+    val topSimilarity: Float,
+    val gap: Float,
+    val confidence: Float,
+    val decision: String,
+    val predictedStudentId: String?,
+    val responseTimeMs: Long
+)
 ```
 
 ---
@@ -1294,14 +1812,18 @@ core/src/main/kotlin/.../core/
 │   ├── DatabaseModule.kt
 │   └── FaceModule.kt
 ├── face/
-│   ├── FaceDetector.kt
-│   ├── FaceEmbedder.kt
-│   ├── FaceMatcher.kt
-│   ├── LivenessDetector.kt
-│   └── FaceIndex.kt
+│   ├── FaceDetector.kt          # YOLOv8 Face (primary) + MediaPipe (fallback)
+│   ├── FaceEmbedder.kt          # MobileFaceNet 192-d, pixel/255.0 normalization
+│   ├── FaceMatcher.kt           # Adaptive threshold: Top-K + gap analysis
+│   ├── LivenessDetector.kt      # EAR-based: 2+ blinks in 3s window
+│   ├── FaceIndex.kt             # In-memory centroid cache
+│   └── QualityChecker.kt        # Blur detection, norm validation, embedding entropy
 ├── database/
 │   ├── AppDatabase.kt
 │   ├── entity/
+│   │   ├── StudentFaceRegistrationEntity.kt
+│   │   ├── ScanMetricEntity.kt
+│   │   └── DailyMetricsEntity.kt
 │   ├── dao/
 │   └── converter/
 ├── network/
@@ -1310,17 +1832,24 @@ core/src/main/kotlin/.../core/
 │   ├── dto/
 │   └── interceptor/
 ├── sync/
-│   ├── FaceSyncWorker.kt
-│   ├── AttendanceSyncWorker.kt
-│   ├── SyncPoller.kt         # Polling sync request
+│   ├── FaceSyncWorker.kt        # Sync centroid embeddings
+│   ├── AttendanceSyncWorker.kt  # Upload queued ScanMetrics
+│   ├── ScanMetricSyncWorker.kt  # Push ScanMetric ke backend
+│   ├── SyncPoller.kt            # Polling sync request
 │   └── SyncManager.kt
+├── metrics/
+│   ├── ScanMetricsCollector.kt  # Collect per-scan metrics
+│   ├── DailyMetricsAggregator.kt # Aggregate FPR/FNR/accuracy
+│   └── AlertMonitor.kt          # Threshold alerts (FPR > 1%, FNR > 2%)
 └── model/
     ├── Student.kt
     ├── AttendanceLog.kt
     ├── Permit.kt
     ├── CampusRule.kt
     ├── Violation.kt
-    └── CourseSchedule.kt
+    ├── CourseSchedule.kt
+    ├── MatchResult.kt           # Adaptive match result
+    └── ScanMetricLog.kt         # Per-scan metric log
 ```
 
 ### 13.2 `:kiosk-scanner`
@@ -1333,19 +1862,26 @@ kiosk-scanner/src/main/kotlin/.../scanner/
 │   ├── CameraManager.kt
 │   ├── FrameAnalyzer.kt
 │   └── PreviewView.kt
+├── registration/
+│   ├── RegistrationEngine.kt    # Multi-frame capture + centroid computation
+│   ├── QualityValidator.kt      # Blur, lighting, detection confidence checks
+│   └── RegistrationScreen.kt    # UI: video capture + quality score + retry
 ├── matching/
-│   ├── MatchEngine.kt
-│   └── MatchResult.kt
+│   ├── MatchEngine.kt           # Adaptive threshold: Top-K + gap analysis
+│   └── MatchResult.kt           # MatchDecision enum + scores
 ├── toggle/
-│   ├── ToggleEngine.kt        # Logic determine keluar/kembali
-│   ├── ToggleState.kt         # State management per-student
-│   └── SessionTracker.kt      # Track durasi di luar
+│   ├── ToggleEngine.kt          # Logic determine keluar/kembali
+│   ├── ToggleState.kt           # State management per-student
+│   └── SessionTracker.kt        # Track durasi di luar
 ├── rule/
 │   ├── RuleChecker.kt
 │   └── RuleCache.kt
+├── metrics/
+│   └── ScanMetricsCollector.kt  # Collect per-scan metrics ke local queue
 ├── ui/
 │   ├── ScannerScreen.kt
-│   ├── ResultOverlay.kt
+│   ├── RegistrationScreen.kt    # Registration UI
+│   ├── ResultOverlay.kt         # Updated: shows MATCH_CONFIDENT/MEDIUM/WEAK/NO_MATCH
 │   └── StatusBar.kt
 └── service/
     └── KioskForegroundService.kt
@@ -1411,6 +1947,11 @@ admin-app/src/main/kotlin/.../admin/
 ├── notification/
 │   ├── NotificationScreen.kt
 │   └── NotificationViewModel.kt
+├── metrics/                              # Scan metrics & monitoring
+│   ├── ScanMetricsScreen.kt             # Decision distribution, FPR/FNR, response time
+│   ├── ScanMetricsViewModel.kt
+│   ├── MatchReviewScreen.kt             # Review MATCH_WEAK scans + manual override
+│   └── MatchReviewViewModel.kt
 └── import/
     ├── ImportScreen.kt
     └── ImportViewModel.kt
@@ -1425,18 +1966,19 @@ admin-app/src/main/kotlin/.../admin/
 | Screen | Deskripsi |
 |---|---|
 | `ScannerScreen` | Fullscreen kamera, auto-scan. Tidak ada tombol. Indikator: jam, status koneksi, mode kiosk. |
-| `ResultOverlay` | Animasi hasil. Hijau = scan sukses + nama mahasiswa + aksi (keluar/kembali). Merah = tidak dikenal. Kuning = violation warning. |
+| `RegistrationScreen` | Video capture 3-5 detik + quality check (blur, lighting) + centroid computation + consistency score display. |
+| `ResultOverlay` | Animasi hasil. Hijau = scan sukses (MATCH_CONFIDENT) + nama mahasiswa + aksi (keluar/kembali). Kuning = MATCH_MEDIUM (approved, flagged for review). Orange = MATCH_WEAK (manual confirmation). Merah = tidak dikenal (NO_MATCH). |
 
 ### 14.2 Admin App
 
 | Screen | Deskripsi |
 |---|---|
 | `LoginScreen` | Username + password |
-| `DashboardScreen` | Card stats: di kampus, di luar, izin aktif, violation hari ini + recent scan feed |
+| `DashboardScreen` | Card stats: di kampus, di luar, izin aktif, violation hari ini + recent scan feed + **real-time scan counter + FPR/FNR trends** |
 | `StudentListScreen` | Search + filter prodi/angkatan |
-| `StudentDetailScreen` | Data + status toggle + history scan + violation |
+| `StudentDetailScreen` | Data + status toggle + history scan + violation + **registration quality (consistency, sample count, model version)** |
 | `StudentFormScreen` | Tambah/edit |
-| `FaceRegisterScreen` | Kamera + panduan oval |
+| `FaceRegisterScreen` | Kamera + panduan oval + **quality check (blur, lighting, detection confidence) + retry strategy** |
 | `PermitListScreen` | Tab: Izin Harian, Pengajuan, All |
 | `PermitFormScreen` | Pilih jenis (harian/pengajuan), pilih mahasiswa, tanggal, jam, alasan, lampiran |
 | `PendingApprovalScreen` | List pengajuan izin yang pending + tombol approve/reject |
@@ -1453,6 +1995,8 @@ admin-app/src/main/kotlin/.../admin/
 | `DeviceListScreen` | Daftar kiosk + status |
 | `NotificationScreen` | Notifikasi violation, sync done, dll |
 | `ImportScreen` | Import CSV/Excel mahasiswa |
+| **`ScanMetricsScreen`** | **Decision distribution pie chart + response time histogram + flagged scans untuk manual review** |
+| **`MatchReviewScreen`** | **Review MATCH_WEAK scans: show face photo + top 3 candidates + accept/reject manual override** |
 
 ---
 
@@ -1500,22 +2044,66 @@ Cahaya dari depan (searah mahasiswa)
 
 ### Phase 1: Foundation + Core Pipeline
 
-**Tujuan**: Backend + Kiosk bisa scan toggle end-to-end offline.
+**Tujuan**: Backend + Kiosk bisa scan toggle end-to-end offline dengan production-grade face recognition.
+
+#### Week 1: Core Foundation
+- [ ] Setup monorepo + Gradle + version catalog
+- [ ] Setup backend (Bun + Prisma + PostgreSQL + pgvector + Docker)
+- [ ] Database schema + migration + seed (termasuk StudentFaceRegistration, ScanMetric, DailyMetrics)
+- [ ] API: CRUD students, attendance scan, sync, rules
+- [ ] `:core` — Room database + TypeConverters
+- [ ] `:core` — TFLite MobileFaceNet loader (192-d)
+- [ ] `:core` — YOLOv8 Face detector (primary) + MediaPipe (fallback)
+- [ ] `:core` — Cosine similarity matcher dengan adaptive threshold
+- [ ] Test dengan synthetic data
+
+#### Week 2: Registration + Verification Pipeline
+- [ ] `:core` — Network layer (Retrofit)
+- [ ] `:kiosk-scanner` — CameraX + frame analyzer
+- [ ] `:kiosk-scanner` — Registration screen (video capture + quality check + centroid computation)
+- [ ] `:kiosk-scanner` — Verification screen (scan + matching + Top-K + gap analysis + UI)
+- [ ] `:kiosk-scanner` — Toggle engine (keluar/kembali)
+- [ ] `:kiosk-scanner` — Metrics collection + local queue
+- [ ] `:kiosk-scanner` — Sync (midnight + polling sync request + push ScanMetric)
+- [ ] Backend: POST /scans endpoint (save ScanMetric)
+- [ ] Test dengan 10-20 volunteer scans
+- [ ] Measure: detection rate, liveness rate, end-to-end latency
+
+#### Week 3: Validation & Tuning
+- [ ] Expand test: 50-100 volunteer registrations
+- [ ] Collect raw FPR/FNR data
+- [ ] Analyze confidence distribution
+- [ ] Adjust thresholds berdasarkan data
+- [ ] Document results (spreadsheet: date, FPR, FNR, threshold_config)
+
+#### Week 4: Soft Launch Prep
+- [ ] Re-test dengan updated thresholds
+- [ ] Validate: FPR < 1%, FNR < 2%
+- [ ] Quality review: inspect MATCH_WEAK cases
+- [ ] Decide: threshold lock or keep tuning
+- [ ] Sign-off: ready untuk 1 kiosk production
+
+**Total Phase 1**: ~4 minggu (28 hari)
 
 | Task | Estimasi |
 |---|---|
 | Setup monorepo + Gradle + version catalog | 1 hari |
 | Setup backend (Bun + Prisma + PostgreSQL + pgvector + Docker) | 2 hari |
 | Database schema + migration + seed | 1 hari |
-| API: CRUD students, attendance scan, sync, rules | 2 hari |
+| API: CRUD students, attendance scan, sync, rules, scans | 3 hari |
 | `:core` — Room database + TypeConverters | 1 hari |
-| `:core` — TFLite face embedder + liveness | 2 hari |
+| `:core` — TFLite face embedder (MobileFaceNet 192-d) + YOLOv8 Face detector | 3 hari |
+| `:core` — Cosine similarity matcher + adaptive threshold | 2 hari |
 | `:core` — Network layer (Retrofit) | 1 hari |
 | `:kiosk-scanner` — CameraX + frame analyzer | 2 hari |
-| `:kiosk-scanner` — Face matching engine | 2 hari |
+| `:kiosk-scanner` — Registration screen + centroid computation | 2 hari |
+| `:kiosk-scanner` — Verification screen + Top-K matching + gap analysis | 3 hari |
 | `:kiosk-scanner` — Toggle engine (keluar/kembali) | 1 hari |
-| `:kiosk-scanner` — Sync (midnight + polling sync request) | 1 hari |
-| **Total Phase 1** | **~16 hari** |
+| `:kiosk-scanner` — Metrics collection + local queue | 1 hari |
+| `:kiosk-scanner` — Sync (midnight + polling + push ScanMetric) | 2 hari |
+| Validation & tuning (50-100 volunteers, FPR/FNR measurement) | 4 hari |
+| Soft launch prep + threshold lock | 2 hari |
+| **Total Phase 1** | **~32 hari** |
 
 ### Phase 2: Admin App + Izin
 
@@ -1569,31 +2157,130 @@ Cahaya dari depan (searah mahasiswa)
 
 ---
 
-## 17. Keputusan Final
+## 17. Troubleshooting & Debug Guide
 
-| No | Pertanyaan | Keputusan |
-|---|---|---|
-| 1 | Model Face Detection | ✅ **MediaPipe FaceDetector** |
-| 2 | Model Face Embedding | ✅ **MobileFaceNet 192-d** |
-| 3 | Liveness Detection | ✅ **Eye Aspect Ratio (EAR)** — rule-based, 0 KB |
-| 4 | Backend Framework | ✅ **Elysia** (Bun-native) |
-| 5 | CSV Import Format | ✅ NIM, Nama, Prodi, Angkatan, No HP, Email |
-| 6 | Jadwal Kuliah Format | ✅ NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang, Dosen |
-| 7 | Dashboard Web | ✅ **Skip dulu** — fokus ke Admin App dulu |
-| 8 | Multiple Kiosk | ✅ **Langsung multi-gerbang** dari awal |
-| 9 | Emergency Mode | ✅ **Skip** — tidak perlu untuk sekarang |
-| 10 | Domain | ✅ **facegate.utc.web.id** — Cloudflare Tunnel dari home server |
-| 11 | Backend Port | ✅ **8150** — dibelokkan via web panel server |
-| 12 | Hosting | ✅ **Docker** di home server + Cloudflare Tunnel |
-| 13 | Kursus Kuliah | ✅ **Per Mahasiswa** — ada relasi studentId |
-| 14 | FaceVector | ✅ **1:1 (studentId PK)** — satu mahasiswa satu vector, paling efektif untuk brute-force matching |
-| 15 | Jam Operasional | ✅ **TOLAK** scan di luar jam operasional (baik sebelum start maupun setelah end) |
-| 16 | Violation Auto-Resolve | ✅ **Semua tipe** violation auto-resolved saat mahasiswa kembali |
-| 17 | Libur Nasional | ✅ **Input manual admin** — model Holiday, saat libur semua aturan skip |
-| 18 | Kuota Izin | ✅ **Per bulan kalender** (reset tiap tanggal 1), bukan rolling 30 hari |
+### Common Issues & Resolution
+
+#### Issue 1: High FPR (False Positives)
+
+```
+Symptom: Wrong student matched (e.g., STU-001 scanned, STU-002 matched)
+
+Debugging:
+  1. Check similarity distribution:
+     SELECT decision, topSimilarity, gap FROM ScanMetric
+     WHERE isCorrect = false AND predictedStudentId != actualStudentId
+  2. Look for FP cases: top_score >= 0.85, but gap < 0.05
+  3. Root cause: two very similar faces (twins? relatives?)
+  
+Solution:
+  • Increase gap threshold: 0.05 → 0.08
+  • OR increase top_score requirement: 0.85 → 0.90
+  • Manual override untuk problem pairs
+```
+
+#### Issue 2: High FNR (False Negatives)
+
+```
+Symptom: Registered student rejected (should match, but decision=NO_MATCH)
+
+Debugging:
+  1. Check: topSimilarity < 0.80 untuk rejected scans
+  2. Possible causes:
+     a) Registration was poor (low consistency)
+     b) Lighting different between registration & scan
+     c) Significant pose variation
+  
+Solution:
+  • Re-register problematic students (new centroid)
+  • Adjust kiosk lighting
+  • Lower threshold temporarily: 0.85 → 0.80 (aber monitor FPR)
+```
+
+#### Issue 3: Liveness Detection Fails
+
+```
+Symptom: Users can't pass liveness check (need multiple retries)
+
+Debugging:
+  1. Check: livenessScore < 0.70 di rejected scans
+  2. Possible causes:
+     a) Dim lighting (EAR detection unreliable)
+     b) Glasses/sunglasses (landmark occlusion)
+     c) User not blinking naturally
+  
+Solution:
+  • Increase kiosk lighting (add LED ring light)
+  • Relax EAR threshold slightly: 0.70 → 0.65
+  • Add user guidance: "Berkedip secara alami, jangan dilebih-lebihkan"
+```
+
+#### Issue 4: Model Quality Degradation
+
+```
+Symptom: Median(confidence) dropped, FPR trending up
+
+Debugging:
+  1. Check if camera hardware changed (e.g., replacement)
+  2. Check if model quantization mismatch (FP32 vs INT8)
+  3. Check if centroid embeddings became stale
+  
+Solution:
+  • Verify camera specs (resolution, lens quality)
+  • Re-export TFLite model dari training environment
+  • Re-register all students (force refresh centroids)
+```
 
 ---
 
-> **Status**: ✅ Planning selesai — sudah sinkron dengan implementasi.
-> **Fase saat ini**: Phase 1-4 selesai (kerangka). Pipeline face recognition masih stub, perlu diselesaikan.
-> **Next step**: Implementasi FaceDetector (MediaPipe) + LivenessDetector (EAR) + CameraX + bundling model TFLite.
+## 18. Face Recognition Implementation Decisions
+
+| No | Keputusan | Pilihan | Alasan | Trade-off |
+|---|---|---|---|---|
+| 1 | Embedding dimension | 192-d (MobileFaceNet) | Resource efficient, mobile-friendly | Accuracy 96-97%, bukan 99.8%+ |
+| 2 | Face detection | YOLOv8 Face (primary) MediaPipe (fallback) | Better bounding box consistency | +6-8 MB model size |
+| 3 | Threshold matching | Adaptive gap-based (0.80-0.90) | Prevents ambiguity, transparent confidence | Require frequent tuning week 1-2 |
+| 4 | Registration samples | 5-10 frames per student | Robust centroid, consistency check | Longer registration time (5-10s) |
+| 5 | Liveness detection | EAR (eye blink) only | Fast, rule-based, no ML overhead | Vulnerable ke advanced spoofing (rare) |
+| 6 | Matching strategy | Top-K ranking + gap analysis | Production standard, auditable | Higher latency (~30ms vs ~10ms brute-force) |
+| 7 | Metrics collection | Full ScanMetric logging | Audit trail, FPR/FNR tracking | +1-2 MB database per 1000 scans |
+| 8 | Incremental learning | Alpha=0.05 untuk high confidence scans | Adapt ke penampilan changes | Risk: drift jika confidence score miscalibrated |
+| 9 | Offline matching | Local centroid embeddings + daily sync | Kiosk survive network outage | Stale data jika student re-register |
+| 10 | Fallback: no match | Manual admin review + override | Prevent false rejection, audit trail | UX interruption for borderline cases |
+
+---
+
+## 19. Keputusan Final
+
+| No | Pertanyaan | Keputusan |
+|---|---|---|
+| 1 | Model Face Detection | ✅ **YOLOv8 Face** (primary) — MediaPipe FaceDetector sebagai fallback |
+| 2 | Model Face Embedding | ✅ **MobileFaceNet 192-d** — TFLite, normalized [0,1] (pixel/255.0) |
+| 3 | Liveness Detection | ✅ **Eye Aspect Ratio (EAR)** — 2+ blinks dalam 3 detik, rule-based |
+| 4 | Matching Strategy | ✅ **Adaptive gap-based** — Top-K ranking + gap analysis (0.80-0.90 threshold) |
+| 5 | Registration | ✅ **Multi-sample centroid** — 5-10 frames per student, consistency >= 0.80 |
+| 6 | Face Storage | ✅ **StudentFaceRegistration** — centroid + all embeddings + quality metrics |
+| 7 | Metrics | ✅ **Full ScanMetric logging** — FPR/FNR tracking, DailyMetrics aggregation |
+| 8 | Backend Framework | ✅ **Elysia** (Bun-native) |
+| 9 | CSV Import Format | ✅ NIM, Nama, Prodi, Angkatan, No HP, Email |
+| 10 | Jadwal Kuliah Format | ✅ NIM, Matkul, Hari, Jam Mulai, Jam Selesai, Ruang, Dosen |
+| 11 | Dashboard Web | ✅ **Skip dulu** — fokus ke Admin App dulu |
+| 12 | Multiple Kiosk | ✅ **Langsung multi-gerbang** dari awal |
+| 13 | Emergency Mode | ✅ **Skip** — tidak perlu untuk sekarang |
+| 14 | Domain | ✅ **facegate.utc.web.id** — Cloudflare Tunnel dari home server |
+| 15 | Backend Port | ✅ **8150** — dibelokkan via web panel server |
+| 16 | Hosting | ✅ **Docker** di home server + Cloudflare Tunnel |
+| 17 | Kursus Kuliah | ✅ **Per Mahasiswa** — ada relasi studentId |
+| 18 | Jam Operasional | ✅ **TOLAK** scan di luar jam operasional (baik sebelum start maupun setelah end) |
+| 19 | Violation Auto-Resolve | ✅ **Semua tipe** violation auto-resolved saat mahasiswa kembali |
+| 20 | Libur Nasional | ✅ **Input manual admin** — model Holiday, saat libur semua aturan skip |
+| 21 | Kuota Izin | ✅ **Per bulan kalender** (reset tiap tanggal 1), bukan rolling 30 hari |
+| 22 | Incremental Learning | ✅ **Alpha=0.05** untuk high confidence scans (>= 0.90), adaptasi penampilan |
+| 23 | Offline Matching | ✅ **Local centroid embeddings** + daily sync — kiosk survive network outage |
+| 24 | Fallback: No Match | ✅ **Manual admin review** + override — prevent false rejection |
+
+---
+
+> **Status**: ✅ Planning selesai — sudah sinkron dengan implementasi production-grade face recognition.
+> **Fase saat ini**: Phase 1 (Foundation + Core Pipeline) — focus ke validation FPR/FNR dengan 50-100 volunteers.
+> **Next step**: Implementasi YOLOv8 Face detector + adaptive threshold matching + registration pipeline + metrics collection.
