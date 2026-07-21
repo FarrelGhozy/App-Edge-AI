@@ -383,8 +383,8 @@ USER: Mahasiswa scan wajah (registrasi awal)
        → Proceed ke save
   ↓
 [Save to database]
-  ├─ StudentFaceRegistration.centroidEmbedding = centroid
-  ├─ StudentFaceRegistration.allEmbeddings = [all 5-10 frames]
+  ├─ StudentFaceRegistration.centroidEmbedding = centroid  ← UNTUK MATCHING
+  ├─ StudentFaceRegistration.allEmbeddings = [all 5-10 frames]  ← DEBUGGING ONLY (bukan untuk matching)
   ├─ StudentFaceRegistration.consistency = mean consistency
   ├─ StudentFaceRegistration.sampleCount = 10
   └─ StudentFaceRegistration.status = "active"
@@ -421,8 +421,11 @@ Max retries = 3 per student
 
 #### 3.4.4 Incremental Learning (Optional)
 
+**PENTING**: Incremental learning HANYA dilakukan di **server** (bukan di kiosk lokal).
+Kiosk kirim scan_embedding + confidence via ScanMetric sync. Server yang compute centroid_new secara terpusat (single source of truth). Ini mencegah race condition saat ada 2+ kiosk offline yang update centroid yang sama.
+
 ```
-AFTER successful scan in production:
+SERVER-SIDE (saat process ScanMetric sync):
   IF confidence >= 0.90:
     Alpha = 0.05
     centroid_new = centroid_old * (1 - alpha) + scan_embedding * alpha
@@ -820,7 +823,7 @@ model StudentFaceRegistration {
   centroidEmbedding Unsupported("vector(192)")
   
   // All samples untuk flexibility matching (optional tapi recommended)
-  allEmbeddings     String?      // JSON array dari semua 192-d vectors
+  allEmbeddings     String?      // JSON array dari semua 192-d vectors — HANYA untuk debugging/audit (bukan untuk matching)
   
   // Quality metrics
   sampleCount       Int
@@ -851,8 +854,11 @@ model ScanMetric {
   timestamp         DateTime     @default(now())
   
   // Predicted vs actual
+  // Flow: saat scan, actualStudentId = predictedStudentId (asumsi benar), isCorrect = null
+  //       kalau decision = MATCH_WEAK → masuk MatchReviewScreen → admin correct manual
+  //       untuk MATCH_CONFIDENT/MEDIUM → asumsikan benar KECUALI ada komplain/audit manual
   predictedStudentId String?
-  actualStudentId    String
+  actualStudentId    String?      // nullable — diisi belakangan saat review/audit
   
   // Scores
   topSimilarity     Float
@@ -868,6 +874,7 @@ model ScanMetric {
   scannedAt         DateTime
   deviceId          String?
   isCorrect         Boolean?     // Filled after human review (nullable = not yet verified)
+  verifiedAt        DateTime?    // kapan di-verify manual (isi saat admin review)
   
   @@index([timestamp])
   @@index([actualStudentId])
@@ -1374,14 +1381,23 @@ data class ScanMetricLog(
 | DELETE | `/api/holidays/:id` | Hapus hari libur |
 | GET | `/api/holidays/today` | Cek apakah hari ini libur |
 
-### 6.14 Audit & Notifikasi
+### 6.14 Scan Metrics & Monitoring
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| POST | `/api/sync/scan-metrics` | Upload batch ScanMetric dari kiosk |
+| GET | `/api/scan-metrics?decision=MATCH_WEAK` | List scan yang perlu review manual |
+| PATCH | `/api/scan-metrics/:id/review` | Admin correct actualStudentId + isCorrect |
+| GET | `/api/metrics/daily?from=&to=` | DailyMetrics untuk dashboard FPR/FNR |
+| GET | `/api/metrics/today` | Real-time counter buat ScanMetricsScreen |
+
+### 6.15 Audit & Notifikasi
 | Method | Endpoint |
 |---|---|
 | GET | `/api/audit` |
 | GET | `/api/notifications` |
 | PUT | `/api/notifications/:id/read` |
 
-### 6.15 Realtime Events (SSE)
+### 6.16 Realtime Events (SSE)
 | Method | Endpoint | Deskripsi |
 |---|---|---|
 | GET | `/api/events/stream` | SSE stream — admin terima event realtime |
