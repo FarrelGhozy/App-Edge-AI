@@ -159,6 +159,10 @@ class KioskInitializer @Inject constructor(
         SyncWorker.scheduleMidnight(context)
         SyncWorker.schedulePolling(context)
         DevicePingWorker.schedule(context)
-        Log.d(TAG, "Workers scheduled")
+
+        // Start foreground service to prevent Android from killing the kiosk
+        KioskForegroundService.start(context)
+
+        Log.d(TAG, "Workers scheduled + foreground service started")
     }
 }

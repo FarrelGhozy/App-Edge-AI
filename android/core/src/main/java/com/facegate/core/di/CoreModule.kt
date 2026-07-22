@@ -18,6 +18,7 @@ import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiClient
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.AuthInterceptor
+import com.facegate.core.data.remote.SseClient
 import com.facegate.core.face.AntiSpoofDetector
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
@@ -90,6 +91,15 @@ object CoreModule {
         @ApiBaseUrl baseUrl: String
     ): ApiService {
         return ApiClient.create(baseUrl, authInterceptor)
+    }
+
+    @Provides
+    @Singleton
+    fun provideSseClient(
+        authInterceptor: AuthInterceptor,
+        @ApiBaseUrl baseUrl: String
+    ): SseClient {
+        return SseClient(baseUrl, authInterceptor)
     }
 
     @Provides
