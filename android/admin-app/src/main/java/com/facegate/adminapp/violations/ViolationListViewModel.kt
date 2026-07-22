@@ -25,7 +25,8 @@ data class ViolationListState(
     val hasMore: Boolean = false,
     val isLoadingMore: Boolean = false,
     val page: Int = 1,
-    val error: String? = null
+    val error: String? = null,
+    val searchQuery: String = ""
 )
 
 @HiltViewModel
@@ -85,5 +86,9 @@ class ViolationListViewModel @Inject constructor(
         val nextPage = _uiState.value.page + 1
         _uiState.value = _uiState.value.copy(isLoadingMore = true)
         load(page = nextPage)
+    }
+
+    fun updateSearch(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
     }
 }

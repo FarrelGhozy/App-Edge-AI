@@ -18,6 +18,7 @@ import com.facegate.kioskscanner.sync.SyncWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,10 +40,12 @@ class KioskInitializer @Inject constructor(
         private const val TAG = "KioskInitializer"
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var scope: CoroutineScope? = null
 
     fun initialize(context: android.content.Context) {
-        scope.launch {
+        if (scope != null) return // already initialized
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope!!.launch {
             try {
                 initFaceDetector()
                 initFaceEmbedder()
@@ -164,5 +167,11 @@ class KioskInitializer @Inject constructor(
         KioskForegroundService.start(context)
 
         Log.d(TAG, "Workers scheduled + foreground service started")
+    }
+
+    /** Cancel all coroutines. Call when stopping kiosk service. */
+    fun cancel() {
+        scope?.cancel()
+        scope = null
     }
 }

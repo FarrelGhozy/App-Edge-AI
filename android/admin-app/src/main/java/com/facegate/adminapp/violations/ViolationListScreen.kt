@@ -66,7 +66,51 @@ fun ViolationListScreen(
                     LazyColumn(
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        items(state.violations) { v ->
+                        // Search box
+                        item {
+                            OutlinedTextField(
+                                value = state.searchQuery,
+                                onValueChange = { viewModel.updateSearch(it) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                placeholder = { Text("Cari nama santri...") },
+                                leadingIcon = { Icon(Icons.Default.Search, "Search") },
+                                trailingIcon = if (state.searchQuery.isNotEmpty()) {
+                                    {
+                                        IconButton(onClick = { viewModel.updateSearch("") }) {
+                                            Icon(Icons.Default.Close, "Hapus")
+                                        }
+                                    }
+                                } else null,
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+
+                        val filteredViolations = if (state.searchQuery.isBlank()) state.violations
+                        else state.violations.filter {
+                            it.studentName.contains(state.searchQuery, ignoreCase = true)
+                        }
+
+                        if (filteredViolations.isEmpty() && state.searchQuery.isNotBlank()) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "Tidak ditemukan \"${state.searchQuery}\"",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        items(filteredViolations) { v ->
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()

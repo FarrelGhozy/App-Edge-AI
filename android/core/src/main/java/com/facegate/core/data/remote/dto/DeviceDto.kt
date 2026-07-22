@@ -24,3 +24,9 @@ data class DeviceRegisterRequest(
 data class DevicePingRequest(
     @SerialName("batteryLevel") val batteryLevel: Double? = null
 )
+
+@Serializable
+data class SingleDeviceResponse(
+    val success: Boolean,
+    val data: DeviceDto? = null
+)

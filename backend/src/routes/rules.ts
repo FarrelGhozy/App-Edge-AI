@@ -8,6 +8,16 @@ export const ruleRoutes = new Elysia()
   .get("/api/rules", async () => {
     return await listRules();
   })
+  .get("/api/rules/:id", async ({ params: { id } }) => {
+    const rule = await prisma.campusRule.findUnique({ where: { id } });
+    if (!rule) {
+      return new Response(JSON.stringify({ success: false, error: "Rule not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return { success: true, data: rule };
+  })
   .post("/api/rules", async ({ body }) => {
     const data = body as {
       dayOfWeek: number;

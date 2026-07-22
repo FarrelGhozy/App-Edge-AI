@@ -24,3 +24,9 @@ data class CampusRuleDto(
     @SerialName("updatedAt")
     val updatedAt: String? = null
 )
+
+@Serializable
+data class RuleResponse(
+    val success: Boolean,
+    val data: CampusRuleDto? = null
+)

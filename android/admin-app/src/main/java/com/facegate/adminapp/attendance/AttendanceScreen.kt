@@ -58,6 +58,10 @@ fun AttendanceScreen(
         ) {
             when {
                 state.isLoading && state.logs.isEmpty() -> LoadingState()
+                state.error != null && state.logs.isEmpty() -> ErrorState(
+                    message = state.error!!,
+                    onRetry = { viewModel.loadLogs() }
+                )
                 state.logs.isEmpty() -> EmptyState(
                     icon = Icons.Default.Fingerprint,
                     title = "Belum ada data absensi",

@@ -29,14 +29,14 @@ class DeviceDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = DeviceDetailState(isLoading = true)
             try {
-                val response = apiService.getDevices()
-                if (response.isSuccessful && response.body() != null) {
-                    val device = response.body()!!.find { it.deviceId == deviceId }
+                val response = apiService.getDevice(deviceId)
+                if (response.isSuccessful && response.body()?.data != null) {
                     _uiState.value = DeviceDetailState(
-                        device = device,
-                        isLoading = false,
-                        error = if (device == null) "Device tidak ditemukan" else null
+                        device = response.body()!!.data,
+                        isLoading = false
                     )
+                } else if (response.code() == 404) {
+                    _uiState.value = DeviceDetailState(error = "Device tidak ditemukan")
                 } else {
                     _uiState.value = DeviceDetailState(error = "Gagal memuat data device")
                 }

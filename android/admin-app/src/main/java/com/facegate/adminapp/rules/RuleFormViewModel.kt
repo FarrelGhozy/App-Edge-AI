@@ -34,21 +34,19 @@ class RuleFormViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(error = null)
             try {
-                val response = apiService.getRules()
-                if (response.isSuccessful && response.body() != null) {
-                    val rule = response.body()!!.find { it.id == ruleId }
-                    if (rule != null) {
-                        _uiState.value = RuleFormState(
-                            dayOfWeek = rule.dayOfWeek,
-                            startTime = rule.startTime,
-                            endTime = rule.endTime,
-                            isRestricted = rule.isRestricted,
-                            studyProgram = rule.studyProgram ?: "",
-                            academicYear = rule.academicYear ?: ""
-                        )
-                    } else {
-                        _uiState.value = _uiState.value.copy(error = "Aturan tidak ditemukan")
-                    }
+                val response = apiService.getRule(ruleId)
+                if (response.isSuccessful && response.body()?.data != null) {
+                    val rule = response.body()!!.data!!
+                    _uiState.value = RuleFormState(
+                        dayOfWeek = rule.dayOfWeek,
+                        startTime = rule.startTime,
+                        endTime = rule.endTime,
+                        isRestricted = rule.isRestricted,
+                        studyProgram = rule.studyProgram ?: "",
+                        academicYear = rule.academicYear ?: ""
+                    )
+                } else if (response.code() == 404) {
+                    _uiState.value = _uiState.value.copy(error = "Aturan tidak ditemukan")
                 } else {
                     _uiState.value = _uiState.value.copy(error = "Gagal memuat aturan")
                 }

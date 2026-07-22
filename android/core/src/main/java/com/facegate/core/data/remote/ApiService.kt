@@ -88,6 +88,9 @@ interface ApiService {
     @GET("api/rules")
     suspend fun getRules(): Response<List<CampusRuleDto>>
 
+    @GET("api/rules/{id}")
+    suspend fun getRule(@Path("id") id: String): Response<RuleResponse>
+
     @POST("api/rules")
     suspend fun createRule(@Body body: Map<String, Any>): Response<Map<String, Any>>
 
@@ -167,6 +170,9 @@ interface ApiService {
     // =========== DEVICES ===========
     @GET("api/devices")
     suspend fun getDevices(): Response<List<DeviceDto>>
+
+    @GET("api/devices/{deviceId}")
+    suspend fun getDevice(@Path("deviceId") deviceId: String): Response<SingleDeviceResponse>
 
     @PUT("api/devices/{deviceId}/ping")
     suspend fun pingDeviceWithBattery(
