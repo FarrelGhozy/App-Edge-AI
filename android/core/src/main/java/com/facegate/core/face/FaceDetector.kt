@@ -144,10 +144,46 @@ class FaceDetectorWrapper(private val context: Context? = null) {
     private fun extract(face: Face, t: Int): List<PointF> =
         face.getContour(t)?.points?.map { PointF(it.x, it.y) } ?: emptyList()
 
+    /** Convert YUV_420_888 Image to ARGB_8888 Bitmap (proper YUV→RGB). */
     private fun imageToBitmap(img: Image): Bitmap? = try {
-        val buf = img.planes[0].buffer; val b = ByteArray(buf.remaining()); buf.get(b)
-        val bm = Bitmap.createBitmap(img.width, img.height, Bitmap.Config.ARGB_8888)
-        bm.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(b)); bm
+        val planes = img.planes
+        val yBuf = planes[0].buffer
+        val uBuf = planes[1].buffer
+        val vBuf = planes[2].buffer
+        val yStride = planes[0].rowStride
+        val uStride = planes[1].rowStride
+        val vStride = planes[2].rowStride
+        val uPixelStride = planes[1].pixelStride
+        val vPixelStride = planes[2].pixelStride
+
+        val w = img.width; val h = img.height
+        val pixels = IntArray(w * h)
+        val yRow = ByteArray(yStride)
+        val uRow = ByteArray(uStride)
+        val vRow = ByteArray(vStride)
+
+        for (row in 0 until h) {
+            yBuf.position(row * yStride)
+            yBuf.get(yRow, 0, yStride)
+            val uRowIdx = (row / 2) * uStride
+            val vRowIdx = (row / 2) * vStride
+            uBuf.position(uRowIdx); uBuf.get(uRow, 0, uStride)
+            vBuf.position(vRowIdx); vBuf.get(vRow, 0, vStride)
+
+            for (col in 0 until w) {
+                val y = yRow[col].toInt() and 0xFF
+                val uIdx = (col / 2) * uPixelStride
+                val vIdx = (col / 2) * vPixelStride
+                val u = (uRow[uIdx].toInt() and 0xFF) - 128
+                val v = (vRow[vIdx].toInt() and 0xFF) - 128
+
+                val r = (y + 1.402f * v).coerceIn(0f, 255f).toInt()
+                val g = (y - 0.344f * u - 0.714f * v).coerceIn(0f, 255f).toInt()
+                val b = (y + 1.772f * u).coerceIn(0f, 255f).toInt()
+                pixels[row * w + col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+        Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
     } catch (_: Exception) { null }
 }
 

@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { authGuard } from "../guards/auth";
 
 // SSE client connections
 const sseClients = new Set<{
@@ -17,12 +18,15 @@ export function broadcastEvent(event: string, data: unknown) {
 }
 
 export const eventRoutes = new Elysia()
-  .get("/api/events/stream", ({ set }) => {
+  .use(authGuard)
+  .get("/api/events/stream", ({ set, admin }) => {
     set.headers["Content-Type"] = "text/event-stream";
     set.headers["Cache-Control"] = "no-cache";
     set.headers["Connection"] = "keep-alive";
+    set.headers["X-Accel-Buffering"] = "no";
 
     const encoder = new TextEncoder();
+    let closed = false;
     const stream = new ReadableStream({
       start(controller) {
         // Send initial connection event
@@ -30,11 +34,18 @@ export const eventRoutes = new Elysia()
 
         const client = {
           send: (event: string, data: unknown) => {
+            if (closed) return;
             const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-            controller.enqueue(encoder.encode(msg));
+            try {
+              controller.enqueue(encoder.encode(msg));
+            } catch {
+              closed = true;
+              sseClients.delete(client);
+            }
           },
           close: () => {
-            controller.close();
+            closed = true;
+            try { controller.close(); } catch { /* already closed */ }
           }
         };
 
@@ -42,9 +53,15 @@ export const eventRoutes = new Elysia()
 
         // Heartbeat every 30 seconds
         const heartbeat = setInterval(() => {
+          if (closed) {
+            clearInterval(heartbeat);
+            return;
+          }
           try {
             controller.enqueue(encoder.encode(": heartbeat\n\n"));
           } catch {
+            closed = true;
+            sseClients.delete(client);
             clearInterval(heartbeat);
           }
         }, 30000);
@@ -52,6 +69,7 @@ export const eventRoutes = new Elysia()
         // Cleanup on client disconnect
         const reader = stream.getReader();
         reader.closed.then(() => {
+          closed = true;
           sseClients.delete(client);
           clearInterval(heartbeat);
         });
@@ -59,9 +77,4 @@ export const eventRoutes = new Elysia()
     });
 
     return stream;
-  })
-  .post("/api/events/trigger-change", ({ body }) => {
-    const { deviceId, type } = body as { deviceId?: string; type: string };
-    broadcastEvent("data-change", { deviceId, type, timestamp: new Date().toISOString() });
-    return { success: true };
   });

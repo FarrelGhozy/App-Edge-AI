@@ -145,44 +145,39 @@ export const attendanceRoutes = new Elysia()
   })
   // ─── Get current outside-now students ───
   .get("/api/attendance/outside-now", async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Look back 48 hours to catch overnight stragglers
+    const lookback = new Date();
+    lookback.setDate(lookback.getDate() - 2);
+    lookback.setHours(0, 0, 0, 0);
+    const now = new Date();
 
-    const todayLogs = await prisma.attendanceLog.findMany({
-      where: { timestamp: { gte: today, lt: tomorrow } },
+    const recentLogs = await prisma.attendanceLog.findMany({
+      where: { timestamp: { gte: lookback } },
       orderBy: [{ studentId: "asc" }, { timestamp: "desc" }]
     });
 
-    // Group by studentId and find those with last action = "keluar"
-    const outsideSet = new Set<string>();
-    const outsideMap = new Map<string, { name: string; keluarTime: Date; nim: string }>();
-    const studentNames = new Map<string, string>();
-    const studentNims = new Map<string, string>();
-
-    for (const l of todayLogs) {
-      studentNames.set(l.studentId, l.studentName);
-      if (l.action === "keluar") {
-        outsideSet.add(l.studentId);
-        if (!outsideMap.has(l.studentId)) {
-          outsideMap.set(l.studentId, { name: l.studentName, keluarTime: l.timestamp, nim: "" });
-        }
-      } else if (l.action === "kembali") {
-        outsideSet.delete(l.studentId);
-        outsideMap.delete(l.studentId);
+    // Group by studentId: last action wins
+    const studentActions = new Map<string, { studentName: string; nim: string; action: string; timestamp: Date }>();
+    for (const l of recentLogs) {
+      if (!studentActions.has(l.studentId)) {
+        studentActions.set(l.studentId, {
+          studentName: l.studentName,
+          nim: l.nim || "",
+          action: l.action,
+          timestamp: l.timestamp
+        });
       }
     }
 
-    const now = new Date();
-    const outsideNow = Array.from(outsideSet).map(sid => ({
-      studentId: sid,
-      studentName: studentNames.get(sid) || "",
-      keluarTime: outsideMap.get(sid)?.keluarTime?.toISOString() || null,
-      durationMinutes: outsideMap.get(sid)
-        ? Math.round((now.getTime() - outsideMap.get(sid)!.keluarTime.getTime()) / 60000)
-        : null
-    }));
+    const outsideNow = Array.from(studentActions.entries())
+      .filter(([_, v]) => v.action === "keluar")
+      .map(([sid, v]) => ({
+        studentId: sid,
+        studentName: v.studentName,
+        nim: v.nim,
+        keluarTime: v.timestamp.toISOString(),
+        durationMinutes: Math.round((now.getTime() - v.timestamp.getTime()) / 60000)
+      }));
 
     return { success: true, data: { count: outsideNow.length, students: outsideNow } };
   });

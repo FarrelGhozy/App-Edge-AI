@@ -2,6 +2,7 @@ package com.facegate.kioskscanner.registration
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -340,14 +341,52 @@ fun RegistrationScreen(
 
 // ─── Helper functions ───
 
-/** Convert ImageProxy to Bitmap (YUV_420_888 → ARGB_8888) */
-private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
-    val buffer = image.planes[0].buffer
-    val bytes = ByteArray(buffer.remaining())
-    buffer.get(bytes)
-    val bitmap = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
-    bitmap.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(bytes))
-    return bitmap
+/** Convert ImageProxy (YUV_420_888) to ARGB_8888 Bitmap with proper YUV→RGB conversion. */
+private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
+    val img = image.image ?: return null
+    return try {
+        val planes = img.planes
+        val yBuf = planes[0].buffer
+        val uBuf = planes[1].buffer
+        val vBuf = planes[2].buffer
+        val yStride = planes[0].rowStride
+        val uStride = planes[1].rowStride
+        val vStride = planes[2].rowStride
+        val uPixelStride = planes[1].pixelStride
+        val vPixelStride = planes[2].pixelStride
+
+        val w = img.width; val h = img.height
+        val pixels = IntArray(w * h)
+        val yRow = ByteArray(yStride)
+        val uRow = ByteArray(uStride)
+        val vRow = ByteArray(vStride)
+
+        for (row in 0 until h) {
+            yBuf.position(row * yStride)
+            yBuf.get(yRow, 0, yStride)
+            val uRowIdx = (row / 2) * uStride
+            val vRowIdx = (row / 2) * vStride
+            uBuf.position(uRowIdx); uBuf.get(uRow, 0, uStride)
+            vBuf.position(vRowIdx); vBuf.get(vRow, 0, vStride)
+
+            for (col in 0 until w) {
+                val y = yRow[col].toInt() and 0xFF
+                val uIdx = (col / 2) * uPixelStride
+                val vIdx = (col / 2) * vPixelStride
+                val u = (uRow[uIdx].toInt() and 0xFF) - 128
+                val v = (vRow[vIdx].toInt() and 0xFF) - 128
+
+                val r = (y + 1.402f * v).coerceIn(0f, 255f).toInt()
+                val g = (y - 0.344f * u - 0.714f * v).coerceIn(0f, 255f).toInt()
+                val b = (y + 1.772f * u).coerceIn(0f, 255f).toInt()
+                pixels[row * w + col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+        Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    } catch (e: Exception) {
+        Log.e("RegistrationScreen", "YUV→RGB failed", e)
+        null
+    }
 }
 
 /** Rotate bitmap by degrees */

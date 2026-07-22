@@ -153,7 +153,7 @@ class RegistrationViewModel @Inject constructor(
                 // Step 2: Upload face vector
                 val faceResp = apiService.uploadFace(
                     studentId,
-                    UploadFaceRequest(pose = "front", vector = state.faceVector!!)
+                    UploadFaceRequest(pose = "CENTER", vector = state.faceVector!!)
                 )
                 if (!faceResp.isSuccessful) {
                     Log.w(TAG, "Face upload skipped: ${faceResp.code()}")

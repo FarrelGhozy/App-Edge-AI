@@ -66,21 +66,22 @@ export const dashboardRoutes = new Elysia()
   })
   // ─── Dashboard outside-now summary ───
   .get("/api/dashboard/outside-now", async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const lookback = new Date();
+    lookback.setDate(lookback.getDate() - 2);
+    lookback.setHours(0, 0, 0, 0);
 
-    const todayLogs = await prisma.attendanceLog.findMany({
-      where: { timestamp: { gte: today, lt: tomorrow } },
+    const recentLogs = await prisma.attendanceLog.findMany({
+      where: { timestamp: { gte: lookback } },
       orderBy: [{ studentId: "asc" }, { timestamp: "desc" }]
     });
 
-    const outsideSet = new Set<string>();
-    for (const l of todayLogs) {
-      if (l.action === "keluar") outsideSet.add(l.studentId);
-      else if (l.action === "kembali") outsideSet.delete(l.studentId);
+    const studentActions = new Map<string, string>();
+    for (const l of recentLogs) {
+      if (!studentActions.has(l.studentId)) {
+        studentActions.set(l.studentId, l.action);
+      }
     }
 
-    return { success: true, data: { count: outsideSet.size } };
+    const count = Array.from(studentActions.values()).filter(a => a === "keluar").length;
+    return { success: true, data: { count } };
   });

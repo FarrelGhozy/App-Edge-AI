@@ -100,8 +100,8 @@ export const metricRoutes = new Elysia()
         }
       });
 
-      const fpr = reviewedTotal > 0 ? falsePositives.toFloat / reviewedTotal.toFloat : 0;
-      const fnr = reviewedTotal > 0 ? falseNegatives.toFloat / reviewedTotal.toFloat : 0;
+      const fpr = reviewedTotal > 0 ? falsePositives / reviewedTotal : 0;
+      const fnr = reviewedTotal > 0 ? falseNegatives / reviewedTotal : 0;
 
       metrics = {
         id: "",

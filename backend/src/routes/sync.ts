@@ -163,11 +163,13 @@ export const syncRoutes = new Elysia()
       data: { triggeredDevices: activeDevices.length }
     };
   })
-  .post("/api/sync/complete", async ({ body }) => {
+  .post("/api/sync/complete", async ({ body, admin }) => {
     const data = body as { deviceId: string; syncType?: string; status?: string; logsCount?: number };
+    // Use admin ID as deviceId for device-role, otherwise trust the provided deviceId
+    const deviceId = admin?.role === "device" ? admin.id : data.deviceId;
     await prisma.syncLog.create({
       data: {
-        deviceId: data.deviceId,
+        deviceId,
         syncType: data.syncType || "manual",
         status: data.status || "success",
         logsCount: data.logsCount || 0
@@ -175,7 +177,7 @@ export const syncRoutes = new Elysia()
     });
 
     await prisma.syncRequest.updateMany({
-      where: { deviceId: data.deviceId, isProcessed: false },
+      where: { deviceId, isProcessed: false },
       data: { isProcessed: true, processedAt: new Date() }
     });
 

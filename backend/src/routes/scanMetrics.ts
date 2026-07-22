@@ -59,10 +59,7 @@ export const scanMetricRoutes = new Elysia()
         where,
         skip: (page - 1) * pageSize,
         take: pageSize,
-        orderBy: { timestamp: "desc" },
-        include: {
-          student: { select: { name: true, nim: true } }
-        }
+        orderBy: { timestamp: "desc" }
       }),
       prisma.scanMetric.count({ where })
     ]);

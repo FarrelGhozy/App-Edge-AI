@@ -123,12 +123,13 @@ export async function violationReport(from: string, to: string) {
 }
 
 export async function outsideNow() {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const lookback = new Date();
+  lookback.setDate(lookback.getDate() - 2);
+  lookback.setHours(0, 0, 0, 0);
 
   const logs = await prisma.attendanceLog.findMany({
-    where: { timestamp: { gte: todayStart } },
-    orderBy: { timestamp: "desc" }
+    where: { timestamp: { gte: lookback } },
+    orderBy: [{ studentId: "asc" }, { timestamp: "desc" }]
   });
 
   const outsideIds = new Set<string>();
