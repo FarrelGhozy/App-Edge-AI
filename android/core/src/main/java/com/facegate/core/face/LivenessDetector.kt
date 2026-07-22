@@ -28,11 +28,12 @@ class LivenessDetector(
         // Anti-spoof thresholds
         private const val SPOOF_CONFIDENCE_THRESHOLD = 0.5f
 
-        // EAR blink detection
-        private const val BLINK_RATIO = 0.60f
-        private const val BLINK_WINDOW_MS = 4_000L
+        // EAR blink detection — sesuai planning.md:
+        // 2+ blinks dalam 3 detik, natural blinking
+        private const val BLINK_RATIO = 0.55f
+        private const val BLINK_WINDOW_MS = 3_000L
         private const val BLINK_COOLDOWN_MS = 300L
-        private const val REQUIRED_BLINKS = 1
+        private const val REQUIRED_BLINKS = 2
     }
 
     // ─── EAR blink state ───
