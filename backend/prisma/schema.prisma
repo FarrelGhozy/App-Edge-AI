@@ -286,3 +286,46 @@ model Holiday {
   @@index([date])
   @@map("holidays")
 }
+
+model ScanMetric {
+  id                String   @id @default(uuid())
+  studentId         String   @map("student_id")
+  predictedStudentId String? @map("predicted_student_id")
+  deviceId          String?  @map("device_id")
+  matchingTimeMs    Int      @default(0) @map("matching_time_ms")
+  totalTimeMs       Int      @default(0) @map("total_time_ms")
+  decision          String   @map("decision")  // CONFIDENT / MEDIUM / WEAK / NO_MATCH
+  topSimilarity     Float    @map("top_similarity")
+  gap               Float    @default(0) @map("gap")
+  runnerUpSimilarity Float   @default(0) @map("runner_up_similarity")
+  isCorrect         Boolean? @map("is_correct")  // null until admin reviews
+  reviewedById      String?  @map("reviewed_by_id")
+  reviewedAt        DateTime? @map("reviewed_at")
+  note              String?  @map("note")
+  timestamp         DateTime @default(now()) @map("timestamp")
+
+  @@index([studentId])
+  @@index([deviceId])
+  @@index([decision])
+  @@index([timestamp])
+  @@map("scan_metrics")
+}
+
+model DailyMetrics {
+  id               String  @id @default(uuid())
+  date             DateTime @unique
+  totalScans       Int     @default(0) @map("total_scans")
+  totalConfident   Int     @default(0) @map("total_confident")
+  totalMedium      Int     @default(0) @map("total_medium")
+  totalWeak        Int     @default(0) @map("total_weak")
+  totalNoMatch     Int     @default(0) @map("total_no_match")
+  falsePositives   Int     @default(0) @map("false_positives")
+  falseNegatives   Int     @default(0) @map("false_negatives")
+  avgResponseTimeMs Float  @default(0) @map("avg_response_time_ms")
+  fpr              Float   @default(0)  // False Positive Rate
+  fnr              Float   @default(0)  // False Negative Rate
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("daily_metrics")
+}
