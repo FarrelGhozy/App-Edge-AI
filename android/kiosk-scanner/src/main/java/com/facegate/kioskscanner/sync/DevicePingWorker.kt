@@ -54,7 +54,7 @@ class DevicePingWorker @AssistedInject constructor(
             if (deviceId != null) {
                 val batteryLevel = readBatteryLevel()
                 val response = apiService.pingDeviceWithBattery(
-                    deviceId, DevicePingRequest(batteryLevel = batteryLevel)
+                    deviceId, DevicePingRequest(batteryLevel = batteryLevel?.toDouble())
                 )
                 if (response.isSuccessful) {
                     Log.d(TAG, "Ping success: $deviceId battery=$batteryLevel")

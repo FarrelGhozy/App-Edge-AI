@@ -124,7 +124,7 @@ class FaceDetectorWrapper(private val context: Context? = null) {
     }
 
     private fun yoloToEyeContours(d: YoloV8FaceDetector.YoloDetection): Pair<List<PointF>, List<PointF>> {
-        if (d.landmarks.size < 2) return emptyList() to emptyList()
+        if (d.landmarks.size < 2) return Pair(emptyList(), emptyList())
         val le = d.landmarks[0]; val re = d.landmarks[1]; val s = 8f
         fun circle(cx: Float, cy: Float): List<PointF> = listOf(
             PointF(cx - s, cy), PointF(cx - s / 2, cy - s / 2), PointF(cx, cy - s),

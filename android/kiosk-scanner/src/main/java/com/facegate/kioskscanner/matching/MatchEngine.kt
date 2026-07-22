@@ -139,8 +139,7 @@ class MatchEngine @Inject constructor(
             )
         }
 
-        val sid = matchResult.studentId
-
+        val sid = matchResult.studentId!!
         // ─── Step 4: Get student info ───
         val student = studentDao.getById(sid)
             ?: return MatchEngineResult.Unknown(matchResult.confidence)

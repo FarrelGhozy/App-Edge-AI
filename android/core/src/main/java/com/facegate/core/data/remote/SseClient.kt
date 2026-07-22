@@ -38,7 +38,7 @@ class SseClient(
             while (isActive) {
                 try {
                     connect()
-                    retryDelay = INITIAL_RETRY_MS // Reset on success
+                    retryDelay = INITIAL_RETRY_MS
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -60,17 +60,13 @@ class SseClient(
     private suspend fun connect() {
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS) // No read timeout for SSE
+            .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(authInterceptor) // Reuse the existing AuthInterceptor
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader("Accept", "text/event-stream")
                     .addHeader("Cache-Control", "no-cache")
-                    .apply {
-                        authInterceptor.headers?.let { headers ->
-                            headers["Authorization"]?.let { addHeader("Authorization", it) }
-                        }
-                    }
                     .build()
                 chain.proceed(request)
             }
@@ -87,21 +83,22 @@ class SseClient(
 
         val reader = BufferedReader(InputStreamReader(body.byteStream()))
         var eventType = ""
-        var data = StringBuilder()
+        val data = StringBuilder()
 
-        reader.forEachLine { line ->
-            when {
-                line.startsWith("event:") -> eventType = line.removePrefix("event:").trim()
-                line.startsWith("data:") -> {
-                    data.append(line.removePrefix("data:").trim())
-                }
-                line.isBlank() && data.isNotEmpty() -> {
-                    // Dispatch event
-                    val eventData = data.toString()
-                    Log.d(TAG, "SSE event: $eventType | ${eventData.take(100)}")
-                    _events.tryEmit(SseEvent(eventType, eventData))
-                    eventType = ""
-                    data = StringBuilder()
+        reader.useLines { lines ->
+            lines.forEach { line ->
+                when {
+                    line.startsWith("event:") -> eventType = line.removePrefix("event:").trim()
+                    line.startsWith("data:") -> {
+                        data.append(line.removePrefix("data:").trim())
+                    }
+                    line.isBlank() && data.isNotEmpty() -> {
+                        val eventData = data.toString()
+                        Log.d(TAG, "SSE event: $eventType | ${eventData.take(100)}")
+                        _events.tryEmit(SseEvent(eventType, eventData))
+                        eventType = ""
+                        data.clear()
+                    }
                 }
             }
         }
@@ -115,8 +112,4 @@ data class SseEvent(
     val isChangeEvent: Boolean get() = type == "change"
     val isPing: Boolean get() = type == "ping"
     val isMetrics: Boolean get() = type == "metrics"
-    val parsedData: Map<String, Any?>?
-        get() = try {
-            com.google.gson.Gson().fromJson(data, Map::class.java) as? Map<String, Any?>
-        } catch (_: Exception) { null }
 }

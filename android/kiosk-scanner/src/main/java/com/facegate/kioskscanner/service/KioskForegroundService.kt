@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.facegate.core.data.local.DevicePreferences
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 /**
@@ -74,8 +75,8 @@ class KioskForegroundService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val deviceName = devicePreferences.getDeviceName() ?: "Kiosk"
-        val deviceId = devicePreferences.getDeviceId() ?: "—"
+        val deviceName = runBlocking { devicePreferences.getDeviceName() } ?: "Kiosk"
+        val deviceId = runBlocking { devicePreferences.getDeviceId() } ?: "—"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("FaceGate Scanner")
             .setContentText("$deviceName — Monitoring berjalan")
