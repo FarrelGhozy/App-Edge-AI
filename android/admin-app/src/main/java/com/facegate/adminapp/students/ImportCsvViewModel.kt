@@ -49,12 +49,33 @@ class ImportCsvViewModel @Inject constructor(
 
                 var success = 0
                 var failed = 0
-                for (student in students) {
-                    try {
-                        val response = apiService.createStudent(student)
-                        if (response.isSuccessful) success++ else failed++
-                    } catch (_: Exception) {
-                        failed++
+                try {
+                    // Use batch import endpoint (backend sudah support)
+                    val response = apiService.importStudents(students)
+                    if (response.isSuccessful) {
+                        val result = response.body()
+                        success = result?.data?.success ?: students.size
+                        failed = result?.data?.failed ?: 0
+                    } else {
+                        // Fallback: individual create
+                        for (student in students) {
+                            try {
+                                val r = apiService.createStudent(student)
+                                if (r.isSuccessful) success++ else failed++
+                            } catch (_: Exception) {
+                                failed++
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Individual fallback
+                    for (student in students) {
+                        try {
+                            val r = apiService.createStudent(student)
+                            if (r.isSuccessful) success++ else failed++
+                        } catch (_: Exception) {
+                            failed++
+                        }
                     }
                 }
 

@@ -33,10 +33,9 @@ class ViolationDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = ViolationDetailState(isLoading = true)
             try {
-                val response = apiService.getViolations(studentId = violationId)
+                val response = apiService.getViolationDetail(violationId)
                 if (response.isSuccessful && response.body() != null) {
-                    val v = response.body()!!.data.find { it.id == violationId }
-                    _uiState.value = ViolationDetailState(violation = v)
+                    _uiState.value = ViolationDetailState(violation = response.body()!!.data)
                 } else {
                     _uiState.value = ViolationDetailState(error = "Pelanggaran tidak ditemukan")
                 }

@@ -14,6 +14,7 @@ import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.FaceMatcher
 import com.facegate.core.face.LivenessDetector
+import com.facegate.core.face.MatchDecision
 import com.facegate.core.sync.SyncManager
 import com.facegate.kioskscanner.matching.MatchEngine
 import com.facegate.kioskscanner.matching.MatchEngineResult
@@ -73,11 +74,14 @@ class ScannerViewModel @Inject constructor(
         data class Success(
             val studentName: String,
             val actionLabel: String,
+            val decision: MatchDecision = MatchDecision.CONFIDENT,
+            val confidence: Float = 0f,
             val isViolation: Boolean = false,
             val message: String? = null
         ) : UIState()
         data class Error(
-            val message: String = "Silakan hubungi admin"
+            val message: String = "Silakan hubungi admin",
+            val decision: MatchDecision = MatchDecision.NO_MATCH
         ) : UIState()
     }
 
@@ -185,7 +189,7 @@ class ScannerViewModel @Inject constructor(
                             studentName = result.studentName,
                             action = action,
                             timestamp = System.currentTimeMillis(),
-                            confidenceScore = 1.0f,
+                            confidenceScore = result.confidence,
                             isViolation = result.isViolation,
                             violationType = if (result.isViolation) result.violationMessage else null,
                             deviceId = deviceId
@@ -195,22 +199,37 @@ class ScannerViewModel @Inject constructor(
                         if (result.isViolation) {
                             result.violationMessage?.let { voiceFeedback.speakWarning(it) }
                         }
+                        val decisionLabel = when (result.decision) {
+                            MatchDecision.CONFIDENT -> "✅"
+                            MatchDecision.MEDIUM -> "⚠️"
+                            MatchDecision.WEAK -> "🔍"
+                            MatchDecision.NO_MATCH -> "❌"
+                        }
                         val label = when (action) {
-                            "keluar" -> "KELUAR ✅"
-                            "kembali" -> "KEMBALI ✅"
+                            "keluar" -> "$decisionLabel KELUAR"
+                            "kembali" -> "$decisionLabel KEMBALI"
                             else -> action
                         }
                         _state.value = UIState.Success(
                             studentName = result.studentName,
                             actionLabel = label,
+                            decision = result.decision,
+                            confidence = result.confidence,
                             isViolation = result.isViolation,
                             message = result.violationMessage
                         )
                         _statusMessage.value = ""
                     }
                     is MatchEngineResult.Unknown -> {
+                        val decisionMsg = when (result.decision) {
+                            MatchDecision.WEAK -> " (kemiripan rendah: ${String.format("%.0f", result.confidence * 100)}%)"
+                            else -> " (${String.format("%.0f", result.confidence * 100)}% mirip)"
+                        }
                         voiceFeedback.speakError()
-                        _state.value = UIState.Error("Wajah tidak dikenal (${String.format("%.0f", result.confidence * 100)}% mirip)")
+                        _state.value = UIState.Error(
+                            message = "Wajah Tidak Dikenal$decisionMsg",
+                            decision = result.decision
+                        )
                     }
                     is MatchEngineResult.LivenessFailed -> {
                         _state.value = UIState.Error("Kedipkan mata untuk verifikasi")

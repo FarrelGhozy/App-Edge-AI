@@ -41,6 +41,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.facegate.kioskscanner.scanner.ScannerViewModel.UIState
+import com.facegate.core.face.MatchDecision
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 
@@ -297,7 +298,19 @@ fun ResultOverlay(state: UIState) {
     when (state) {
         is UIState.Idle -> {}
         is UIState.Success -> {
-            val bgColor = if (state.isViolation) Color(0xFFFFA000) else Color(0xFF2E7D32)
+            val decisionColor = when (state.decision) {
+                MatchDecision.CONFIDENT -> Color(0xFF2E7D32)  // Hijau
+                MatchDecision.MEDIUM -> Color(0xFFFFA000)     // Kuning/Orange
+                MatchDecision.WEAK -> Color(0xFFE65100)       // Oranye Tua
+                MatchDecision.NO_MATCH -> Color(0xFFC62828)   // Merah
+            }
+            val bgColor = if (state.isViolation) Color(0xFFFFA000) else decisionColor
+            val decisionBadge = when (state.decision) {
+                MatchDecision.CONFIDENT -> "✓ Cocok"
+                MatchDecision.MEDIUM -> "⚠️ Butuh Review"
+                MatchDecision.WEAK -> "🔍 Kemiripan Rendah"
+                MatchDecision.NO_MATCH -> "❌ Tidak Cocok"
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -328,6 +341,20 @@ fun ResultOverlay(state: UIState) {
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 32.dp)
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Decision badge
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = decisionBadge,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = state.actionLabel,
@@ -335,6 +362,15 @@ fun ResultOverlay(state: UIState) {
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Medium
                     )
+                    // Confidence score
+                    if (state.confidence > 0f) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Kepercayaan: ${String.format("%.0f", state.confidence * 100)}%",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 14.sp
+                        )
+                    }
                     if (state.message != null) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Surface(

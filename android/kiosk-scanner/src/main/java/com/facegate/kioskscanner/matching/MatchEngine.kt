@@ -8,6 +8,7 @@ import com.facegate.core.data.local.dao.FaceVectorDao
 import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.engine.*
 import com.facegate.core.face.*
+// MatchDecision, FaceDetectionResult from core.face.*
 import javax.inject.Inject
 
 sealed class MatchEngineResult {
@@ -15,11 +16,13 @@ sealed class MatchEngineResult {
         val studentId: String,
         val studentName: String,
         val action: ToggleAction,
+        val decision: MatchDecision = MatchDecision.CONFIDENT,
+        val confidence: Float = 0f,
         val isViolation: Boolean = false,
         val violationMessage: String? = null
     ) : MatchEngineResult()
 
-    data class Unknown(val confidence: Float) : MatchEngineResult()
+    data class Unknown(val confidence: Float, val decision: MatchDecision = MatchDecision.NO_MATCH) : MatchEngineResult()
     data object LivenessFailed : MatchEngineResult()
     data object NoFace : MatchEngineResult()
     data class QualityFailed(val reason: String) : MatchEngineResult()
@@ -87,17 +90,7 @@ class MatchEngine @Inject constructor(
         return currentTimeMs - getLivenessWindowStart() > 3500L
     }
 
-    /**
-     * Continue pipeline after detection + EAR blink pass.
-     *
-     * Steps:
-     *   1. Anti-spoofing (deep learning) — runs on final frame
-     *   2. Face embedding (192-d/512-d)
-     *   3. Match against face index
-     *   4. Toggle (keluar/kembali)
-     *   5. Violation check
-     *   6. Session tracking
-     */
+    /** Full face detection pipeline — call on analyzer thread. */
     suspend fun matchAfterDetection(detection: FaceDetectionResult, bitmap: Bitmap): MatchEngineResult {
         // Reset liveness for next scan
         livenessDetector.reset()
@@ -139,10 +132,14 @@ class MatchEngine @Inject constructor(
             null
         }
 
-        val sid = matchResult?.studentId
-        if (matchResult == null || !matchResult.isMatch || sid == null) {
-            return MatchEngineResult.Unknown(matchResult?.confidence ?: 0f)
+        if (matchResult == null || matchResult.decision == MatchDecision.NO_MATCH || matchResult.studentId == null) {
+            return MatchEngineResult.Unknown(
+                confidence = matchResult?.confidence ?: 0f,
+                decision = matchResult?.decision ?: MatchDecision.NO_MATCH
+            )
         }
+
+        val sid = matchResult.studentId
 
         // ─── Step 4: Get student info ───
         val student = studentDao.getById(sid)
@@ -171,6 +168,8 @@ class MatchEngine @Inject constructor(
             studentId = student.id,
             studentName = student.name,
             action = toggle.action,
+            decision = matchResult.decision,
+            confidence = matchResult.topScore,
             isViolation = violation.isViolation,
             violationMessage = violation.message
         )
