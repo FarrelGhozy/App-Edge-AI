@@ -34,3 +34,16 @@ data class ApiResponse<T>(
     val data: T? = null,
     val error: String? = null
 )
+
+@Serializable
+data class ImportResultResponse(
+    val success: Boolean,
+    val data: ImportResultData
+)
+
+@Serializable
+data class ImportResultData(
+    val success: Int,
+    val failed: Int,
+    val errors: List<String>? = null
+)

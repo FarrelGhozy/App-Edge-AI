@@ -29,12 +29,11 @@ class SessionTracker @Inject constructor(
             .toInstant()
             .toEpochMilli()
 
-        val logs = attendanceLogDao.getByStudentId(studentId)
+        val logs = attendanceLogDao.getByStudentIdSince(studentId, todayStart)
         var totalDuration = 0L
         var keluarTime: Long? = null
 
         for (log in logs.sortedBy { it.timestamp }) {
-            if (log.timestamp < todayStart) continue
             if (log.action == "keluar") {
                 keluarTime = log.timestamp
             } else if (log.action == "kembali" && keluarTime != null) {

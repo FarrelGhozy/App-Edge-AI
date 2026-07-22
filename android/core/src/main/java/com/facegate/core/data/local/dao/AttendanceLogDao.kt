@@ -13,12 +13,18 @@ interface AttendanceLogDao {
     @Query("SELECT * FROM attendance_logs WHERE studentId = :studentId ORDER BY timestamp DESC")
     suspend fun getByStudentId(studentId: String): List<AttendanceLogEntity>
 
+    @Query("SELECT * FROM attendance_logs WHERE studentId = :studentId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestByStudentId(studentId: String): AttendanceLogEntity?
+
     @Query("""
         SELECT * FROM attendance_logs 
         WHERE studentId = :studentId AND timestamp >= :since 
         ORDER BY timestamp DESC LIMIT 1
     """)
     suspend fun getLatestByStudentIdSince(studentId: String, since: Long): AttendanceLogEntity?
+
+    @Query("SELECT * FROM attendance_logs WHERE studentId = :studentId AND timestamp >= :since ORDER BY timestamp ASC")
+    suspend fun getByStudentIdSince(studentId: String, since: Long): List<AttendanceLogEntity>
 
     @Query("SELECT * FROM attendance_logs WHERE isSynced = 0 ORDER BY timestamp ASC")
     suspend fun getUnsynced(): List<AttendanceLogEntity>

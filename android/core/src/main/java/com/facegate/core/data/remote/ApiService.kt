@@ -38,6 +38,9 @@ interface ApiService {
     @DELETE("api/students/{id}")
     suspend fun deleteStudent(@Path("id") id: String): Response<StatusResponse>
 
+    @POST("api/students/import")
+    suspend fun importStudents(@Body request: List<CreateStudentRequest>): Response<ImportResultResponse>
+
     @POST("api/students/{id}/face")
     suspend fun uploadFace(
         @Path("id") id: String,
@@ -131,6 +134,9 @@ interface ApiService {
     ): Response<ApiResponse<PermitQuotaResponse>>
 
     // =========== VIOLATIONS ===========
+    @GET("api/violations/{id}")
+    suspend fun getViolationDetail(@Path("id") id: String): Response<ApiResponse<ViolationDto>>
+
     @GET("api/violations")
     suspend fun getViolations(
         @Query("page") page: Int = 1,
