@@ -63,4 +63,24 @@ export const dashboardRoutes = new Elysia()
       take: 20
     });
     return { success: true, data: scans };
+  })
+  // ─── Dashboard outside-now summary ───
+  .get("/api/dashboard/outside-now", async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayLogs = await prisma.attendanceLog.findMany({
+      where: { timestamp: { gte: today, lt: tomorrow } },
+      orderBy: [{ studentId: "asc" }, { timestamp: "desc" }]
+    });
+
+    const outsideSet = new Set<string>();
+    for (const l of todayLogs) {
+      if (l.action === "keluar") outsideSet.add(l.studentId);
+      else if (l.action === "kembali") outsideSet.delete(l.studentId);
+    }
+
+    return { success: true, data: { count: outsideSet.size } };
   });

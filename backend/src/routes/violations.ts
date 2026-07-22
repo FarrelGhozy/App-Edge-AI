@@ -53,4 +53,31 @@ export const violationRoutes = new Elysia()
       data: { isResolved: true, resolvedAt: new Date(), resolvedNote: resolvedNote || null }
     });
     return { success: true, data: violation };
+  })
+  // ─── Violation statistics ───
+  .get("/api/violations/statistics", async () => {
+    const total = await prisma.violation.count();
+    const resolved = await prisma.violation.count({ where: { isResolved: true } });
+    const unresolved = await prisma.violation.count({ where: { isResolved: false } });
+
+    const byType = await prisma.violation.groupBy({
+      by: ["type"],
+      _count: true,
+      orderBy: { _count: { id: "desc" } }
+    });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayCount = await prisma.violation.count({
+      where: { timestamp: { gte: today } }
+    });
+
+    return {
+      success: true,
+      data: {
+        total, resolved, unresolved,
+        todayCount,
+        byType: byType.map(b => ({ type: b.type, count: b._count }))
+      }
+    };
   });

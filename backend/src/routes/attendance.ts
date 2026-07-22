@@ -142,4 +142,47 @@ export const attendanceRoutes = new Elysia()
         endDate: endDate.toISOString()
       }
     };
+  })
+  // ─── Get current outside-now students ───
+  .get("/api/attendance/outside-now", async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayLogs = await prisma.attendanceLog.findMany({
+      where: { timestamp: { gte: today, lt: tomorrow } },
+      orderBy: [{ studentId: "asc" }, { timestamp: "desc" }]
+    });
+
+    // Group by studentId and find those with last action = "keluar"
+    const outsideSet = new Set<string>();
+    const outsideMap = new Map<string, { name: string; keluarTime: Date; nim: string }>();
+    const studentNames = new Map<string, string>();
+    const studentNims = new Map<string, string>();
+
+    for (const l of todayLogs) {
+      studentNames.set(l.studentId, l.studentName);
+      if (l.action === "keluar") {
+        outsideSet.add(l.studentId);
+        if (!outsideMap.has(l.studentId)) {
+          outsideMap.set(l.studentId, { name: l.studentName, keluarTime: l.timestamp, nim: "" });
+        }
+      } else if (l.action === "kembali") {
+        outsideSet.delete(l.studentId);
+        outsideMap.delete(l.studentId);
+      }
+    }
+
+    const now = new Date();
+    const outsideNow = Array.from(outsideSet).map(sid => ({
+      studentId: sid,
+      studentName: studentNames.get(sid) || "",
+      keluarTime: outsideMap.get(sid)?.keluarTime?.toISOString() || null,
+      durationMinutes: outsideMap.get(sid)
+        ? Math.round((now.getTime() - outsideMap.get(sid)!.keluarTime.getTime()) / 60000)
+        : null
+    }));
+
+    return { success: true, data: { count: outsideNow.length, students: outsideNow } };
   });

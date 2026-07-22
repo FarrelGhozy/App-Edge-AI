@@ -72,11 +72,19 @@ async function main() {
   console.log(`   Created ${rules.length} campus rules`);
 
   const settings = [
-    { key: "face_match_threshold", value: "0.6", description: "Threshold cosine similarity" },
+    { key: "face_match_threshold", value: "0.80", description: "Adaptive threshold (min) — CONFIDENT ≥ 0.85, MEDIUM ≥ 0.80, WEAK ≥ 0.70" },
+    { key: "confident_threshold", value: "0.85", description: "CONFIDENT match threshold" },
+    { key: "medium_threshold", value: "0.80", description: "MEDIUM match threshold" },
+    { key: "weak_threshold", value: "0.70", description: "WEAK match threshold" },
+    { key: "confident_gap", value: "0.05", description: "Minimum gap for CONFIDENT decision" },
+    { key: "medium_gap", value: "0.03", description: "Minimum gap for MEDIUM decision" },
     { key: "max_daily_duration_ms", value: "28800000", description: "Max 8 jam di luar per hari" },
     { key: "max_permit_per_month", value: "10", description: "Maks izin harian per bulan" },
     { key: "auto_permit_hours", value: "4", description: "Maks jam izin harian" },
     { key: "kiosk_poll_interval_minutes", value: "10", description: "Polling interval kiosk" },
+    { key: "operational_start", value: "06:00", description: "Jam buka kiosk" },
+    { key: "operational_end", value: "21:00", description: "Jam tutup kiosk" },
+    { key: "sync_poll_interval_seconds", value: "10", description: "Polling sync request interval" },
   ];
 
   for (const setting of settings) {

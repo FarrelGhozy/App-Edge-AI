@@ -14,6 +14,7 @@ import {
   deleteFace
 } from "../services/student";
 import { authGuard } from "../guards/auth";
+import prisma from "../services/prisma";
 
 export const studentRoutes = new Elysia()
   .use(authGuard)
@@ -155,4 +156,80 @@ export const studentRoutes = new Elysia()
       );
     }
     return { success: true };
+  })
+  // ─── Get schedules for a student ───
+  .get("/api/students/:id/schedules", async ({ params: { id } }) => {
+    const schedules = await prisma.courseSchedule.findMany({
+      where: { studentId: id, isActive: true },
+      orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }]
+    });
+    return { success: true, data: schedules };
+  })
+  // ─── Get student status (toggle + violations) ───
+  .get("/api/students/:id/status", async ({ params: { id } }) => {
+    const student = await prisma.student.findUnique({ where: { id } });
+    if (!student) {
+      return new Response(JSON.stringify({ success: false, error: "Student not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    }
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayLogs = await prisma.attendanceLog.findMany({
+      where: { studentId: id, timestamp: { gte: today } },
+      orderBy: { timestamp: "desc" }
+    });
+    const lastAction = todayLogs.length > 0 ? todayLogs[0].action : null;
+    const violations = await prisma.violation.findMany({
+      where: { studentId: id, isResolved: false },
+      orderBy: { timestamp: "desc" },
+      take: 10
+    });
+    return {
+      success: true,
+      data: {
+        studentId: id,
+        studentName: student.name,
+        nim: student.nim,
+        currentStatus: lastAction === "keluar" ? "outside" : "inside",
+        lastAction,
+        lastTimestamp: todayLogs[0]?.timestamp?.toISOString() || null,
+        totalScansToday: todayLogs.length,
+        activeViolations: violations.length,
+        violations
+      }
+    };
+  })
+  // ─── Import students (CSV/JSON) ───
+  .post("/api/students/import", async ({ body }) => {
+    const { rows } = body as { rows: Array<{ nim: string; name: string; studyProgram: string; academicYear: string; phone?: string; email?: string }> };
+    const results = { success: 0, failed: 0, errors: [] as string[] };
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        await prisma.student.create({
+          data: {
+            nim: rows[i].nim,
+            name: rows[i].name,
+            studyProgram: rows[i].studyProgram,
+            academicYear: rows[i].academicYear,
+            phone: rows[i].phone || null,
+            email: rows[i].email || null
+          }
+        });
+        results.success++;
+      } catch (e: any) {
+        results.failed++;
+        results.errors.push(`Row ${i + 1}: ${e.message || "Unknown error"}`);
+      }
+    }
+    // Log import batch
+    if (results.success > 0) {
+      await prisma.importBatch.create({
+        data: {
+          filename: `import-${Date.now()}`,
+          totalRows: rows.length,
+          successRows: results.success,
+          failedRows: results.failed,
+          errors: results.errors.length > 0 ? results.errors.join("; ") : null
+        }
+      });
+    }
+    return { success: true, data: results };
   });

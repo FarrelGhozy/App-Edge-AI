@@ -180,4 +180,15 @@ export const syncRoutes = new Elysia()
     });
 
     return { success: true };
+  })
+  // ─── Get sync settings ───
+  .get("/api/sync/settings", async () => {
+    const settings = await prisma.globalSetting.findMany({
+      where: {
+        key: { in: ["sync_poll_interval_seconds", "kiosk_poll_interval_minutes", "operational_start", "operational_end"] }
+      }
+    });
+    const map: Record<string, string> = {};
+    for (const s of settings) map[s.key] = s.value;
+    return map;
   });
