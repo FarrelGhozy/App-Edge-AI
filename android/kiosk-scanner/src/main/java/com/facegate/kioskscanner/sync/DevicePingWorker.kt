@@ -1,6 +1,9 @@
 package com.facegate.kioskscanner.sync
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.*
@@ -49,11 +52,12 @@ class DevicePingWorker @AssistedInject constructor(
         return try {
             val deviceId = devicePreferences.getDeviceId()
             if (deviceId != null) {
+                val batteryLevel = readBatteryLevel()
                 val response = apiService.pingDeviceWithBattery(
-                    deviceId, DevicePingRequest(batteryLevel = null)
+                    deviceId, DevicePingRequest(batteryLevel = batteryLevel)
                 )
                 if (response.isSuccessful) {
-                    Log.d(TAG, "Ping success: $deviceId")
+                    Log.d(TAG, "Ping success: $deviceId battery=$batteryLevel")
                     Result.success()
                 } else {
                     Log.w(TAG, "Ping failed: ${response.code()}")
@@ -66,6 +70,20 @@ class DevicePingWorker @AssistedInject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Ping error", e)
             Result.retry()
+        }
+    }
+
+    private fun readBatteryLevel(): Int? {
+        return try {
+            val intent = applicationContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            if (level >= 0 && scale > 0) {
+                (level * 100 / scale)
+            } else null
+        } catch (e: Exception) {
+            Log.w(TAG, "Battery read failed: ${e.message}")
+            null
         }
     }
 }

@@ -7,7 +7,12 @@ import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.SessionManager
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
+import com.facegate.core.data.local.dao.CourseScheduleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
+import com.facegate.core.data.local.dao.GlobalSettingDao
+import com.facegate.core.data.local.dao.HolidayDao
+import com.facegate.core.data.local.dao.PermitDao
+import com.facegate.core.data.local.dao.ScanMetricDao
 import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiClient
@@ -36,7 +41,7 @@ object CoreModule {
             context,
             AppDatabase::class.java,
             "facegate.db"
-        ).fallbackToDestructiveMigration().build()
+        ).addMigrations(*AppDatabase.ALL_MIGRATIONS).build()
     }
 
     @Provides
@@ -50,6 +55,21 @@ object CoreModule {
 
     @Provides
     fun provideCampusRuleDao(db: AppDatabase): CampusRuleDao = db.campusRuleDao()
+
+    @Provides
+    fun providePermitDao(db: AppDatabase): PermitDao = db.permitDao()
+
+    @Provides
+    fun provideHolidayDao(db: AppDatabase): HolidayDao = db.holidayDao()
+
+    @Provides
+    fun provideCourseScheduleDao(db: AppDatabase): CourseScheduleDao = db.courseScheduleDao()
+
+    @Provides
+    fun provideGlobalSettingDao(db: AppDatabase): GlobalSettingDao = db.globalSettingDao()
+
+    @Provides
+    fun provideScanMetricDao(db: AppDatabase): ScanMetricDao = db.scanMetricDao()
 
     @Provides
     @Singleton
@@ -74,8 +94,8 @@ object CoreModule {
 
     @Provides
     @Singleton
-    fun provideFaceDetector(): FaceDetectorWrapper {
-        return FaceDetectorWrapper()
+    fun provideFaceDetector(@ApplicationContext context: Context): FaceDetectorWrapper {
+        return FaceDetectorWrapper(context)
     }
 
     @Provides
