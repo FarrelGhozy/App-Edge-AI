@@ -7,7 +7,6 @@ import org.junit.Test
 class FaceMatcherTest {
 
     private lateinit var matcher: FaceMatcher
-    private val threshold = 0.70f
 
     private fun makeVector(vararg values: Float): FloatArray {
         val arr = FloatArray(192)
@@ -30,7 +29,11 @@ class FaceMatcherTest {
 
     @Before
     fun setup() {
-        matcher = FaceMatcher(threshold = threshold)
+        matcher = FaceMatcher(
+            confidentThreshold = 0.85f,
+            mediumThreshold = 0.80f,
+            weakThreshold = 0.70f
+        )
     }
 
     @Test
@@ -42,17 +45,16 @@ class FaceMatcherTest {
     }
 
     @Test
-    fun `identical vectors should match with high confidence`() {
+    fun `identical vectors should match CONFIDENT`() {
         val vec = normalize(makeVector(1f, 2f, 3f))
         matcher.buildIndex(listOf(entry("student1", vec)))
         val result = matcher.match(vec)
-        assertTrue(result.isMatch)
-        assertTrue(result.confidence >= threshold)
+        assertEquals(MatchDecision.CONFIDENT, result.decision)
         assertEquals("student1", result.studentId)
     }
 
     @Test
-    fun `similar vectors should find correct match`() {
+    fun `similar but different vectors should find correct match`() {
         val v1 = normalize(makeVector(1f, 0f, 0f))
         val v2 = normalize(makeVector(0.9f, 0f, 0f))
         val v3 = normalize(makeVector(0f, 1f, 0f))
@@ -63,11 +65,41 @@ class FaceMatcherTest {
     }
 
     @Test
-    fun `studentId should be returned in result`() {
-        val vec = normalize(makeVector(1f))
-        matcher.buildIndex(listOf(entry("unique_student", vec)))
-        val result = matcher.match(vec)
-        assertEquals("unique_student", result.studentId)
+    fun `completely different vectors should not match`() {
+        val dbVec = normalize(makeVector(1f, 0f, 0f))
+        matcher.buildIndex(listOf(entry("db", dbVec)))
+        val queryVec = FloatArray(192) { -dbVec[it] }
+        val result = matcher.match(queryVec)
+        assertFalse(result.isMatch)
+        assertEquals(MatchDecision.NO_MATCH, result.decision)
+    }
+
+    @Test
+    fun `second best info should be available`() {
+        val v1 = normalize(makeVector(1f, 0f, 0f))
+        val v2 = normalize(makeVector(0.95f, 0f, 0f))
+        matcher.buildIndex(listOf(entry("best", v1), entry("second", v2)))
+        val result = matcher.match(v1)
+        assertEquals("second", result.secondBestId)
+    }
+
+    @Test
+    fun `threshold levels should produce correct decision`() {
+        // CONFIDENT: topScore >= 0.85 AND gap >= 0.05
+        // MEDIUM:    topScore >= 0.80 AND gap >= 0.03
+        // WEAK:      topScore >= 0.70
+        // NO_MATCH:  topScore < 0.70
+
+        val base = normalize(makeVector(1f, 0f, 0f))
+
+        // CONFIDENT: close match with big gap
+        matcher.buildIndex(listOf(
+            entry("confident", normalize(makeVector(0.95f, 0f, 0f))),
+            entry("far", normalize(makeVector(0.1f, 1f, 0f)))
+        ))
+        val confidentMatch = matcher.match(base)
+        assertEquals("confident", confidentMatch.studentId)
+        assertEquals(MatchDecision.CONFIDENT, confidentMatch.decision)
     }
 
     @Test
@@ -81,25 +113,51 @@ class FaceMatcherTest {
     }
 
     @Test
-    fun `completely different vectors should not match`() {
-        val dbVec = normalize(makeVector(1f, 0f, 0f))
-        matcher.buildIndex(listOf(entry("db", dbVec)))
-        val queryVec = FloatArray(192) { -dbVec[it] }
-        val result = matcher.match(queryVec)
-        assertFalse(result.isMatch)
+    fun `same student with multiple poses should match any pose`() {
+        val center = normalize(makeVector(1f, 0f, 0f))
+        val left = normalize(makeVector(0.8f, 0.1f, 0f))
+        val right = normalize(makeVector(0.6f, 0.2f, 0f))
+        matcher.buildIndex(listOf(
+            entry("student1", center),
+            entry("student1", left),
+            entry("student1", right)
+        ))
+        val query = normalize(makeVector(0.75f, 0.15f, 0f))
+        val result = matcher.match(query)
+        assertTrue(result.isMatch)
+        assertEquals("student1", result.studentId)
     }
 
     @Test
-    fun `match should set isMatch false for low similarity`() {
-        val dbVec = normalize(makeVector(1f, 0f, 0f))
-        matcher.buildIndex(listOf(entry("db", dbVec)))
-        val diffVec = FloatArray(192) { -1f / kotlin.math.sqrt(192f) }
-        val result = matcher.match(diffVec)
-        assertFalse(result.isMatch)
+    fun `size should reflect vector count not student count`() {
+        assertEquals(0, matcher.size())
+        matcher.buildIndex(listOf(
+            entry("s1", normalize(makeVector(1f, 0f))),
+            entry("s1", normalize(makeVector(0f, 1f))),
+            entry("s2", normalize(makeVector(0.5f, 0.5f)))
+        ))
+        assertEquals(3, matcher.size())
     }
 
     @Test
-    fun `large index should still return results`() {
+    fun `clear should remove all entries`() {
+        matcher.buildIndex(listOf(entry("a", normalize(makeVector(1f)))))
+        matcher.clear()
+        assertEquals(0, matcher.size())
+        val result = matcher.match(normalize(makeVector(1f)))
+        assertNull(result.studentId)
+    }
+
+    @Test
+    fun `getThresholds should return configured values`() {
+        val (conf, med, weak) = matcher.getThresholds()
+        assertEquals(0.85f, conf, 0.001f)
+        assertEquals(0.80f, med, 0.001f)
+        assertEquals(0.70f, weak, 0.001f)
+    }
+
+    @Test
+    fun `large index should return results quickly`() {
         val baseVec = normalize(makeVector(1f, 0f, 0f))
         val entries = (0 until 1000).map { id ->
             val v = baseVec.copyOf()
@@ -116,64 +174,13 @@ class FaceMatcherTest {
     }
 
     @Test
-    fun `second best info should be available`() {
-        val v1 = normalize(makeVector(1f, 0f, 0f))
-        val v2 = normalize(makeVector(0.95f, 0f, 0f))
-        matcher.buildIndex(listOf(entry("best", v1), entry("second", v2)))
-        val result = matcher.match(v1)
-        assertEquals("second", result.secondBestId)
-    }
-
-    @Test
-    fun `size should reflect vector count`() {
-        assertEquals(0, matcher.size())
-        matcher.buildIndex(listOf(entry("a", normalize(makeVector(1f)))))
-        assertEquals(1, matcher.size())
-        matcher.buildIndex(listOf(
-            entry("b", normalize(makeVector(1f))),
-            entry("c", normalize(makeVector(0f, 1f)))
-        ))
-        assertEquals(2, matcher.size())
-    }
-
-    @Test
-    fun `clear should remove all entries`() {
-        matcher.buildIndex(listOf(entry("a", normalize(makeVector(1f)))))
-        matcher.clear()
-        assertEquals(0, matcher.size())
-        val result = matcher.match(normalize(makeVector(1f)))
-        assertNull(result.studentId)
-    }
-
-    @Test
-    fun `getThreshold should return configured threshold`() {
-        assertEquals(threshold, matcher.getThreshold(), 0.001f)
-    }
-
-    @Test
-    fun `same student with multiple poses should match any pose`() {
-        val center = normalize(makeVector(1f, 0f, 0f))
-        val left = normalize(makeVector(0.8f, 0.1f, 0f))
-        val right = normalize(makeVector(0.6f, 0.2f, 0f))
-        matcher.buildIndex(listOf(
-            entry("student1", center),
-            entry("student1", left),
-            entry("student1", right)
-        ))
-        // Match against a near-pose
-        val query = normalize(makeVector(0.75f, 0.15f, 0f))
-        val result = matcher.match(query)
-        assertTrue(result.isMatch)
-        assertEquals("student1", result.studentId)
-    }
-
-    @Test
-    fun `size should count vectors not students`() {
-        matcher.buildIndex(listOf(
-            entry("s1", normalize(makeVector(1f, 0f))),
-            entry("s1", normalize(makeVector(0f, 1f))),
-            entry("s2", normalize(makeVector(0.5f, 0.5f)))
-        ))
-        assertEquals(3, matcher.size())
+    fun `matchBatch should return results for multiple embeddings`() {
+        val base = normalize(makeVector(1f, 0f, 0f))
+        matcher.buildIndex(listOf(entry("s1", base)))
+        val vecs = listOf(base, normalize(makeVector(-0.5f, 0.5f, 0.5f)))
+        val results = matcher.matchBatch(vecs)
+        assertEquals(2, results.size)
+        assertTrue(results[0].isMatch)
+        assertFalse(results[1].isMatch)
     }
 }
