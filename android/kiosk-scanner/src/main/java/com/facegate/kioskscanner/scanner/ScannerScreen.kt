@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.facegate.kioskscanner.matching.MatchEngineResult
 import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -108,7 +107,7 @@ fun ScannerScreen(
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                         analyzer.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                            if (!isProcessing && state !is MatchEngineResult.Matched && state !is ScannerViewModel.UIState.Error) {
+                            if (!isProcessing && state !is ScannerViewModel.UIState.Success && state !is ScannerViewModel.UIState.Error) {
                                 viewModel.onFrameCaptured(imageProxy)
                             }
                             imageProxy.close()

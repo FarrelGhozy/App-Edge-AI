@@ -20,7 +20,7 @@ import javax.inject.Inject
  * computes embeddings, fuses via quality-weighted average, then matches.
  *
  * Pipeline:
- *   Live preview: RetinaFace detection → quality gate → EAR blink liveness
+ *   Live preview: RetinaFace detection → quality gate → face-steady liveness (1.5s)
  *   Collect: capture 10-15 frame bitmaps over ~1.5s
  *   Match:   anti-spoof → embed each → quality-weighted fusion → cosine match → toggle
  */
@@ -48,9 +48,6 @@ class VideoMatchEngine @Inject constructor(
 
     // Quality fusion engine
     private val fusionEngine = QualityWeightedFusion()
-
-    // Liveness window tracking
-    private var livenessWindowStart: Long = 0L
 
     /**
      * Synchronous face detection from raw camera image.
@@ -114,19 +111,6 @@ class VideoMatchEngine @Inject constructor(
     /** Reset liveness state. */
     fun resetLiveness() {
         livenessDetector.reset()
-        livenessWindowStart = 0L
-    }
-
-    /** Check if liveness window (3.5s) has expired. */
-    fun isLivenessWindowExpired(currentTimeMs: Long): Boolean {
-        return currentTimeMs - livenessWindowStart > 3500L
-    }
-
-    /** Start tracking liveness window. */
-    fun startLivenessWindow() {
-        if (livenessWindowStart == 0L) {
-            livenessWindowStart = System.currentTimeMillis()
-        }
     }
 
     // ─── Video Collection API ───

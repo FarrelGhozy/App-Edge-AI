@@ -53,8 +53,8 @@ class ScannerViewModel @Inject constructor(
     companion object {
         private const val TAG = "ScannerVM"
         private const val CENTER_MARGIN_RATIO = 0.25f
-        private const val DELAY_BEFORE_COLLECT_MS = 500L
         private const val FRAME_INTERVAL_MS = 100L // Capture 1 frame setiap 100ms = 10 FPS
+        private const val STEADY_DURATION_MS = 1500L // Wajib tahan pose stabil selama ini sebelum collect
     }
 
     private val _state = MutableStateFlow<UIState>(UIState.Idle)
@@ -85,8 +85,8 @@ class ScannerViewModel @Inject constructor(
     private val _syncStatus = MutableStateFlow<String?>(null)
     val syncStatus: StateFlow<String?> = _syncStatus.asStateFlow()
 
-    // Delayed collect start — wait after liveness passes
-    private var pendingCollectAt: Long = 0L
+    // Face-steady timer: replace EAR blink (gak bisa dengan RetinaFace 5 landmark)
+    private var faceSteadyStartTime: Long = 0L
     private var lastFrameCaptureTime: Long = 0L
 
     // Image dimensions for transform
@@ -157,42 +157,29 @@ class ScannerViewModel @Inject constructor(
         updateOverlay(face, bitmap.width, bitmap.height, qualityOK, centered, currentTime)
 
         if (!qualityOK) {
-            pendingCollectAt = 0L
+            faceSteadyStartTime = 0L
             _statusMessage.value = if (!centered) "Posisikan wajah di tengah"
                                    else "Hadapkan wajah lurus ke kamera"
             if (!videoMatchEngine.isCollecting()) bitmap.recycle()
             return
         }
 
-        // ─── Liveness check (EAR blink) ───
-        videoMatchEngine.startLivenessWindow()
-        // Note: EAR liveness requires eye contours from ML Kit landmarks.
-        // With RetinaFace (5 landmarks only), approximate using eye landmark positions.
-        // For now, simplified: proceed after quality pass + short delay
-        val livenessReady = currentTime - livenessStartTime > 2000L // 2s simplified liveness
-        if (!livenessReady) {
-            _statusMessage.value = "Kedipkan mata"
+        // ─── Face-steady liveness ───
+        // RetinaFace cuma 5 landmark → gak bisa EAR blink.
+        // Solusi: wajah harus stabil di tengah + yaw <25° selama STEADY_DURATION_MS.
+        // Anti-spoof deep learning tetap jalan di pipeline setelah collect.
+        if (faceSteadyStartTime == 0L) {
+            faceSteadyStartTime = currentTime
+        }
+        val steadyDuration = currentTime - faceSteadyStartTime
+        if (steadyDuration < STEADY_DURATION_MS) {
+            _statusMessage.value = "Tahan pose..."
             if (!videoMatchEngine.isCollecting()) bitmap.recycle()
             return
         }
 
-        // ─── Start frame collection (video mode) ───
+        // ─── Start frame collection ───
         if (!videoMatchEngine.isCollecting()) {
-            if (pendingCollectAt == 0L) {
-                pendingCollectAt = currentTime + DELAY_BEFORE_COLLECT_MS
-                _statusMessage.value = "Tahan pose..."
-                lastFrameCaptureTime = currentTime
-                if (!videoMatchEngine.isCollecting()) bitmap.recycle()
-                return
-            }
-
-            if (currentTime < pendingCollectAt) {
-                _statusMessage.value = "Tahan pose..."
-                if (!videoMatchEngine.isCollecting()) bitmap.recycle()
-                return
-            }
-
-            // Mulai collect frame
             videoMatchEngine.startFrameCollection()
             _statusMessage.value = "Mengambil gambar..."
             lastFrameCaptureTime = currentTime
@@ -207,6 +194,9 @@ class ScannerViewModel @Inject constructor(
                 lastFrameCaptureTime = currentTime
 
                 _statusMessage.value = "Mengambil gambar... ${videoMatchEngine.getCollectedCount()}/15"
+            } else {
+                // Throttle skip — bitmap not stored, must recycle
+                bitmap.recycle()
             }
 
             // Update overlay progress
@@ -232,10 +222,8 @@ class ScannerViewModel @Inject constructor(
         bitmap.recycle()
     }
 
-    private var livenessStartTime: Long = 0L
-
     private fun resetDetectionState() {
-        pendingCollectAt = 0L
+        faceSteadyStartTime = 0L
         _isFaceDetected.value = false
         _isFaceCentered.value = false
         _statusMessage.value = "Arahkan wajah ke kamera"
@@ -408,8 +396,7 @@ class ScannerViewModel @Inject constructor(
 
     fun resetState() {
         _state.value = UIState.Idle
-        pendingCollectAt = 0L
-        livenessStartTime = 0L
+        faceSteadyStartTime = 0L
         _isFaceDetected.value = false
         _isFaceCentered.value = false
         _statusMessage.value = "Arahkan wajah ke kamera"
