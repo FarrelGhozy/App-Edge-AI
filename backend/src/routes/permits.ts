@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { listPermits, approvePermit, rejectPermit } from "../services/permit";
 import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
+import { notifyDevicesChange } from "../services/events";
 
 export const permitRoutes = new Elysia()
   .use(authGuard)
@@ -104,9 +105,11 @@ export const permitRoutes = new Elysia()
 
     if (status === "approved") {
       const permit = await approvePermit(id, adminId);
+      notifyDevicesChange();
       return { success: true, data: permit };
     } else if (status === "rejected") {
       const permit = await rejectPermit(id, adminId);
+      notifyDevicesChange();
       return { success: true, data: permit };
     }
     return { success: false, error: "Invalid status" };
