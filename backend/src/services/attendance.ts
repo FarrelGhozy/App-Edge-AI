@@ -1,5 +1,6 @@
 import { t } from "elysia";
 import prisma from "./prisma";
+import { emitToAdmins } from "./events";
 
 export const scanSchema = t.Object({
   studentId: t.String(),
@@ -30,7 +31,7 @@ export async function recordScan(data: {
   const student = await prisma.student.findUnique({ where: { id: data.studentId } });
   if (!student) throw new Error("STUDENT_NOT_FOUND");
 
-  return prisma.attendanceLog.create({
+  const log = await prisma.attendanceLog.create({
     data: {
       studentId: data.studentId,
       studentName: data.studentName,
@@ -44,6 +45,12 @@ export async function recordScan(data: {
       isSynced: true
     }
   });
+
+  try {
+    emitToAdmins("scan_realtime", log);
+  } catch {}
+
+  return log;
 }
 
 export async function listAttendance(params: {
