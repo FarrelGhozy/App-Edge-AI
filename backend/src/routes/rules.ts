@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import prisma from "../services/prisma";
 import { listRules } from "../services/rule";
 import { authGuard } from "../guards/auth";
+import { notifyDevicesChange } from "../services/events";
 
 export const ruleRoutes = new Elysia()
   .use(authGuard)
@@ -20,6 +21,7 @@ export const ruleRoutes = new Elysia()
       priority?: number;
     };
     const rule = await prisma.campusRule.create({ data });
+    notifyDevicesChange();
     return { success: true, data: rule };
   })
   .put("/api/rules/:id", async ({ params, body }) => {
@@ -34,10 +36,12 @@ export const ruleRoutes = new Elysia()
       priority?: number;
     };
     const rule = await prisma.campusRule.update({ where: { id: params.id }, data });
+    notifyDevicesChange();
     return { success: true, data: rule };
   })
   .delete("/api/rules/:id", async ({ params }) => {
     await prisma.campusRule.delete({ where: { id: params.id } });
+    notifyDevicesChange();
     return { success: true };
   })
   .get("/api/rules/effective", async ({ query }) => {
