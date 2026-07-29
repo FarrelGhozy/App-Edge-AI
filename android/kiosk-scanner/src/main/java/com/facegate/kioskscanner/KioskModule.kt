@@ -42,33 +42,13 @@ abstract class KioskModule {
         onnxFaceEmbedder: OnnxFaceEmbedder
     ): FaceEmbedderProvider
 
-    // ─── RetinaFaceDetector (concrete — for registration flow too) ───
-    @Binds
-    @Singleton
-    abstract fun bindRetinaFaceDetector(
-        retinaFaceDetector: RetinaFaceDetector
-    ): RetinaFaceDetector
-
-    // ─── OnnxFaceEmbedder (concrete) ───
-    @Binds
-    @Singleton
-    abstract fun bindOnnxFaceEmbedder(
-        onnxFaceEmbedder: OnnxFaceEmbedder
-    ): OnnxFaceEmbedder
-
-    // ─── VideoMatchEngine ───
-    @Binds
-    @Singleton
-    abstract fun bindVideoMatchEngine(
-        videoMatchEngine: VideoMatchEngine
-    ): VideoMatchEngine
-
     companion object {
 
         @Provides
         @Singleton
-        fun provideApiBaseUrl(): ApiBaseUrl {
-            return ApiBaseUrl(BuildConfig.API_BASE_URL)
+        @ApiBaseUrl
+        fun provideApiBaseUrl(): String {
+            return BuildConfig.API_BASE_URL
         }
 
         @Provides
@@ -80,10 +60,9 @@ abstract class KioskModule {
         @Provides
         @Singleton
         fun provideSessionTracker(
-            database: AppDatabase,
-            sessionManager: SessionManager
+            database: AppDatabase
         ): SessionTracker {
-            return SessionTracker(database.attendanceLogDao(), sessionManager)
+            return SessionTracker(database.attendanceLogDao())
         }
 
         @Provides
@@ -110,32 +89,12 @@ abstract class KioskModule {
 
         @Provides
         @Singleton
-        fun provideFaceMatcher(): FaceMatcher {
-            return FaceMatcher(isVideoMode = true) // Video mode untuk kiosk scanner
-        }
-
-        @Provides
-        @Singleton
-        fun provideLivenessDetector(
-            antiSpoofDetector: AntiSpoofDetector
-        ): LivenessDetector {
-            return LivenessDetector(antiSpoofDetector = antiSpoofDetector)
-        }
-
-        @Provides
-        @Singleton
         fun provideVoiceFeedback(
             @ApplicationContext context: android.content.Context
         ): VoiceFeedback {
             return VoiceFeedback(context)
         }
 
-        @Provides
-        @Singleton
-        fun provideDevicePreferences(
-            @ApplicationContext context: android.content.Context
-        ): DevicePreferences {
-            return DevicePreferences(context)
-        }
+
     }
 }

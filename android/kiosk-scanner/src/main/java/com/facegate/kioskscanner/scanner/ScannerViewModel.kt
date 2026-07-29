@@ -93,6 +93,9 @@ class ScannerViewModel @Inject constructor(
     private var lastImageWidth: Int = 0
     private var lastImageHeight: Int = 0
 
+    private val _imageSize = MutableStateFlow(0 to 0)
+    val imageSize: StateFlow<Pair<Int, Int>> = _imageSize.asStateFlow()
+
     sealed class UIState {
         data object Idle : UIState()
         data class Success(
@@ -120,9 +123,13 @@ class ScannerViewModel @Inject constructor(
         val bitmap = imageProxyToBitmap(imageProxy) ?: return
         lastImageWidth = bitmap.width
         lastImageHeight = bitmap.height
+        _imageSize.value = lastImageWidth to lastImageHeight
 
         // ─── RetinaFace detection ───
+        val startDetect = System.nanoTime()
         val faces = videoMatchEngine.detectFromBitmap(bitmap)
+        val detectTimeMs = (System.nanoTime() - startDetect) / 1_000_000L
+        Log.d(TAG, "Frame ${lastImageWidth}x$lastImageHeight: ${faces.size} faces detected in ${detectTimeMs}ms")
         val face = faces.maxByOrNull { it.confidence }
 
         if (face == null) {
@@ -133,6 +140,8 @@ class ScannerViewModel @Inject constructor(
             }
             return
         }
+
+        Log.d(TAG, "Best face: conf=${"%.3f".format(face.confidence)} rect=${face.boundingBox}")
 
         _isFaceDetected.value = true
         _debugDetection.value = null // Legacy, digantikan overlay

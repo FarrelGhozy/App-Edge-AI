@@ -12,16 +12,16 @@ import java.nio.FloatBuffer
  *
  * Model: w600k_mbf.onnx from InsightFace buffalo_sc pack.
  * Input:  [1, 3, 112, 112] float32 normalized [0,1]
- * Output: [1, 192] float32 — already L2-normalized, ready for cosine similarity
+ * Output: [1, 512] float32 — already L2-normalized, ready for cosine similarity
  */
 class OnnxFaceEmbedder(private val context: Context) : FaceEmbedderProvider {
 
     companion object {
         private const val TAG = "OnnxEmbedder"
-        override val INPUT_SIZE = 112
-        override val EMBEDDING_DIM = 192
-        private const val INPUT_NAME = "input"
-        private const val OUTPUT_NAME = "output"
+        val INPUT_SIZE = 112
+        val EMBEDDING_DIM = 512
+        private const val INPUT_NAME = "input.1"
+        private const val OUTPUT_NAME = "516"
     }
 
     private var session: OrtSession? = null
@@ -61,7 +61,7 @@ class OnnxFaceEmbedder(private val context: Context) : FaceEmbedderProvider {
             val inputMap = mapOf(INPUT_NAME to inputTensor)
             val results = session!!.run(inputMap)
 
-            val output = (results.get(OUTPUT_NAME)?.value as? Array<FloatArray>)?.get(0)
+            val output = (results.get(OUTPUT_NAME).orElse(null)?.value as? Array<FloatArray>)?.get(0)
                 ?: throw IllegalStateException("Unexpected ONNX output format")
 
             // Model output is already L2-normalized — no need to normalize again

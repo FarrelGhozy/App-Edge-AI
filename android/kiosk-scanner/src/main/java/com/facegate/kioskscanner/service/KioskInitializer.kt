@@ -7,8 +7,8 @@ import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.LoginRequest
-import com.facegate.core.face.FaceDetectorWrapper
-import com.facegate.core.face.FaceEmbedder
+import com.facegate.core.face.FaceDetectorProvider
+import com.facegate.core.face.FaceEmbedderProvider
 import com.facegate.core.face.FaceMatcher
 import com.facegate.core.sync.SyncManager
 import com.facegate.kioskscanner.BuildConfig
@@ -30,8 +30,8 @@ class KioskInitializer @Inject constructor(
     private val faceVectorDao: FaceVectorDao,
     private val campusRuleDao: CampusRuleDao,
     private val faceMatcher: FaceMatcher,
-    private val faceDetector: FaceDetectorWrapper,
-    private val faceEmbedder: FaceEmbedder,
+    private val faceDetectorProvider: FaceDetectorProvider,
+    private val faceEmbedderProvider: FaceEmbedderProvider,
     private val voiceFeedback: VoiceFeedback,
     private val syncManager: SyncManager
 ) {
@@ -68,13 +68,13 @@ class KioskInitializer @Inject constructor(
     }
 
     private fun initFaceDetector() {
-        faceDetector.init()
-        Log.d(TAG, "FaceDetector initialized")
+        val ok = faceDetectorProvider.init()
+        Log.d(TAG, "FaceDetector initialized: $ok")
     }
 
     private fun initFaceEmbedder() {
-        faceEmbedder.init()
-        Log.d(TAG, "FaceEmbedder initialized")
+        val ok = faceEmbedderProvider.init()
+        Log.d(TAG, "FaceEmbedder initialized: $ok")
     }
 
     private fun initVoiceFeedback() {

@@ -74,12 +74,10 @@ class VideoMatchEngine @Inject constructor(
      * Synchronous detection from Bitmap (used during live analyzer).
      */
     fun detectFromBitmap(bitmap: Bitmap): List<FaceBox> {
-        return if (faceDetector.isReady()) {
-            faceDetector.detect(bitmap)
-        } else {
-            // Fallback would go here via FaceDetectorWrapper
-            emptyList()
+        if (!faceDetector.isReady()) {
+            if (!faceDetector.init()) return emptyList()
         }
+        return faceDetector.detect(bitmap)
     }
 
     /**
@@ -187,9 +185,10 @@ class VideoMatchEngine @Inject constructor(
 
         try {
             // 1. Extract embeddings for each frame
-            val embedResults = frames.map { entry ->
+            val embedResults = frames.mapNotNull { entry ->
                 try {
-                    val faceCrop = cropFace(entry.bitmap, entry.faceRect)
+                    val faceRect = entry.faceRect ?: return@mapNotNull null
+                    val faceCrop = cropFace(entry.bitmap, faceRect)
                     val emb = faceEmbedder.embed(faceCrop)
                     if (faceCrop !== entry.bitmap) faceCrop.recycle()
                     entry.copy(embedding = emb)
@@ -197,7 +196,7 @@ class VideoMatchEngine @Inject constructor(
                     Log.e(TAG, "Embed failed for frame: ${e.message}")
                     null
                 }
-            }.filterNotNull()
+            }
 
             if (embedResults.size < MIN_FRAMES_FOR_FUSION) {
                 Log.w(TAG, "Too few frames embedded: ${embedResults.size}")

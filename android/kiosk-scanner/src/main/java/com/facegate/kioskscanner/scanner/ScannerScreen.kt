@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -50,6 +51,7 @@ fun ScannerScreen(
     val isFaceCentered by viewModel.isFaceCentered.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
+    val imageSize by viewModel.imageSize.collectAsState()
 
     val cameraPermissionGranted = remember {
         mutableStateOf(
@@ -130,22 +132,19 @@ fun ScannerScreen(
 
             // ─── Face Bounding Box Overlay ───
             Canvas(
-                modifier = Modifier.fillMaxSize().also {
-                    // Capture canvas size for coordinate transform
-                    it.onSizeChanged { size ->
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onSizeChanged { size ->
                         canvasWidth = size.width.toFloat()
                         canvasHeight = size.height.toFloat()
                     }
-                }
             ) {
                 val overlay = faceOverlay
                 val rect = overlay.faceRect ?: return@Canvas
 
                 // Transform image coords → canvas coords
-                // Asumsi: image 1920×1080, canvas = screen size
-                // Front camera → mirror X
-                val imgW = 1920f // akan diganti runtime dari ViewModel
-                val imgH = 1080f
+                val imgW = if (imageSize.first > 0) imageSize.first.toFloat() else 640f
+                val imgH = if (imageSize.second > 0) imageSize.second.toFloat() else 480f
                 val scaleX = size.width / imgW
                 val scaleY = size.height / imgH
 
@@ -237,10 +236,11 @@ fun ScannerScreen(
                 }
 
                 // Sync status
-                if (syncStatus != null) {
+                val ss = syncStatus
+                if (ss != null) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        syncStatus,
+                        ss,
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 11.sp
                     )
@@ -318,7 +318,7 @@ fun ScannerScreen(
                     onClick = { viewModel.syncNow() },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(8.dp)
+                        .padding(top = 48.dp, end = 8.dp)
                         .size(40.dp)
                         .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                 ) {

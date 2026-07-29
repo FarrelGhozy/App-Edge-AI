@@ -29,9 +29,10 @@ class FaceDetectorWrapper : FaceDetectorProvider {
     private var isInitialized = false
     private var lastError: String? = null
 
-    fun init() {
+    override fun init(): Boolean {
         isInitialized = true
         lastError = null
+        return true
     }
 
     /** Detect from raw android.media.Image (no Bitmap conversion needed). */

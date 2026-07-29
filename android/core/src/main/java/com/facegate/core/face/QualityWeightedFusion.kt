@@ -75,8 +75,8 @@ class QualityWeightedFusion {
         val scored = entries.map { entry ->
             val qs = computeQualityScore(entry)
             entry to qs
-        }.filter { (_, qs) ->
-            qs >= MIN_QUALITY && it.first.embedding != null
+        }.filter { (entry, qs) ->
+            qs >= MIN_QUALITY && entry.embedding != null
         }
 
         if (scored.size < MIN_FRAMES) {

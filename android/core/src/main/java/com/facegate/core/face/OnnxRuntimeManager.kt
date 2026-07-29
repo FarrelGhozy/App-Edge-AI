@@ -55,7 +55,6 @@ class OnnxRuntimeManager private constructor(private val context: Context) {
             ortEnv = OrtEnvironment.getEnvironment()
 
             val sessionOpts = OrtSession.SessionOptions()
-            sessionOpts.addCpuProvider() // Fallback CPU
 
             // Load detection model
             try {
