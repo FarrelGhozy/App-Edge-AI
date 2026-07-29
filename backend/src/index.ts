@@ -11,6 +11,7 @@ import { deviceRoutes } from "./routes/devices";
 import { permitRoutes } from "./routes/permits";
 import { violationRoutes } from "./routes/violations";
 import { notificationRoutes } from "./routes/notifications";
+import { eventsRoutes } from "./routes/events";
 import { settingRoutes } from "./routes/settings";
 import { reportRoutes } from "./routes/reports";
 import { dashboardRoutes } from "./routes/dashboard";
@@ -54,6 +55,7 @@ const app = new Elysia()
   .use(permitRoutes)
   .use(violationRoutes)
   .use(notificationRoutes)
+  .use(eventsRoutes)
   .use(settingRoutes)
   .use(reportRoutes)
   .use(dashboardRoutes)
