@@ -13,6 +13,9 @@ import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiClient
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.AuthInterceptor
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import java.util.concurrent.TimeUnit
 import com.facegate.core.face.AntiSpoofDetector
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
@@ -65,11 +68,25 @@ object CoreModule {
 
     @Provides
     @Singleton
+    fun provideOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient {
+        return OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
+            .addInterceptor(HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BODY
+            })
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    @Provides
+    @Singleton
     fun provideApiService(
-        authInterceptor: AuthInterceptor,
+        okHttpClient: OkHttpClient,
         @ApiBaseUrl baseUrl: String
     ): ApiService {
-        return ApiClient.create(baseUrl, authInterceptor)
+        return ApiClient.create(baseUrl, okHttpClient)
     }
 
     @Provides
