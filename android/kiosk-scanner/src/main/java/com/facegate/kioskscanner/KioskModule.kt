@@ -81,9 +81,7 @@ abstract class KioskModule {
 
         @Provides
         @Singleton
-        fun provideOnnxFaceEmbedder(
-            @ApplicationContext context: android.content.Context
-        ): OnnxFaceEmbedder {
+        fun provideOnnxFaceEmbedder(@ApplicationContext context: android.content.Context): OnnxFaceEmbedder {
             return OnnxFaceEmbedder(context)
         }
 

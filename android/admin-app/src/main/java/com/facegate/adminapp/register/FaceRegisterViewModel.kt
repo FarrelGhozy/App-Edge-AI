@@ -12,7 +12,7 @@ import com.facegate.core.data.remote.dto.BatchUploadFacesRequest
 import com.facegate.core.data.remote.dto.PoseVectorEntry
 import com.facegate.core.face.FaceDetectionResult
 import com.facegate.core.face.FaceDetectorWrapper
-import com.facegate.core.face.FaceEmbedder
+import com.facegate.core.face.FaceEmbedderProvider
 import com.facegate.core.face.LivenessDetector
 import com.facegate.core.face.QualityAnalyzer
 import com.facegate.core.face.QualityAnalyzer.QualityReport
@@ -86,7 +86,7 @@ data class FaceRegisterState(
 @HiltViewModel
 class FaceRegisterViewModel @Inject constructor(
     private val faceDetector: FaceDetectorWrapper,
-    private val faceEmbedder: FaceEmbedder,
+    private val faceEmbedder: FaceEmbedderProvider,
     private val livenessDetector: LivenessDetector,
     private val apiService: ApiService
 ) : ViewModel() {
