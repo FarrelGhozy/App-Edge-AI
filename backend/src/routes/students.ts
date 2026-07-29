@@ -14,6 +14,7 @@ import {
   deleteFace
 } from "../services/student";
 import { authGuard } from "../guards/auth";
+import { notifyDevicesChange } from "../services/events";
 
 export const studentRoutes = new Elysia()
   .use(authGuard)
@@ -40,6 +41,7 @@ export const studentRoutes = new Elysia()
   .post("/api/students", async ({ body }) => {
     try {
       const student = await createStudent(body);
+      notifyDevicesChange();
       return student;
     } catch (error: any) {
       if (error.code === "P2002") {
@@ -56,16 +58,19 @@ export const studentRoutes = new Elysia()
   }, { body: createStudentSchema })
   .put("/api/students/:id", async ({ params: { id }, body }) => {
     const student = await updateStudent(id, body as Record<string, unknown>);
+    notifyDevicesChange();
     return student;
   }, { body: updateStudentSchema })
   .delete("/api/students/:id", async ({ params: { id } }) => {
     await deleteStudent(id);
+    notifyDevicesChange();
     return { success: true };
   })
   // ─── Upload single pose vector ───
   .post("/api/students/:id/face", async ({ params: { id }, body }) => {
     try {
       await uploadFace(id, body.pose, body.vector);
+      notifyDevicesChange();
       return { success: true };
     } catch (error: any) {
       if (error.message === "STUDENT_NOT_FOUND") {
@@ -108,6 +113,7 @@ export const studentRoutes = new Elysia()
   .post("/api/students/:id/faces", async ({ params: { id }, body }) => {
     try {
       const result = await batchUploadFaces(id, body.vectors);
+      notifyDevicesChange();
       return { success: true, ...result };
     } catch (error: any) {
       if (error.message === "STUDENT_NOT_FOUND") {
@@ -154,5 +160,6 @@ export const studentRoutes = new Elysia()
         { status: 404, headers: { "Content-Type": "application/json" } }
       );
     }
+    notifyDevicesChange();
     return { success: true };
   });
