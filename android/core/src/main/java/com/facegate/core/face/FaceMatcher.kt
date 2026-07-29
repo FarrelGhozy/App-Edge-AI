@@ -2,32 +2,30 @@ package com.facegate.core.face
 
 import android.util.Log
 
-data class MatchResult(
-    val studentId: String?,
-    val confidence: Float,
-    val isMatch: Boolean,
-    val matchTimeMs: Long = 0L,
-    val secondBestId: String? = null,
-    val secondBestConfidence: Float = 0f
-)
-
 /**
- * Optimized face matcher using cosine similarity with multi-vector per student support.
+ * Optimized face matcher using cosine similarity with adaptive threshold.
  *
- * Each student can have multiple pose vectors (CENTER, LEFT, RIGHT, UP, DOWN).
- * Matching scans ALL vectors and returns the student with the best match across any pose.
+ * Key features:
+ * - Adaptive threshold berdasarkan gap analysis (best vs second-best)
+ * - Support multi-vector per student (different poses)
+ * - Pre-normalized storage (dot product = cosine similarity)
  *
- * Optimizations:
- * 1. Pre-normalized storage — dot product = cosine similarity directly
- * 2. Second-best tracking — detects ambiguous matches
+ * Adaptive threshold strategy:
+ * - Gap > 0.15: CONFIDENT, threshold 0.70 (normal)
+ * - Gap 0.08-0.15: MEDIUM, threshold 0.75 (perlu lebih yakin)
+ * - Gap < 0.08: WEAK, threshold 0.85 (banyak yang mirip)
+ * - Video mode: threshold bisa diturunkan 0.02 karena fusion sudah stabilkan noise
  */
 class FaceMatcher(
-    private val threshold: Float = 0.70f
+    private val baseThreshold: Float = 0.70f,
+    private val isVideoMode: Boolean = true
 ) : FaceIndex {
 
     companion object {
         private const val TAG = "FaceMatcher"
         private const val AMBIGUITY_RATIO = 0.15f
+        private const val HIGH_GAP = 0.15f
+        private const val MEDIUM_GAP = 0.08f
     }
 
     // Flat list of (studentId, normalizedVector) — one entry per pose vector
@@ -72,22 +70,54 @@ class FaceMatcher(
 
         val elapsedMs = (System.nanoTime() - startTime) / 1_000_000L
 
-        // Ambiguity check
-        val diff = bestScore - secondScore
-        val adjustedScore = if (diff < AMBIGUITY_RATIO && bestScore > 0) {
-            bestScore - (AMBIGUITY_RATIO - diff) * 0.5f
+        // Gap analysis
+        val gap = bestScore - secondScore
+        val adjustedScore = if (gap < AMBIGUITY_RATIO && bestScore > 0) {
+            bestScore - (AMBIGUITY_RATIO - gap) * 0.5f
         } else {
             bestScore
+        }
+
+        // Adaptive threshold
+        val adaptiveThreshold = computeAdaptiveThreshold(gap)
+        val isMatch = adjustedScore >= adaptiveThreshold
+
+        // Decision level
+        val decision = when {
+            !isMatch -> MatchDecision.NO_MATCH
+            gap > HIGH_GAP && adjustedScore >= baseThreshold + 0.05f -> MatchDecision.CONFIDENT
+            gap > MEDIUM_GAP -> MatchDecision.MEDIUM
+            else -> MatchDecision.WEAK
         }
 
         return MatchResult(
             studentId = bestId,
             confidence = adjustedScore,
-            isMatch = adjustedScore >= threshold,
+            isMatch = isMatch,
+            decision = decision,
             matchTimeMs = elapsedMs,
             secondBestId = secondId,
-            secondBestConfidence = secondScore
+            secondBestConfidence = secondScore,
+            gapScore = gap
         )
+    }
+
+    /**
+     * Compute adaptive threshold based on gap between best and second-best.
+     *
+     * - Large gap (> 0.15): standard threshold (0.70)
+     * - Medium gap (0.08-0.15): higher threshold (0.75)
+     * - Small gap (< 0.08): strict threshold (0.85)
+     * - Video mode: -0.02 because fusion reduces noise
+     */
+    private fun computeAdaptiveThreshold(gap: Float): Float {
+        val rawThreshold = when {
+            gap > HIGH_GAP -> baseThreshold
+            gap > MEDIUM_GAP -> baseThreshold + 0.05f
+            else -> baseThreshold + 0.15f
+        }
+        // Video fusion produces more stable embeddings → slightly lower threshold
+        return if (isVideoMode) (rawThreshold - 0.02f).coerceAtLeast(0.60f) else rawThreshold
     }
 
     fun matchBatch(embeddings: List<FloatArray>): List<MatchResult> {
@@ -99,8 +129,6 @@ class FaceMatcher(
     }
 
     override fun size(): Int = faceIndex.size
-
-    // ─── Old Map-based buildIndex removed — use List<IndexEntry> instead ───
 
     private fun dotProduct(a: FloatArray, b: FloatArray): Float {
         var sum = 0f
@@ -126,5 +154,5 @@ class FaceMatcher(
         return kotlin.math.abs(sqSum - 1f) < 0.001f
     }
 
-    fun getThreshold(): Float = threshold
+    fun getThreshold(): Float = baseThreshold
 }

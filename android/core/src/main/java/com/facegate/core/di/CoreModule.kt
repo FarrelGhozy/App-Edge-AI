@@ -104,7 +104,7 @@ object CoreModule {
     @Provides
     @Singleton
     fun provideFaceMatcher(): FaceMatcher {
-        return FaceMatcher()
+        return FaceMatcher(isVideoMode = false) // Default mode for registration/admin
     }
 
     @Provides

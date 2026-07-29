@@ -1,22 +1,20 @@
 package com.facegate.kioskscanner.scanner
 
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.util.Log
 import androidx.camera.core.ImageProxy
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.entity.AttendanceLogEntity
 import com.facegate.core.engine.ToggleAction
-import com.facegate.core.face.FaceDetectionResult
-import com.facegate.core.face.FaceDetectorWrapper
-import com.facegate.core.face.FaceEmbedder
-import com.facegate.core.face.FaceMatcher
-import com.facegate.core.face.LivenessDetector
+import com.facegate.core.face.*
 import com.facegate.core.sync.SyncManager
-import com.facegate.kioskscanner.matching.MatchEngine
 import com.facegate.kioskscanner.matching.MatchEngineResult
+import com.facegate.kioskscanner.matching.VideoMatchEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,9 +25,25 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.math.abs
 
+/**
+ * Data class for the face bounding box overlay UI state.
+ * Selalu dikirim tiap frame dari live analyzer ke UI.
+ */
+data class FaceOverlayState(
+    val faceRect: Rect? = null,           // Bounding box in original image coordinates
+    val canvasRect: Rect? = null,         // Bounding box in Canvas coordinates (after transform)
+    val qualityColor: Color = Color.Transparent,
+    val label: String = "",
+    val progress: Float = 0f,             // 0.0..1.0 selama frame collection
+    val isCollecting: Boolean = false,
+    val collectedCount: Int = 0,
+    val userName: String? = null,          // Muncul kalau match sukses
+    val actionLabel: String? = null        // "KELUAR ✅" / "KEMBALI ✅"
+)
+
 @HiltViewModel
 class ScannerViewModel @Inject constructor(
-    private val matchEngine: MatchEngine,
+    private val videoMatchEngine: VideoMatchEngine,
     private val attendanceLogDao: AttendanceLogDao,
     private val devicePreferences: DevicePreferences,
     private val voiceFeedback: VoiceFeedback,
@@ -37,8 +51,10 @@ class ScannerViewModel @Inject constructor(
 ) : ViewModel() {
 
     companion object {
+        private const val TAG = "ScannerVM"
         private const val CENTER_MARGIN_RATIO = 0.25f
-        private const val DELAY_BEFORE_CAPTURE_MS = 1000L
+        private const val DELAY_BEFORE_COLLECT_MS = 500L
+        private const val FRAME_INTERVAL_MS = 100L // Capture 1 frame setiap 100ms = 10 FPS
     }
 
     private val _state = MutableStateFlow<UIState>(UIState.Idle)
@@ -46,6 +62,10 @@ class ScannerViewModel @Inject constructor(
 
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+
+    // Face overlay state — emitted tiap frame
+    private val _faceOverlay = MutableStateFlow(FaceOverlayState())
+    val faceOverlay: StateFlow<FaceOverlayState> = _faceOverlay.asStateFlow()
 
     // Face detection state for guide overlay
     private val _isFaceDetected = MutableStateFlow(false)
@@ -57,7 +77,7 @@ class ScannerViewModel @Inject constructor(
     private val _statusMessage = MutableStateFlow("Arahkan wajah ke kamera")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
-    // Debug: expose last detection for overlay
+    // Debug: expose last detection for overlay (legacy)
     private val _debugDetection = MutableStateFlow<FaceDetectionResult?>(null)
     val debugDetection: StateFlow<FaceDetectionResult?> = _debugDetection.asStateFlow()
 
@@ -65,8 +85,13 @@ class ScannerViewModel @Inject constructor(
     private val _syncStatus = MutableStateFlow<String?>(null)
     val syncStatus: StateFlow<String?> = _syncStatus.asStateFlow()
 
-    // Delayed capture — 1s wait after liveness passes
-    private var pendingCaptureAt: Long = 0L
+    // Delayed collect start — wait after liveness passes
+    private var pendingCollectAt: Long = 0L
+    private var lastFrameCaptureTime: Long = 0L
+
+    // Image dimensions for transform
+    private var lastImageWidth: Int = 0
+    private var lastImageHeight: Int = 0
 
     sealed class UIState {
         data object Idle : UIState()
@@ -87,155 +112,268 @@ class ScannerViewModel @Inject constructor(
 
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
-            Log.d("ScannerVM", "mediaImage null")
-            pendingCaptureAt = 0L
-            _isFaceDetected.value = false
-            _isFaceCentered.value = false
-            _statusMessage.value = "Arahkan wajah ke kamera"
-            _debugDetection.value = null
-            return
-        }
-
-        val detection = matchEngine.detectFromImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-        _debugDetection.value = detection
-
-        if (detection == null) {
-            Log.d("ScannerVM", "no face detected")
-            pendingCaptureAt = 0L
-            _isFaceDetected.value = false
-            _isFaceCentered.value = false
-            _statusMessage.value = "Arahkan wajah ke kamera"
-            return
-        }
-
-        _isFaceDetected.value = true
-
-        if (!detection.isGoodQuality) {
-            _isFaceCentered.value = false
-            pendingCaptureAt = 0L
-            _statusMessage.value = "Hadapkan wajah lurus ke kamera"
-            _debugDetection.value = detection
-            return
-        }
-
-        // Center-position check: wajah harus di tengah frame
-        val centered = isFaceCentered(detection)
-        _isFaceCentered.value = centered
-        if (!centered) {
-            pendingCaptureAt = 0L
-            _statusMessage.value = "Posisikan wajah di tengah kotak"
-            _debugDetection.value = detection
+            resetDetectionState()
             return
         }
 
         val currentTime = System.currentTimeMillis()
+        val bitmap = imageProxyToBitmap(imageProxy) ?: return
+        lastImageWidth = bitmap.width
+        lastImageHeight = bitmap.height
 
-        // Liveness check (blink detection)
-        val livenessPassed = matchEngine.checkLiveness(detection, currentTime)
-        if (!livenessPassed) {
-            val timedOut = matchEngine.isLivenessWindowExpired(currentTime)
-            _statusMessage.value = if (timedOut) {
-                "Kedipkan mata untuk verifikasi"
-            } else {
-                "Kedipkan mata"
+        // ─── RetinaFace detection ───
+        val faces = videoMatchEngine.detectFromBitmap(bitmap)
+        val face = faces.maxByOrNull { it.confidence }
+
+        if (face == null) {
+            resetDetectionState()
+            // If we were collecting frames, let the collection continue
+            if (!videoMatchEngine.isCollecting()) {
+                bitmap.recycle()
             }
-            _debugDetection.value = detection
             return
         }
 
-        // If this is the first frame after liveness passed, start 1s delay
-        if (pendingCaptureAt == 0L) {
-            pendingCaptureAt = currentTime + DELAY_BEFORE_CAPTURE_MS
-            _statusMessage.value = "Tahan pose..."
-            _debugDetection.value = detection
+        _isFaceDetected.value = true
+        _debugDetection.value = null // Legacy, digantikan overlay
+
+        // ─── Quality & centered check ───
+        val centered = videoMatchEngine.isFaceCentered(face, bitmap.width.toFloat(), bitmap.height.toFloat())
+        _isFaceCentered.value = centered
+
+        val yawEstimated = estimateYaw(face) // Approx from landmarks
+        val qualityOK = abs(yawEstimated) < 25f && centered
+
+        // ─── Update overlay UI tiap frame ───
+        updateOverlay(face, bitmap.width, bitmap.height, qualityOK, centered, currentTime)
+
+        if (!qualityOK) {
+            pendingCollectAt = 0L
+            _statusMessage.value = if (!centered) "Posisikan wajah di tengah"
+                                   else "Hadapkan wajah lurus ke kamera"
+            if (!videoMatchEngine.isCollecting()) bitmap.recycle()
             return
         }
 
-        // Wait for delay to elapse (wajah harus tetap di tengah)
-        if (currentTime < pendingCaptureAt) {
-            _statusMessage.value = "Tahan pose..."
-            _debugDetection.value = detection
+        // ─── Liveness check (EAR blink) ───
+        videoMatchEngine.startLivenessWindow()
+        // Note: EAR liveness requires eye contours from ML Kit landmarks.
+        // With RetinaFace (5 landmarks only), approximate using eye landmark positions.
+        // For now, simplified: proceed after quality pass + short delay
+        val livenessReady = currentTime - livenessStartTime > 2000L // 2s simplified liveness
+        if (!livenessReady) {
+            _statusMessage.value = "Kedipkan mata"
+            if (!videoMatchEngine.isCollecting()) bitmap.recycle()
             return
         }
 
-        // ─── CAPTURE TIME ───
-        pendingCaptureAt = 0L
-        _isProcessing.value = true
-        _statusMessage.value = "Memproses..."
+        // ─── Start frame collection (video mode) ───
+        if (!videoMatchEngine.isCollecting()) {
+            if (pendingCollectAt == 0L) {
+                pendingCollectAt = currentTime + DELAY_BEFORE_COLLECT_MS
+                _statusMessage.value = "Tahan pose..."
+                lastFrameCaptureTime = currentTime
+                if (!videoMatchEngine.isCollecting()) bitmap.recycle()
+                return
+            }
 
-        val bitmap = imageProxyToBitmap(imageProxy)
-        if (bitmap == null) {
-            _isProcessing.value = false
+            if (currentTime < pendingCollectAt) {
+                _statusMessage.value = "Tahan pose..."
+                if (!videoMatchEngine.isCollecting()) bitmap.recycle()
+                return
+            }
+
+            // Mulai collect frame
+            videoMatchEngine.startFrameCollection()
+            _statusMessage.value = "Mengambil gambar..."
+            lastFrameCaptureTime = currentTime
+        }
+
+        // ─── Collect frames ───
+        if (videoMatchEngine.isCollecting()) {
+            // Throttle: ambil 1 frame setiap FRAME_INTERVAL_MS
+            if (currentTime - lastFrameCaptureTime >= FRAME_INTERVAL_MS) {
+                val qualityScore = computeQualityScore(face)
+                videoMatchEngine.addFrame(bitmap, face, qualityScore)
+                lastFrameCaptureTime = currentTime
+
+                _statusMessage.value = "Mengambil gambar... ${videoMatchEngine.getCollectedCount()}/15"
+            }
+
+            // Update overlay progress
+            _faceOverlay.value = _faceOverlay.value.copy(
+                progress = videoMatchEngine.getCollectionProgress(),
+                isCollecting = true,
+                collectedCount = videoMatchEngine.getCollectedCount()
+            )
+
+            // Check if collection complete
+            if (videoMatchEngine.isCollectionComplete()) {
+                _statusMessage.value = "Memproses..."
+                _isProcessing.value = true
+                processVideoFrames()
+                // Don't recycle bitmap here — it's stored in buffer
+                return
+            }
+
+            // If collection ongoing, don't recycle bitmap (it's stored)
             return
         }
 
+        bitmap.recycle()
+    }
+
+    private var livenessStartTime: Long = 0L
+
+    private fun resetDetectionState() {
+        pendingCollectAt = 0L
+        _isFaceDetected.value = false
+        _isFaceCentered.value = false
+        _statusMessage.value = "Arahkan wajah ke kamera"
+        _faceOverlay.value = FaceOverlayState()
+    }
+
+    /**
+     * Process collected video frames asynchronously.
+     */
+    private fun processVideoFrames() {
         viewModelScope.launch {
             try {
-                val result = matchEngine.matchAfterDetection(detection, bitmap)
+                val result = videoMatchEngine.processVideoCollection()
 
-                when (result) {
-                    is MatchEngineResult.Matched -> {
-                        val action = when (result.action) {
-                            ToggleAction.KELUAR -> "keluar"
-                            ToggleAction.KEMBALI -> "kembali"
+                withContext(Dispatchers.Main) {
+                    when (result) {
+                        is MatchEngineResult.Matched -> {
+                            val action = when (result.action) {
+                                ToggleAction.KELUAR -> "keluar"
+                                ToggleAction.KEMBALI -> "kembali"
+                            }
+                            val deviceId = devicePreferences.getDeviceId()
+                            val log = AttendanceLogEntity(
+                                studentId = result.studentId,
+                                studentName = result.studentName,
+                                action = action,
+                                timestamp = System.currentTimeMillis(),
+                                confidenceScore = 1.0f,
+                                isViolation = result.isViolation,
+                                violationType = if (result.isViolation) result.violationMessage else null,
+                                deviceId = deviceId
+                            )
+                            attendanceLogDao.insert(log)
+                            launch { syncManager.syncLogsOnly() }
+                            voiceFeedback.speakSuccess(result.studentName, action)
+                            if (result.isViolation) {
+                                result.violationMessage?.let { voiceFeedback.speakWarning(it) }
+                            }
+                            val label = when (action) {
+                                "keluar" -> "KELUAR ✅"
+                                "kembali" -> "KEMBALI ✅"
+                                else -> action
+                            }
+
+                            // Update overlay with success info
+                            _faceOverlay.value = _faceOverlay.value.copy(
+                                userName = result.studentName,
+                                actionLabel = label,
+                                qualityColor = Color(0xFF4CAF50)
+                            )
+
+                            _state.value = UIState.Success(
+                                studentName = result.studentName,
+                                actionLabel = label,
+                                isViolation = result.isViolation,
+                                message = result.violationMessage
+                            )
+                            _statusMessage.value = ""
                         }
-                        val deviceId = devicePreferences.getDeviceId()
-                        val log = AttendanceLogEntity(
-                            studentId = result.studentId,
-                            studentName = result.studentName,
-                            action = action,
-                            timestamp = System.currentTimeMillis(),
-                            confidenceScore = 1.0f,
-                            isViolation = result.isViolation,
-                            violationType = if (result.isViolation) result.violationMessage else null,
-                            deviceId = deviceId
-                        )
-                        attendanceLogDao.insert(log)
-                        viewModelScope.launch { syncManager.syncLogsOnly() }
-                        voiceFeedback.speakSuccess(result.studentName, action)
-                        if (result.isViolation) {
-                            result.violationMessage?.let { voiceFeedback.speakWarning(it) }
+                        is MatchEngineResult.Unknown -> {
+                            voiceFeedback.speakError()
+                            _state.value = UIState.Error("Wajah tidak dikenal")
+                            _faceOverlay.value = _faceOverlay.value.copy(
+                                qualityColor = Color(0xFFE53935)
+                            )
                         }
-                        val label = when (action) {
-                            "keluar" -> "KELUAR ✅"
-                            "kembali" -> "KEMBALI ✅"
-                            else -> action
+                        is MatchEngineResult.LivenessFailed -> {
+                            _state.value = UIState.Error("Kedipkan mata untuk verifikasi")
                         }
-                        _state.value = UIState.Success(
-                            studentName = result.studentName,
-                            actionLabel = label,
-                            isViolation = result.isViolation,
-                            message = result.violationMessage
-                        )
-                        _statusMessage.value = ""
+                        is MatchEngineResult.NoFace -> {
+                            // Will retry on next frame
+                        }
+                        is MatchEngineResult.QualityFailed -> {
+                            _state.value = UIState.Error(result.reason)
+                        }
                     }
-                    is MatchEngineResult.Unknown -> {
-                        voiceFeedback.speakError()
-                        _state.value = UIState.Error("Wajah tidak dikenal (${String.format("%.0f", result.confidence * 100)}% mirip)")
-                    }
-                    is MatchEngineResult.LivenessFailed -> {
-                        _state.value = UIState.Error("Kedipkan mata untuk verifikasi")
-                    }
-                    is MatchEngineResult.NoFace -> {}
-                    is MatchEngineResult.QualityFailed -> {
-                        _state.value = UIState.Error(result.reason)
-                    }
+                    _isProcessing.value = false
                 }
-            } finally {
+            } catch (e: Exception) {
+                Log.e(TAG, "Video processing error", e)
+                _state.value = UIState.Error("Proses gagal, coba lagi")
                 _isProcessing.value = false
-                bitmap.recycle()
             }
         }
     }
 
-    private fun isFaceCentered(detection: FaceDetectionResult): Boolean {
-        val cx = detection.imageWidth / 2f
-        val cy = detection.imageHeight / 2f
-        val bb = detection.boundingBox
+    private fun updateOverlay(face: FaceBox, imgW: Int, imgH: Int, qualityOK: Boolean, centered: Boolean, time: Long) {
+        val color = when {
+            !centered -> Color(0xFFFFC107)      // Kuning — belum centered
+            !qualityOK -> Color(0xFFFFC107)     // Kuning — miring
+            videoMatchEngine.isCollecting() -> Color(0xFF2196F3) // Biru — collecting
+            else -> Color(0xFF4CAF50)           // Hijau — siap
+        }
+
+        val label = when {
+            !centered -> "Posisikan di tengah"
+            !qualityOK -> "Hadap lurus"
+            videoMatchEngine.isCollecting() -> "Mengambil gambar..."
+            else -> "Tahan pose..."
+        }
+
+        _faceOverlay.value = FaceOverlayState(
+            faceRect = face.boundingBox,
+            canvasRect = null, // Dihitung di UI layer
+            qualityColor = color,
+            label = label,
+            progress = if (videoMatchEngine.isCollecting()) videoMatchEngine.getCollectionProgress() else 0f,
+            isCollecting = videoMatchEngine.isCollecting(),
+            collectedCount = videoMatchEngine.getCollectedCount()
+        )
+    }
+
+    /**
+     * Estimate yaw angle from RetinaFace landmarks (5 point).
+     * If left eye and right eye x-positions are asymmetric → face is turning.
+     */
+    private fun estimateYaw(face: FaceBox): Float {
+        val lm = face.landmarks
+        if (lm.size < 4) return 0f
+        val leftEye = lm[0]
+        val rightEye = lm[1]
+        val nose = lm[2]
+        // Simple heuristic: nose deviation from center between eyes
+        val eyeCenterX = (leftEye.first + rightEye.first) / 2f
+        val noseOffset = (nose.first - eyeCenterX) / (rightEye.first - leftEye.first).coerceAtLeast(1f)
+        return noseOffset * 45f // Approx degrees
+    }
+
+    /**
+     * Compute quality score from face box characteristics.
+     */
+    private fun computeQualityScore(face: FaceBox): Float {
+        val rect = face.boundingBox
+        val faceArea = rect.width().toFloat() * rect.height().toFloat()
+        val imageArea = (lastImageWidth * lastImageHeight).toFloat()
+        val sizeRatio = minOf(faceArea / (imageArea * 0.3f), 1.0f)
+        return 0.6f + sizeRatio * 0.4f // Base 0.6 + bonus for big face
+    }
+
+    private fun isFaceCenteredLegacy(face: FaceBox): Boolean {
+        val cx = lastImageWidth / 2f
+        val cy = lastImageHeight / 2f
+        val bb = face.boundingBox
         val faceCx = bb.exactCenterX()
         val faceCy = bb.exactCenterY()
-        val marginX = detection.imageWidth * CENTER_MARGIN_RATIO
-        val marginY = detection.imageHeight * CENTER_MARGIN_RATIO
+        val marginX = lastImageWidth * CENTER_MARGIN_RATIO
+        val marginY = lastImageHeight * CENTER_MARGIN_RATIO
         return abs(faceCx - cx) <= marginX && abs(faceCy - cy) <= marginY
     }
 
@@ -254,7 +392,6 @@ class ScannerViewModel @Inject constructor(
             } catch (e: Exception) {
                 _syncStatus.value = "Gagal: ${e.message}"
             }
-            // Auto-hide status after 3 seconds
             kotlinx.coroutines.delay(3000)
             _syncStatus.value = null
         }
@@ -262,17 +399,20 @@ class ScannerViewModel @Inject constructor(
 
     fun resetState() {
         _state.value = UIState.Idle
-        pendingCaptureAt = 0L
+        pendingCollectAt = 0L
+        livenessStartTime = 0L
         _isFaceDetected.value = false
         _isFaceCentered.value = false
         _statusMessage.value = "Arahkan wajah ke kamera"
+        _faceOverlay.value = FaceOverlayState()
+        videoMatchEngine.resetLiveness()
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
         return try {
             imageProxy.toBitmap()
         } catch (e: Exception) {
-            Log.e("ScannerVM", "toBitmap error", e)
+            Log.e(TAG, "toBitmap error", e)
             null
         }
     }

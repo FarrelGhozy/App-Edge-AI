@@ -30,9 +30,9 @@ android {
         jvmTarget = "17"
     }
 
-    // Don't compress TFLite models in APK (they're already compressed)
+    // Don't compress TFLite & ONNX models in APK
     androidResources {
-        noCompress += listOf("tflite")
+        noCompress += listOf("tflite", "onnx")
     }
 
     testOptions {
@@ -59,6 +59,7 @@ dependencies {
 
     api(libs.tensorflow.lite)
     api(libs.mlkit.facedetection)
+    api(libs.onnxruntime.android)
 
     api(libs.workmanager)
     api(libs.datastore.preferences)
