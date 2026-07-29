@@ -2,6 +2,7 @@ package com.facegate.adminapp.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.facegate.adminapp.sse.SseClient
 import com.facegate.core.data.local.SessionManager
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.AttendanceLogDto
@@ -30,13 +31,26 @@ data class DashboardState(
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val apiService: ApiService,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val sseClient: SseClient
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardState())
     val uiState: StateFlow<DashboardState> = _uiState.asStateFlow()
 
     private var autoRefreshJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            sseClient.events.collect { event ->
+                when (event.type) {
+                    "scan_realtime", "dashboard_update" -> {
+                        loadSummary(isAutoRefresh = true)
+                    }
+                }
+            }
+        }
+    }
 
     fun logout() {
         viewModelScope.launch {
@@ -48,15 +62,17 @@ class DashboardViewModel @Inject constructor(
 
     fun startAutoRefresh() {
         autoRefreshJob?.cancel()
+        sseClient.connect(viewModelScope)
         autoRefreshJob = viewModelScope.launch {
             while (isActive) {
-                delay(30_000)
+                delay(300_000)
                 loadSummary(isAutoRefresh = true)
             }
         }
     }
 
     fun stopAutoRefresh() {
+        sseClient.disconnect()
         autoRefreshJob?.cancel()
         autoRefreshJob = null
     }
@@ -90,5 +106,10 @@ class DashboardViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal terhubung ke server")
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        sseClient.disconnect()
     }
 }
