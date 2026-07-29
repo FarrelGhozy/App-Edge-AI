@@ -191,6 +191,7 @@ class ScannerViewModel @Inject constructor(
                             deviceId = deviceId
                         )
                         attendanceLogDao.insert(log)
+                        viewModelScope.launch { syncManager.syncLogsOnly() }
                         voiceFeedback.speakSuccess(result.studentName, action)
                         if (result.isViolation) {
                             result.violationMessage?.let { voiceFeedback.speakWarning(it) }
