@@ -25,7 +25,8 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
+            // Local dev: emulator → WSL host (lihat docs/server-config.md)
+            buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8150\"")
             buildConfigField("String", "DEVICE_USERNAME", "\"kiosk-gate1\"")
             buildConfigField("String", "DEVICE_PASSWORD", "\"facegate-kiosk-2024\"")
         }
