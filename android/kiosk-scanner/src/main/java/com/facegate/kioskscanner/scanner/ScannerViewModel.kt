@@ -418,6 +418,10 @@ class ScannerViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        voiceFeedback.release()
+        // NOTE: voiceFeedback is @Singleton app-wide and must NOT be released
+        // here — onCleared fires on every activity recreate / config change,
+        // which would shut down the shared TTS engine permanently (issue #79).
+        // Its lifecycle belongs to the Application scope (KioskInitializer),
+        // i.e. it lives until the process dies.
     }
 }
