@@ -4,13 +4,21 @@ import { authGuard } from "../guards/auth";
 
 export const eventsRoutes = new Elysia()
   .use(authGuard())
-  .get("/api/events/stream", () => {
+  .get("/api/events/stream", ({ admin }) => {
     let client: ReturnType<typeof addClient> | null = null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
 
+    // #131: scope koneksi → "admin:<adminId>" atau "device:<deviceId>" agar
+    // emitToAdmins bisa mem-filter event yang relevan (kiosk tak menerima
+    // data admin, admin tak menerima heartbeat device lain).
+    const adminId = admin?.id ?? null;
+    const scope = admin?.role === "device"
+      ? `device:${adminId}`
+      : adminId ? `admin:${adminId}` : undefined;
+
     const stream = new ReadableStream({
       start(controller) {
-        client = addClient(controller);
+        client = addClient(controller, scope);
 
         heartbeat = setInterval(() => {
           try {

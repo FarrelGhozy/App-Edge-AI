@@ -14,7 +14,23 @@ export const deviceRoutes = new Elysia()
     const device = await registerDevice(req, authenticatedDeviceId);
     return device;
   })
-  .put("/api/devices/:deviceId/ping", async ({ params: { deviceId }, body }) => {
+  .put("/api/devices/:deviceId/ping", async ({ params: { deviceId }, body, admin }) => {
+    // #121: IDOR — device hanya boleh mem-ping dirinya sendiri (token device
+    // ber-identitas admin.id = deviceId). Admin (bukan device) tidak boleh
+    // memakai route ini untuk spoof heartbeat device lain.
+    const deviceIdFromToken = admin?.role === "device" ? admin.id : undefined;
+    if (deviceIdFromToken && deviceIdFromToken !== deviceId) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Forbidden: device can only ping itself" }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (admin?.role === "device" && !deviceIdFromToken) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized: device identity required" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
     const { batteryLevel } = body as { batteryLevel?: number };
     await pingDevice(deviceId, batteryLevel);
     return { success: true };
@@ -52,15 +68,51 @@ export const deviceRoutes = new Elysia()
   })
   .put("/api/devices/:deviceId", async ({ params: { deviceId }, body }) => {
     const data = body as { name?: string; location?: string; isActive?: boolean };
-    const device = await prisma.device.update({ where: { deviceId }, data });
-    return { success: true, data: device };
+    try {
+      const device = await prisma.device.update({ where: { deviceId }, data });
+      return { success: true, data: device };
+    } catch (e) {
+      // #123: P2025 → 404 bersih, bukan 500 mentah.
+      if (
+        e instanceof Error &&
+        "code" in e &&
+        (e as { code: string }).code === "P2025"
+      ) {
+        return new Response(JSON.stringify({ success: false, error: "Device tidak ditemukan" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      throw e;
+    }
   })
   .post("/api/sync/request/:deviceId", async ({ params: { deviceId }, admin }) => {
-    const request = await prisma.syncRequest.create({
-      data: {
-        deviceId,
-        requestedById: admin?.id || null
-      }
+    // #131: dedup — 1 pending per device (partial unique index memaksa unik).
+    const existing = await prisma.syncRequest.findFirst({
+      where: { deviceId, isProcessed: false }
     });
-    return { success: true, data: request };
+    if (existing) {
+      await prisma.syncRequest.update({
+        where: { id: existing.id },
+        data: { requestedAt: new Date(), requestedById: admin?.id || existing.requestedById }
+      });
+      return { success: true, data: existing, updated: true };
+    }
+    try {
+      const request = await prisma.syncRequest.create({
+        data: { deviceId, requestedById: admin?.id || null }
+      });
+      return { success: true, data: request };
+    } catch (e) {
+      // P2002 (partial index) = request pending sudah dibuat paralel → laporkan exist.
+      if (
+        e instanceof Error &&
+        "code" in e &&
+        (e as { code: string }).code === "P2002"
+      ) {
+        const race = await prisma.syncRequest.findFirst({ where: { deviceId, isProcessed: false } });
+        return { success: true, data: race, updated: false };
+      }
+      throw e;
+    }
   });

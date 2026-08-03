@@ -1,10 +1,10 @@
 import prisma from "./prisma";
+import { wibParseDate, wibMonthStart, wibMonthEndExclusive, wibDayStart } from "./wib";
 
 export async function dailyReport(date: string) {
-  const startDate = new Date(date);
-  startDate.setHours(0, 0, 0, 0);
-  const endDate = new Date(date);
-  endDate.setHours(23, 59, 59, 999);
+  // #110: interpretasi "hari ini" menurut WIB (deterministik, bukan TZ proses).
+  const { start: startDate, endExclusive } = wibParseDate(date);
+  const endDate = new Date(endExclusive.getTime() - 1); // <= inclusive sandi
 
   const logs = await prisma.attendanceLog.findMany({
     where: { timestamp: { gte: startDate, lte: endDate } },
@@ -34,8 +34,9 @@ export async function dailyReport(date: string) {
 }
 
 export async function monthlyReport(month: number, year: number) {
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+  // #110: awal/akhir bulan menurut WIB, deterministik, bukan TZ proses.
+  const startDate = wibMonthStart(year, month);
+  const endDate = new Date(wibMonthEndExclusive(year, month).getTime() - 1);
 
   const students = await prisma.student.findMany({
     where: { isActive: true }
@@ -127,9 +128,8 @@ export async function outsideNow() {
   // 23:50 belum kembali harus tetap terhitung "di luar". Ambil log sejak
   // awal hari kemarin (24-48 jam cukup untuk menutup gap lintas tengah malam),
   // lalu status ditentukan dari ACTION TERAKHIR per student.
-  const since = new Date();
-  since.setDate(since.getDate() - 1);
-  since.setHours(0, 0, 0, 0);
+  // #110: "awal hari kemarin" menurut WIB, deterministik, bukan TZ proses.
+  const since = wibDayStart(new Date(Date.now() - 24 * 60 * 60 * 1000));
 
   const logs = await prisma.attendanceLog.findMany({
     where: { timestamp: { gte: since } },

@@ -65,14 +65,25 @@ export const permitRoutes = new Elysia()
       const setting = await prisma.globalSetting.findUnique({ where: { key: "max_permit_per_month" } });
       const maxPermits = setting ? parseInt(setting.value) : 10;
 
-      // #85: cek quota + create + increment DALAM SATU transaction — 2 request
-      // paralel tidak bisa lolos melewati batas kuota.
+      // #85 + #128: cek quota + create + increment DALAM SATU transaction.
+      // #128: isolasi default READ COMMITTED membuat check-then-act bisa tembus
+      // saat 2 request paralel (keduanya baca permitsUsed < max lalu keduanya
+      // create+increment → kuota jadi max+1). Solusi: row lock SELECT ... FOR
+      // UPDATE pada permit_quotas — transaksi kedua menunggu commit yang pertama,
+      // lalu membaca nilai yang sudah di-increment → kuota dijaga atomik.
       const permit = await prisma.$transaction(async (tx) => {
-        const quota = await tx.permitQuota.findUnique({
-          where: { studentId_month_year: { studentId: data.studentId, month, year } }
-        });
+        const quota = await tx.$queryRawUnsafe<Array<{ permits_used: number; max_permits: number }>>(
+          `SELECT permits_used, max_permits
+             FROM permit_quotas
+            WHERE student_id = $1 AND month = $2 AND year = $3
+            FOR UPDATE`,
+          data.studentId, month, year
+        );
 
-        if (quota && quota.permitsUsed >= (quota.maxPermits ?? maxPermits)) {
+        const used = quota[0]?.permits_used ?? 0;
+        const quotaMax = quota[0]?.max_permits ?? maxPermits;
+
+        if (quota[0] && used >= quotaMax) {
           throw new Error("QUOTA_EXCEEDED");
         }
 
@@ -98,6 +109,16 @@ export const permitRoutes = new Elysia()
         return created;
       }).catch((e: unknown) => {
         if (e instanceof Error && e.message === "QUOTA_EXCEEDED") return null;
+        if (
+          e instanceof Error &&
+          "code" in e &&
+          (e as { code: string }).code === "P2034"
+        ) {
+          // #128: deadlock serializable jarang terjadi — retry sempat gagal,
+          // kembalikan null (konsumen melihat kuota habis/perlu coba lagi).
+          console.error("[permits] deadlock serialization di kuota:", e);
+          return null;
+        }
         throw e;
       });
 

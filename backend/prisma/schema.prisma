@@ -69,6 +69,7 @@ model AttendanceLog {
   violationType   String?  @map("violation_type")
   deviceId        String?  @map("device_id")
   photoCapture    String?  @map("photo_capture")
+  clientId        String?  @map("client_id")
   isSynced        Boolean  @default(true) @map("is_synced")
   createdAt       DateTime @default(now()) @map("created_at")
 
@@ -77,6 +78,7 @@ model AttendanceLog {
   @@index([studentId])
   @@index([timestamp])
   @@index([action])
+  @@unique([deviceId, clientId])
   @@map("attendance_logs")
 }
 
@@ -214,6 +216,10 @@ model SyncRequest {
   device      Device   @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
   requestedBy Admin?   @relation(fields: [requestedById], references: [id])
 
+  // NOTE: dedup "satu pending per device" memakai PARTIAL UNIQUE INDEX SQL
+  // (bukan @@unique Prisma) karena hanya baris is_processed=false yang harus
+  // unik per device; riwayat processed boleh menumpuk. Index dibuat manual di
+  // migrasi: CREATE UNIQUE INDEX sync_requests_pending_device ON ... WHERE NOT is_processed
   @@map("sync_requests")
 }
 

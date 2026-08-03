@@ -1,4 +1,5 @@
 import prisma from "./prisma";
+import { wibDayStart, wibDayEndExclusive } from "./wib";
 
 export async function dashboardSummary() {
   const totalStudents = await prisma.student.count({ where: { isActive: true } });
@@ -13,9 +14,10 @@ export async function dashboardSummary() {
 
   const currentlyOutside = latestActions.filter((r) => r.action === "keluar").length;
 
+  // #110: "hari ini" menurut WIB (Asia/Jakarta), bukan timezone proses (UTC).
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayEnd = new Date(todayStart.getTime() + 86400000);
+  const todayStart = wibDayStart(now);
+  const todayEnd = wibDayEndExclusive(now);
 
   const [violationsToday, recentScans, registeredFaces] = await Promise.all([
     prisma.violation.count({

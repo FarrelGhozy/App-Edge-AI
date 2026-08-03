@@ -31,7 +31,7 @@ export const syncRoutes = new Elysia()
         s.academic_year
       FROM face_vectors fv
       JOIN students s ON s.id = fv.student_id
-      WHERE $1::timestamptz IS NULL OR fv.updated_at >= $1::timestamptz`,
+      WHERE $1::timestamptz IS NULL OR fv.updated_at > $1::timestamptz`,
       since ? new Date(since) : null
     );
 
@@ -83,6 +83,7 @@ export const syncRoutes = new Elysia()
         violationType: log.violationType,
         deviceId: log.deviceId,
         photoCapture: log.photoCapture,
+        clientId: log.clientId, // #119: idempotency key (uuid per log offline)
         timestamp: log.timestamp
       });
       created.push(record);
@@ -135,8 +136,12 @@ export const syncRoutes = new Elysia()
       orderBy: { createdAt: "desc" }
     });
 
-    const unprocessedLogs = await prisma.syncLog.count({
-      where: { deviceId, status: "pending" }
+    // #131: unprocessedLogs sebelumnya dihitung dari sync_log status="pending"
+    // yang TIDAK PERNAH ada (sync_log hanya success/failed) → selalu 0 dan
+    // menyesatkan. Makna sebenarnya: berapa log offline device yang BELUM
+    // ter-upload ke server. Sumber kebenaran = attendance_logs isSynced=false.
+    const unprocessedLogs = await prisma.attendanceLog.count({
+      where: { deviceId, isSynced: false }
     });
 
     return {
