@@ -3,6 +3,12 @@
 > Proyek **izin keluar-masuk kampus** berbasis Face Recognition untuk **pondok pesantren / asrama kampus**
 > Target: 10.000 mahasiswa | 2 aplikasi Android Native + Backend API
 
+> [!NOTE] **Status migrasi model (branch `insightface`)**
+> Pipeline face recognition sudah dimigrasi dari ML Kit + TFLite ke **InsightFace ONNX (buffalo_sc)**:
+> detection `det_500m.onnx` (RetinaFace-500MF) + embedding `w600k_mbf.onnx` (**512-d**, bukan 192-d lagi).
+> Bagian dokumen ini yang menyebut MediaPipe/TFLite/192-d adalah **rancangan awal (history)** — lihat
+> [`insightface-migration-plan.md`](./insightface-migration-plan.md) untuk arsitektur aktif terkini.
+
 ---
 
 ## Daftar Isi
@@ -62,7 +68,7 @@ FaceGateApp/
 ├── android/
 │   ├── core/                         # :core — shared library
 │   │   ├── src/main/kotlin/.../core/
-│   │   │   ├── face/                 # TFLite wrapper
+│   │   │   ├── face/                 # InsightFace ONNX pipeline (RetinaFace + w600k_mbf)
 │   │   │   ├── network/             # Retrofit
 │   │   │   ├── database/            # Room
 │   │   │   ├── sync/                # WorkManager sync
@@ -150,7 +156,7 @@ FaceGateApp/
 | Bahasa | Kotlin | 2.0.x |
 | UI | Jetpack Compose + Material 3 | |
 | Kamera | CameraX | 1.4.x |
-| Face Embedding | TensorFlow Lite (MobileFaceNet 192-d) | |
+| Face Embedding | InsightFace ONNX (`w600k_mbf.onnx`, 512-d) | |
 | Database Lokal | Room | 2.6.x |
 | Background Sync | WorkManager | 2.9.x |
 | Networking | Retrofit + OkHttp + Kotlinx Serialization | |
@@ -185,8 +191,8 @@ FaceGateApp/
      ↓                                                    ↓
   Crop face ROI                             468 titik landmark wajah
      ↓                                                    ↓
-  [Liveness: Eye Aspect Ratio]              [MobileFaceNet Embedding]
-  Hitung EAR dari landmark mata              Ekstrak 192-d vector (MobileFaceNet)
+  [Liveness: Eye Aspect Ratio]              [InsightFace MBF ONNX Embedding]
+  Hitung EAR dari landmark mata              Ekstrak 512-d vector (w600k_mbf.onnx)
   Kedipan = EAR turun drastis                      ↓
      ↓                                       Brute-force match di RAM
   Jika tidak ada kedipan → tolak             Cosine similarity
@@ -206,8 +212,8 @@ FaceGateApp/
 | Face Detection | **MediaPipe FaceDetector** (via ML Kit CameraX) | ~350 KB | < 5ms |
 | Face Landmarks | **MediaPipe Face Landmarks** (468 titik) | ~0 KB (bundle) | < 2ms |
 | Liveness | **Eye Aspect Ratio (EAR)** — rule-based dari landmark mata | 0 KB | < 2ms |
-| Face Embedding | **MobileFaceNet** .tflite — 192-d vector | ~5 MB | ~15ms |
-| Matching | Brute-force cosine similarity di RAM | 10.000 × 192 = ~7.5 MB | ~3ms |
+| Face Embedding | **InsightFace ONNX** (`w600k_mbf.onnx`) — 512-d vector | ~13.6 MB | ~15ms |
+| Matching | Brute-force cosine similarity di RAM | 10.000 × 512 = ~20 MB | ~3ms |
 | **Total** | | **~9-10 MB** | **~25ms per face** |
 
 - **Threshold**: 0.6 (default, bisa di-tuning)
@@ -410,7 +416,7 @@ model Student {
 
 model FaceVector {
   studentId String   @id @map("student_id")
-  vector    Unsupported("vector(192)")
+  vector    Unsupported("vector(512)")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -1573,8 +1579,8 @@ Cahaya dari depan (searah mahasiswa)
 
 | No | Pertanyaan | Keputusan |
 |---|---|---|
-| 1 | Model Face Detection | ✅ **MediaPipe FaceDetector** |
-| 2 | Model Face Embedding | ✅ **MobileFaceNet 192-d** |
+| 1 | Model Face Detection | ✅ **MediaPipe FaceDetector** → *(migrasi: **RetinaFace-500MF ONNX**, `det_500m.onnx` — branch `insightface`)* |
+| 2 | Model Face Embedding | ✅ **MobileFaceNet 192-d** → *(migrasi: **InsightFace `w600k_mbf.onnx`, 512-d** — branch `insightface`)* |
 | 3 | Liveness Detection | ✅ **Eye Aspect Ratio (EAR)** — rule-based, 0 KB |
 | 4 | Backend Framework | ✅ **Elysia** (Bun-native) |
 | 5 | CSV Import Format | ✅ NIM, Nama, Prodi, Angkatan, No HP, Email |
@@ -1586,7 +1592,7 @@ Cahaya dari depan (searah mahasiswa)
 | 11 | Backend Port | ✅ **8150** — dibelokkan via web panel server |
 | 12 | Hosting | ✅ **Docker** di home server + Cloudflare Tunnel |
 | 13 | Kursus Kuliah | ✅ **Per Mahasiswa** — ada relasi studentId |
-| 14 | FaceVector | ✅ **1:1 (studentId PK)** — satu mahasiswa satu vector, paling efektif untuk brute-force matching |
+| 14 | FaceVector | ✅ **1:1 (studentId PK)** — satu mahasiswa satu vector, paling efektif untuk brute-force matching *(implementasi sekarang malah **5-pose**, PK `@@id([studentId, pose])` — lihat note migrasi)* |
 | 15 | Jam Operasional | ✅ **TOLAK** scan di luar jam operasional (baik sebelum start maupun setelah end) |
 | 16 | Violation Auto-Resolve | ✅ **Semua tipe** violation auto-resolved saat mahasiswa kembali |
 | 17 | Libur Nasional | ✅ **Input manual admin** — model Holiday, saat libur semua aturan skip |
@@ -1594,6 +1600,5 @@ Cahaya dari depan (searah mahasiswa)
 
 ---
 
-> **Status**: ✅ Planning selesai — sudah sinkron dengan implementasi.
-> **Fase saat ini**: Phase 1-4 selesai (kerangka). Pipeline face recognition masih stub, perlu diselesaikan.
-> **Next step**: Implementasi FaceDetector (MediaPipe) + LivenessDetector (EAR) + CameraX + bundling model TFLite.
+> **Status**: ⚠️ **Dokumentasi sedang disinkronkan (branch `insightface`)** — lihat banner di atas.
+> **Fase saat ini**: migrasi ke InsightFace ONNX + video-based matching. Pipeline face recognition **masih rusak/belum compile** (build failure di `:core`), dan dimensi embedding **belum disinkronkan ke 512-d** (kode masih klaim 192-d). Details: [`insightface-migration-plan.md`](./insightface-migration-plan.md).

@@ -15,7 +15,7 @@ Face recognition gate system for **pondok pesantren / asrama kampus**. Students 
 ```
 FaceGateApp/
 ├── android/                    # Android apps (Gradle) — `cd android` to build
-│   ├── core/                   # :core — shared library (TFLite, Room, Retrofit)
+│   ├── core/                   # :core — shared library (InsightFace ONNX, Room, Retrofit)
 │   ├── kiosk-scanner/          # :kiosk-scanner — gate scanner app
 │   ├── admin-app/              # :admin-app — admin management app
 │   ├── gradle/libs.versions.toml  # Version catalog
@@ -38,7 +38,7 @@ FaceGateApp/
 ## Database (PostgreSQL + pgvector)
 Key models (see `prisma/schema.prisma`):
 - `Student` — master data with `nim`, `studyProgram`, `academicYear`
-- `FaceVector` — `vector(192)` via pgvector extension (MobileFaceNet 192-d embedding)
+- `FaceVector` — `vector(512)` via pgvector extension (InsightFace MBF@WebFace600K 512-d embedding)
 - `AttendanceLog` — scan logs with `action: "keluar" | "kembali"`
 - `Permit` — `type: "izin_harian" | "pengajuan_izin"` (harian auto-approved)
 - `CampusRule` — restricted hours configuration
@@ -57,27 +57,34 @@ Key models (see `prisma/schema.prisma`):
 
 ## Face Recognition Pipeline
 ```
-CameraX → ML Kit Face Detection → Face Landmarks (468pts)
+CameraX → RetinaFace-500MF ONNX (detection, det_500m.onnx)
   → EAR Liveness (blink detection, 3.5s window)
-  → Anti-spoofing (MiniFASNet ensemble)
-  → MobileFaceNet TFLite (192-d embedding) — previously ArcFace 512-d (broken)
-  → Brute-force cosine similarity match (10k faces in RAM, ~3ms)
-  → Threshold: 0.7 (configurable)
+  → MBF@WebFace600K ONNX (embedding, w600k_mbf.onnx 512-d)
+  → Video multi-frame collection + Quality-Weighted Fusion
+  → Brute-force cosine similarity match (10k faces in RAM)
+  → Adaptive threshold (AMBIGUITY_RATIO gap analysis)
 ```
-Total pipeline: ~25ms per face. All models cached locally in RAM.
 
-**Model change (Jul 2026)**:  
-- **Old**: `arcface_512.tflite` — FP16, **broken architecture** (conversion script was a skeleton, not real Inception-ResNet v1). Produced non-discriminative embeddings → false positive 100%.  
-- **New**: `mobilefacenet.tflite` — proven model from GitHub release, **5 MB**, LFW 99.4%  
+**Stack saat ini (branch `insightface`)**: ONNX Runtime Mobile — InsightFace buffalo_sc.
+- Detection: `det_500m.onnx` — RetinaFace-500MF (input `[1,3,H,W]`, output boxes+scores+landmarks)
+- Embedding: `w600k_mbf.onnx` — MobileFaceNet @ WebFace600K (**output `[1,512]`**, L2-normalized, 112×112, pixel/255)
+- Fallback (legacy, tidak aktif): ML Kit detection + MobileFaceNet TFLite
 
-**Preprocessing fix**: Changed from `pixel / 127.5 - 1.0` (range [-1, 1]) to `pixel / 255.0` (range [0, 1]). ArcFace ResNet100 from PINTO model zoo uses `data / 255` normalization — previous [-1, 1] caused poor accuracy.  
+⚠️ **KNOWN ISSUE (temuan audit)**: model `w600k_mbf.onnx` output **512-d**, tapi `OnnxFaceEmbedder.kt: EMBEDDING_DIM = 192` dan schema DB `vector(192)` — **dimensi belum disinkronkan ke 512**. Ini penyebab potensial `VECTOR_DIMENSION_MISMATCH` saat upload face setelah build dibetulkan.
+
+## Model History (Jul 2026)
+- **Old**: `arcface_512.tflite` — FP16, **broken architecture** (conversion script was a skeleton, not real Inception-ResNet v1). Produced non-discriminative embeddings → false positive 100%.
+- **Then**: `mobilefacenet.tflite` — proven 192-d model from GitHub release, 5 MB, LFW 99.4% (digunakan di pipeline TFLite lama).
+- **Now**: InsightFace `w600k_mbf.onnx` — 512-d, LFW 99.70%, CFP-FP 98.00% (migrasi aktif di branch `insightface`).
+
+**Preprocessing fix**: Changed from `pixel / 127.5 - 1.0` (range [-1, 1]) to `pixel / 255.0` (range [0, 1]).
 
 **Specifications**:
 - Input: 112×112 RGB, normalized to [0, 1] (pixel/255.0)
-- Output: 192-d L2-normalized float vector  
-- Database: `vector(192)` in PostgreSQL  
+- Output: **512-d** L2-normalized float vector (ONNX model asli; kode masih klaim 192 — harus dibetulkan)
+- Database: `vector(512)` in PostgreSQL (schema masih `vector(192)` — harus dibetulkan)
 
-**IMPORTANT**: If upload fails with dimension mismatch, verify vector is **192-d** (not 512-d). The old `arcface_512.tflite` model had an incomplete conversion script (`backend/scripts/convert_arcface_tflite.py` was a skeleton, not the real Inception-ResNet v1).
+**IMPORTANT**: If upload fails with dimension mismatch, verify vector is **512-d** (model InsightFace w600k_mbf output 512). Update `OnnxFaceEmbedder.kt EMBEDDING_DIM` → 512 dan `schema.prisma vector(192)` → `vector(512)`.
 
 ## Realtime Data Architecture
 
@@ -119,7 +126,7 @@ Two types:
 **Android 12 (API 31)**
 
 ## Tech Stack
-- **Android**: Kotlin, Compose + Material 3, CameraX, Room, Hilt, WorkManager, Retrofit, TFLite, MediaPipe
+- **Android**: Kotlin, Compose + Material 3, CameraX, Room, Hilt, WorkManager, Retrofit, ONNX Runtime (InsightFace)
 - **Backend**: Bun, Elysia, Prisma, PostgreSQL + pgvector, Zod
 - **Infra**: Docker, home server + Cloudflare Tunnel (facegate.utc.web.id)
 
@@ -135,19 +142,19 @@ Two types:
 - TypeScript: Elysia routes grouped by resource, Zod schemas in service files
 - All UI in Jetpack Compose (no XML)
 - Face vector stored as Blob in Room (FloatArray → ByteArray via TypeConverter)
-- In-memory FaceIndex: `Map<String, FloatArray>` (studentId → 192-d vector)
+- In-memory FaceIndex: `Map<String, FloatArray>` (studentId → 512-d vector)
 
 ## Common Issues & Fixes
 
 ### Error :500 saat upload face
 1. Pastikan ekstensi `pgvector` sudah aktif: `CREATE EXTENSION IF NOT EXISTS vector;`
-2. Model TFLite (MobileFaceNet) menghasilkan **192-dimensi** — schema harus `vector(192)`, cek `FaceEmbedder.kt: embeddingDim = 192`
+2. Model ONNX (w600k_mbf) menghasilkan **512-dimensi** — schema harus `vector(512)`, cek `OnnxFaceEmbedder.kt: EMBEDDING_DIM = 512` (jangan pakai klaim lama 192-d — model InsightFace asli output 512)
 3. Jalankan `npx prisma db push` setelah mengubah schema
 4. Cek error detail di log backend — sekarang uploadFace memberikan pesan error spesifik
 
 ### Masalah akurasi face recognition
 1. **Preprocessing salah** — Pastikan FaceEmbedder pakai `pixel/255.0` (range [0,1]), bukan `pixel/127.5-1` ([-1,1])
-2. **Model rusak** — Jangan gunakan `arcface_512.tflite` (dari conversion script skeleton). Pakai `mobilefacenet.tflite`
+2. **Model rusak** — Jangan gunakan `arcface_512.tflite` (dari conversion script skeleton). Pakai InsightFace ONNX `w600k_mbf.onnx` (512-d)
 3. **Enrollment tidak crop** — Pastikan admin app crop wajah sebelum embed (fix ada di FaceRegisterViewModel.kt)
 4. **SyncWorker missing pose** — Semua 5 pose harus tersimpan dengan label CENTER/LEFT/RIGHT/UP/DOWN
 
@@ -167,12 +174,12 @@ npx prisma generate         # Regenerate Prisma client
 ## Fix History (Jul 2026)
 | # | File | Perubahan |
 |---|---|---|
-| 1 | `FaceEmbedder.kt` | Model default: `arcface_512.tflite` (broken) → `mobilefacenet.tflite` (proven) |
+| 1 | `FaceEmbedder.kt` | Model default: `arcface_512.tflite` (broken) → `mobilefacenet.tflite` (proven) → **InsightFace ONNX `w600k_mbf.onnx` (512-d, branch `insightface`)** |
 | 2 | `FaceEmbedder.kt` | Preprocessing: `pixel/127.5-1` ([-1,1]) → `pixel/255.0` ([0,1]) |
 | 3 | `FaceEmbedder.kt` | Dequantization: output quantized sekarang di-dequantize pakai scale + zeroPoint |
 | 4 | `SyncWorker.kt` | FaceVectorEntity dibuat dengan `pose` field (sebelumnya empty → PK conflict → 1 vector per student) |
 | 5 | `SyncWorker.kt` | Ganti insert loop dengan `deleteAll()` + `insertAll()` batch |
 | 6 | `FaceRegisterViewModel.kt` | Crop wajah sebelum embed (konsisten dengan kiosk) |
-| 7 | `student.ts` | Backend validation: menerima 192-d (sebelumnya cuma 512) |
-| 8 | `schema.prisma` | `vector(512)` → `vector(192)` |
+| 7 | `student.ts` | Backend validation: menerima 192-d (sebelumnya cuma 512) → **harus update ke 512-d lagi (mengikuti model InsightFace)** |
+| 8 | `schema.prisma` | `vector(512)` → `vector(192)` (era MobileFaceNet TFLite) → **kembali `vector(512)` (era InsightFace ONNX)** |
 | 9 | Database | pgvector extension + prisma db push |

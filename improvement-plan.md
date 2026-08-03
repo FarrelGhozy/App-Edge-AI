@@ -139,7 +139,7 @@ finalFrames.map { data ->
 // Per pose: embed 2 frame → average → L2 normalize → upload
 ```
 
-Ini menghasilkan template yang lebih robust tanpa mengubah jumlah data (tetap 5 pose, tetap 192-d per pose).
+Ini menghasilkan template yang lebih robust tanpa mengubah jumlah data (tetap 5 pose, tetap 512-d per pose — mengikuti model InsightFace `w600k_mbf.onnx`).
 
 ---
 

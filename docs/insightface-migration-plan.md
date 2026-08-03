@@ -68,7 +68,7 @@
 | File | Ukuran | Arsitektur | Fungsi | Input Shape | Output |
 |------|--------|------------|--------|-------------|--------|
 | `det_500m.onnx` | ~2.4 MB | RetinaFace-500MF (MobileNet0.25 backbone) | Face detection + bounding box + 5 landmarks | `[1,3,H,W]` | Boxes, scores, landmarks |
-| `w600k_mbf.onnx` | ~13.6 MB | MobileFaceNet @ WebFace600K | Face embedding (192-d) | `[1,3,112,112]` | `[1,192]` L2-normalized |
+| `w600k_mbf.onnx` | ~13.6 MB | MobileFaceNet @ WebFace600K | Face embedding (512-d) | `[1,3,112,112]` | `[1,512]` L2-normalized |
 
 **Total: ~16 MB**
 
@@ -114,11 +114,11 @@ Liveness Pass
     ├── Collect phase (1-1.5 detik):
     │   Capture ~10-15 frame berturut-turut dari live feed
     │       │
-    │       ├── Frame 1 → Detect → Quality Score → Embed (192-d)
-    │       ├── Frame 2 → Detect → Quality Score → Embed (192-d)
-    │       ├── Frame 3 → Detect → Quality Score → Embed (192-d)
+    │       ├── Frame 1 → Detect → Quality Score → Embed (512-d)
+    │       ├── Frame 2 → Detect → Quality Score → Embed (512-d)
+    │       ├── Frame 3 → Detect → Quality Score → Embed (512-d)
     │       ├── ... (skip: blur, no face, low quality)
-    │       └── Frame N → Detect → Quality Score → Embed (192-d)
+    │       └── Frame N → Detect → Quality Score → Embed (512-d)
     │
     ├── Selection phase:
     │   Pilih K frame terbaik berdasarkan quality score (K=3-5)
@@ -566,7 +566,7 @@ class OnnxFaceEmbedder(private val context: Context) {
     
     companion object {
         const val INPUT_SIZE = 112     // Model input: 112×112
-        const val EMBEDDING_DIM = 192  // Output: 192-d
+        const val EMBEDDING_DIM = 512  // Output: 512-d
         const val INPUT_NAME = "input"
         const val OUTPUT_NAME = "output"
     }
@@ -587,7 +587,7 @@ class OnnxFaceEmbedder(private val context: Context) {
     }
     
     fun embedBatch(bitmaps: List<Bitmap>): List<FloatArray> {
-        // Batch inference: [N,3,112,112] → [N,192]
+        // Batch inference: [N,3,112,112] → [N,512]
     }
 }
 ```
@@ -736,7 +736,7 @@ interface FaceDetectorProvider {
 
 interface FaceEmbedderProvider {
     fun embed(faceCrop: Bitmap): FloatArray
-    val embeddingDim: Int  // 192
+    val embeddingDim: Int  // 512
     val inputSize: Int     // 112
     fun init(): Boolean
 }
@@ -843,7 +843,7 @@ Inisialisasi
 | 11 | Update DI module (`KioskModule.kt`) — bind new providers | File diubah | 15 menit |
 | 12 | Update `ScannerViewModel.kt` — call VideoMatchEngine | File diubah | 1 jam |
 | 13 | Fallback chain: ONNX → TFLite → ML Kit | `OnnxRuntimeManager.kt` | 45 menit |
-| 14 | Registrasi tetap pakai existing (compatible 192-d) | Tidak berubah | — |
+| 14 | Registrasi tetap pakai existing (compatible 512-d) | Tidak berubah | — |
 
 ### Phase 4: Testing & Tuning 🎯
 
@@ -903,5 +903,5 @@ Untuk referensi implementasi post-processing RetinaFace:
 
 > **MBF@WebFace600K (`w600k_mbf.onnx`)**
 > - Input: `[1, 3, 112, 112]` — float32, normalized [0,1]
-> - Output: `[1, 192]` — float32, sudah L2-normalized
+> - Output: `[1, 512]` — float32, sudah L2-normalized
 > - Tidak perlu L2-normalize lagi di Kotlin
