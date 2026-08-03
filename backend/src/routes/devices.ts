@@ -1,7 +1,8 @@
 import { Elysia } from "elysia";
-import { registerDevice, pingDevice, listDevices } from "../services/device";
+import { registerDevice, pingDevice, listDevices, createDeviceWithCredentials } from "../services/device";
 import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
+import { audit } from "../services/audit";
 
 export const deviceRoutes = new Elysia()
   .use(authGuard())
@@ -20,6 +21,20 @@ export const deviceRoutes = new Elysia()
   })
   // Semua route admin-only di bawah — guard factory kedua dengan RBAC (#70)
   .use(authGuard("admin", "superadmin"))
+  // #61: admin membuat device dgn credential UNIK per-perangkat — password
+  // di-generate random & hanya di-return sekali (tidak hardcoded di APK).
+  .post("/api/devices", async ({ body, admin }) => {
+    const data = body as { name: string; location?: string };
+    if (!data.name) {
+      return new Response(JSON.stringify({ success: false, error: "Nama device wajib diisi" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    const { device, username, password } = await createDeviceWithCredentials(data);
+    await audit(admin, { action: "CREATE", entityType: "DEVICES", entityId: device.deviceId, details: `device ${data.name}` });
+    return { success: true, data: { ...device, username, password } };
+  })
   .get("/api/devices", async () => {
     return await listDevices();
   })

@@ -50,7 +50,6 @@ describe("permit service", () => {
         reason: "izin",
         startDate: "2025-07-15",
         endDate: "2025-07-16",
-        description: "Acara keluarga",
       });
       expect(r).toBeDefined();
     });

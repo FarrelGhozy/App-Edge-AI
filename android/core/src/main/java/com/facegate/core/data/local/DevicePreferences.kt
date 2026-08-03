@@ -13,6 +13,10 @@ class DevicePreferences(private val context: Context) {
     private companion object {
         val DEVICE_ID_KEY = stringPreferencesKey("device_id")
         val DEVICE_NAME_KEY = stringPreferencesKey("device_name")
+        // #61: credential device UNIK per-perangkat disimpan lokal (DataStore),
+        // bukan hardcoded di APK — dibagikan via enrollment, bukan reverse-engineering.
+        val DEVICE_USERNAME_KEY = stringPreferencesKey("device_username")
+        val DEVICE_PASSWORD_KEY = stringPreferencesKey("device_password")
     }
 
     suspend fun getDeviceId(): String? {
@@ -42,6 +46,19 @@ class DevicePreferences(private val context: Context) {
     suspend fun setDeviceName(name: String) {
         context.deviceStore.edit { prefs ->
             prefs[DEVICE_NAME_KEY] = name
+        }
+    }
+
+    suspend fun getDeviceUsername(): String? =
+        context.deviceStore.data.first()[DEVICE_USERNAME_KEY]
+
+    suspend fun getDevicePassword(): String? =
+        context.deviceStore.data.first()[DEVICE_PASSWORD_KEY]
+
+    suspend fun setDeviceCredentials(username: String, password: String) {
+        context.deviceStore.edit { prefs ->
+            prefs[DEVICE_USERNAME_KEY] = username
+            prefs[DEVICE_PASSWORD_KEY] = password
         }
     }
 }

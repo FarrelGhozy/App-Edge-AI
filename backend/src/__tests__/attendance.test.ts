@@ -4,7 +4,8 @@ import { describe, it, expect, mock } from "bun:test";
 // Attendance Service Tests
 // ---------------------------------------------------------------------------
 
-const mockPrisma = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockPrisma: any = {
   student: {
     findUnique: mock(() => null),
     findMany: mock(() => []),

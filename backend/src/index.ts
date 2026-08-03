@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
-import { jwt } from "@elysiajs/jwt";
+import { jwtPlugin } from "./plugins/jwt";
 import { authRoutes } from "./routes/auth";
 import { studentRoutes } from "./routes/students";
 import { attendanceRoutes } from "./routes/attendance";
@@ -42,13 +42,7 @@ const app = new Elysia()
     }
   }))
   .use(cors())
-  .use(
-    jwt({
-      name: "jwt",
-      secret: JWT_SECRET,
-      exp: "24h"
-    })
-  )
+  .use(jwtPlugin)
   .get("/api/health", () => ({
     status: "ok",
     timestamp: new Date().toISOString(),

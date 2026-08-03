@@ -85,10 +85,20 @@ class KioskInitializer @Inject constructor(
 
     private suspend fun loginDevice() {
         try {
+            // #61: credential dari enrollment lokal (DataStore) — unik per device.
+            // BuildConfig.DEVICE_* HANYA fallback dev (debug), release kosong.
+            val username = devicePreferences.getDeviceUsername()
+                ?: BuildConfig.DEVICE_USERNAME.ifBlank { null }
+            val password = devicePreferences.getDevicePassword()
+                ?: BuildConfig.DEVICE_PASSWORD.ifBlank { null }
+            if (username == null || password == null) {
+                Log.w(TAG, "Device belum di-enroll (username/password kosong) — tunggu enrollment")
+                return
+            }
             val response = apiService.deviceLogin(
                 LoginRequest(
-                    username = BuildConfig.DEVICE_USERNAME,
-                    password = BuildConfig.DEVICE_PASSWORD
+                    username = username,
+                    password = password
                 )
             )
             if (response.isSuccessful && response.body() != null) {

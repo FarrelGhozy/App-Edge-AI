@@ -1,10 +1,12 @@
 import { Elysia } from "elysia";
+import { jwtPlugin } from "../plugins/jwt";
 import { loginSchema, loginUser, loginDevice } from "../services/auth";
 import prisma from "../services/prisma";
 import bcrypt from "bcryptjs";
 import { audit } from "../services/audit";
 
 export const authRoutes = new Elysia()
+  .use(jwtPlugin)
   .post("/api/auth/login", async ({ body, jwt }) => {
     const { username, password } = body;
     const admin = await loginUser(username, password);

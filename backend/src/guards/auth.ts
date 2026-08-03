@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { jwtPlugin } from "../plugins/jwt";
 
 /**
  * Auth guard — factory: `authGuard()` cek token valid (401),
@@ -8,13 +9,18 @@ import { Elysia } from "elysia";
  */
 export const authGuard = (...allowedRoles: string[]) =>
   new Elysia()
+    .use(jwtPlugin)
     .derive({ as: "scoped" }, async ({ jwt, request }) => {
       const authHeader = request.headers.get("authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return { admin: null };
       }
       const token = authHeader.slice(7);
-      const payload = await jwt.verify(token);
+      // #62: jwt.verify ber-return AllowClaimValue — cast ke bentuk payload
+      // aplikasi agar admin ter-typed string (bukan union).
+      const payload = (await jwt.verify(token)) as
+        | { id: string; username: string; role: string }
+        | null;
       if (!payload) {
         return { admin: null };
       }

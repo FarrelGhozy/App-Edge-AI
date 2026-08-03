@@ -1,4 +1,6 @@
 import prisma from "./prisma";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 export async function registerDevice(data: { deviceId?: string; name: string; location?: string }, authenticatedDeviceId?: string) {
   // Use the authenticated device ID (from JWT) if available, otherwise fallback to provided or generated
@@ -17,6 +19,24 @@ export async function registerDevice(data: { deviceId?: string; name: string; lo
       location: data.location || null
     }
   });
+}
+
+// #61: buat device dengan credential UNIK per-perangkat (bukan satu password
+// bersama). Password di-generate random, di-return SEKALI (tidak bisa dibaca lagi).
+export async function createDeviceWithCredentials(data: { name: string; location?: string }) {
+  const username = `kiosk-${crypto.randomUUID().slice(0, 8)}`;
+  const plainPassword = crypto.randomBytes(9).toString("base64url").slice(0, 12);
+  const passwordHash = await bcrypt.hash(plainPassword, 10);
+  const device = await prisma.device.create({
+    data: {
+      deviceId: username,
+      username,
+      passwordHash,
+      name: data.name,
+      location: data.location || null
+    }
+  });
+  return { device, username, password: plainPassword };
 }
 
 export async function pingDevice(deviceId: string, batteryLevel?: number) {

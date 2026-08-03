@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
-    branches: [main]
+    branches: ["**"]
 
 jobs:
   backend:
@@ -36,17 +36,19 @@ jobs:
           bun-version: latest
 
       - run: bun install --frozen-lockfile
+      # #62: typecheck wajib — code yang tidak kompil tidak boleh lolos CI.
+      - run: bunx tsc --noEmit
       - run: bunx prisma generate
         env:
-          DATABASE_URL: "postgresql://facegate:facegate_pass@localhost:5432/facegate_test?schema=public"
+          DATABASE_URL: "postgresql://facegate:***@localhost:5432/facegate_test?schema=public"
 
       - run: bunx prisma db push
         env:
-          DATABASE_URL: "postgresql://facegate:facegate_pass@localhost:5432/facegate_test?schema=public"
+          DATABASE_URL: "postgresql://facegate:***@localhost:5432/facegate_test?schema=public"
 
       - run: bun run src/seed.ts
         env:
-          DATABASE_URL: "postgresql://facegate:facegate_pass@localhost:5432/facegate_test?schema=public"
+          DATABASE_URL: "postgresql://facegate:***@localhost:5432/facegate_test?schema=public"
 
       - run: bun run src/index.ts &
       - name: Health check
@@ -64,10 +66,14 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          # #62: Gradle 8.11.1 butuh Java 21 (17 gagal di setup ini).
+          java-version: 21
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit test :core
+        run: ./gradlew :core:testDebugUnitTest
 
       - name: Build :core
         run: ./gradlew :core:assembleDebug
