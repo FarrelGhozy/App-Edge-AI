@@ -54,6 +54,11 @@ class FaceMatcher(
         val startTime = System.nanoTime()
         val query = if (embedding.isL2Normalized()) embedding else normalize(embedding.clone())
 
+        // Best & second-best must come from DIFFERENT students (issue #77).
+        // The index holds multiple pose-vectors per student; if the runner-up is
+        // another pose of the SAME student, the gap collapses and the adaptive
+        // threshold rises → false reject. So: pick the best score per student,
+        // then the best score among the remaining students.
         var bestId: String? = null
         var bestScore = -1f
         var secondId: String? = null
@@ -62,13 +67,19 @@ class FaceMatcher(
         for (entry in faceIndex) {
             val sim = dotProduct(query, entry.vector)
             if (sim > bestScore) {
-                secondScore = bestScore
-                secondId = bestId
                 bestScore = sim
                 bestId = entry.studentId
-            } else if (sim > secondScore) {
-                secondScore = sim
-                secondId = entry.studentId
+            }
+        }
+        // Runner-up: best score from a DIFFERENT student.
+        if (bestId != null) {
+            for (entry in faceIndex) {
+                if (entry.studentId == bestId) continue
+                val sim = dotProduct(query, entry.vector)
+                if (sim > secondScore) {
+                    secondScore = sim
+                    secondId = entry.studentId
+                }
             }
         }
 

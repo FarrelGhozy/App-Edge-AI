@@ -19,6 +19,14 @@ class FaceMatcherTest {
         return arr
     }
 
+    /** Zero-filled vector (no shared noise pattern) — for similarity tests where
+     *  unrelated dimensions must NOT contribute cosine similarity. */
+    private fun cleanVector(vararg values: Float): FloatArray {
+        val arr = FloatArray(dim)
+        for (i in values.indices) arr[i] = values[i]
+        return arr
+    }
+
     private fun normalize(v: FloatArray): FloatArray {
         var norm = 0f
         for (x in v) norm += x * x
@@ -176,6 +184,25 @@ class FaceMatcherTest {
             entry("s2", normalize(makeVector(0.5f, 0.5f)))
         ))
         assertEquals(3, matcher.size())
+    }
+
+    @Test
+    fun `multi-pose same student should not collapse gap - no false reject`() {
+        // Issue #77: best & second-best must be from DIFFERENT students.
+        // Student A has 5 near-identical pose vectors; student B is far away.
+        // Runner-up must be B (not another pose of A), keeping the gap large
+        // so the adaptive threshold stays low and A is accepted.
+        val poseA = (0 until 5).map { normalize(cleanVector(0.95f - it * 0.01f, 0.1f, 0f)) }
+        val poseB = normalize(cleanVector(0.2f, 0.9f, 0f))
+        val index = poseA.map { entry("studentA", it) } + entry("studentB", poseB)
+        matcher.buildIndex(index)
+
+        // Match against A's pose 1
+        val result = matcher.match(normalize(cleanVector(0.97f, 0.1f, 0f)))
+        assertTrue("studentA must match (false reject due to same-student runner-up)", result.isMatch)
+        assertEquals("studentA", result.studentId)
+        assertNotEquals("second-best must be a different student", "studentA", result.secondBestId)
+        assertTrue("gap must stay large", result.gapScore > 0.3f)
     }
 
     @Test
