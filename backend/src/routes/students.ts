@@ -17,7 +17,7 @@ import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 
 export const studentRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/students", async ({ query }) => {
     const params = {
       page: query.page ? parseInt(query.page as string) : 1,

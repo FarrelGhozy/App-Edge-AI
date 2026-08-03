@@ -48,7 +48,7 @@ class PermitDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true)
             try {
-                val request = UpdatePermitStatusRequest(status = "approved", adminId = "admin")
+                val request = UpdatePermitStatusRequest(status = "approved")
                 val response = apiService.updatePermitStatus(permitId, request)
                 if (response.isSuccessful) {
                     _uiState.value = _uiState.value.copy(
@@ -75,7 +75,7 @@ class PermitDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true)
             try {
-                val request = UpdatePermitStatusRequest(status = "rejected", adminId = "admin")
+                val request = UpdatePermitStatusRequest(status = "rejected")
                 val response = apiService.updatePermitStatus(permitId, request)
                 if (response.isSuccessful) {
                     _uiState.value = _uiState.value.copy(

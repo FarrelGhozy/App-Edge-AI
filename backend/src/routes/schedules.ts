@@ -3,7 +3,7 @@ import { listSchedules, createSchedule, batchCreateSchedules, updateSchedule, de
 import { authGuard } from "../guards/auth";
 
 export const scheduleRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/schedules", async ({ query }) => {
     const studentId = query.studentId as string | undefined;
     return await listSchedules(studentId);

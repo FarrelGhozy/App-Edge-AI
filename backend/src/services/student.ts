@@ -144,12 +144,19 @@ export async function updateStudent(id: string, data: Record<string, unknown>) {
 }
 
 export async function deleteStudent(id: string) {
-  await prisma.attendanceLog.deleteMany({ where: { studentId: id } });
-  await prisma.permit.deleteMany({ where: { studentId: id } });
-  await prisma.faceVector.deleteMany({ where: { studentId: id } });
-  const student = await prisma.student.delete({ where: { id } });
-  await triggerSyncForAllDevices();
-  return student;
+  // #72: bungkus DELETE bertahap dalam $transaction — kalau salah satu gagal,
+  // seluruh operasi rollback (tidak ada state parsial).
+  return prisma.$transaction(async (tx) => {
+    await tx.attendanceLog.deleteMany({ where: { studentId: id } });
+    await tx.permit.deleteMany({ where: { studentId: id } });
+    await tx.faceVector.deleteMany({ where: { studentId: id } });
+    const student = await tx.student.delete({ where: { id } });
+    return student;
+  }).then(async (student) => {
+    // Notifikasi sync hanya setelah commit sukses.
+    await triggerSyncForAllDevices();
+    return student;
+  });
 }
 
 export async function deleteFace(studentId: string) {

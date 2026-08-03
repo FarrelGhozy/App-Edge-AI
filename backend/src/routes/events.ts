@@ -3,7 +3,7 @@ import { addClient } from "../services/events";
 import { authGuard } from "../guards/auth";
 
 export const eventsRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard())
   .get("/api/events/stream", () => {
     let client: ReturnType<typeof addClient> | null = null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;

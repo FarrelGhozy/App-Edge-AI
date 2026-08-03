@@ -5,7 +5,7 @@ import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 
 export const permitRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/permits", async ({ query }) => {
     const params = {
       page: query.page ? parseInt(query.page as string) : 1,
@@ -100,8 +100,17 @@ export const permitRoutes = new Elysia()
 
     return { success: true, data: permit };
   })
-  .put("/api/permits/:id/status", async ({ params: { id }, body }) => {
-    const { status, adminId } = body as { status: string; adminId: string };
+  .put("/api/permits/:id/status", async ({ params: { id }, body, admin }) => {
+    const { status } = body as { status: string };
+    // #73: approvedById HARUS dari identitas JWT (admin dari guard derive),
+    // bukan body. Klien tidak boleh menentukan siapa yang menyetujui.
+    if (!admin?.id) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized: admin identity required" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const adminId = admin.id;
 
     if (status === "approved") {
       const permit = await approvePermit(id, adminId);

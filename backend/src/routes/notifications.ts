@@ -4,7 +4,7 @@ import { listNotifications, markRead, markAllRead } from "../services/notificati
 import { authGuard } from "../guards/auth";
 
 export const notificationRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/notifications", async ({ query }) => {
     const page = query.page ? parseInt(query.page as string) : 1;
     const pageSize = query.pageSize ? parseInt(query.pageSize as string) : 20;

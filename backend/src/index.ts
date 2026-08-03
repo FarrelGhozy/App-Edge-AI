@@ -20,7 +20,15 @@ import { scheduleRoutes } from "./routes/schedules";
 import { auditRoutes } from "./routes/audit";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8150;
-const JWT_SECRET = process.env.JWT_SECRET || "facegate-jwt-secret";
+
+// #71: JANGAN pernah fallback ke secret hardcoded — kalau env tidak diset,
+// server menolak start (fail-fast) supaya token tidak bisa di-forge.
+// Set JWT_SECRET di backend/.env (lihat docs/server-config.md).
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 16) {
+  console.error("[FATAL] JWT_SECRET tidak diset atau terlalu pendek (<16 chars). Set di backend/.env");
+  process.exit(1);
+}
 
 const app = new Elysia()
   .use(swagger({

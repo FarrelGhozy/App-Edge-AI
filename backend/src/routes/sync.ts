@@ -6,7 +6,7 @@ import { notifyDevicesChange } from "../services/events";
 import { computeFacesWatermark } from "../services/syncWatermark";
 
 export const syncRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard())
   .get("/api/sync/faces", async ({ query }) => {
     const since = query.since as string | undefined;
 

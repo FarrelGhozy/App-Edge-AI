@@ -35,7 +35,8 @@ data class CreatePermitRequest(
 @Serializable
 data class UpdatePermitStatusRequest(
     val status: String,
-    @SerialName("adminId") val adminId: String
+    // #73: adminId TIDAK dikirim client — server mengambil dari JWT (approvedById
+    // harus identitas asli yang login, bukan body yang bisa di-spoof).
 )
 
 @Serializable

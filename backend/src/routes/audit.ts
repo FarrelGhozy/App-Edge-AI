@@ -3,7 +3,7 @@ import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 
 export const auditRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/audit", async ({ query }) => {
     const page = query.page ? parseInt(query.page as string) : 1;
     const pageSize = query.pageSize ? parseInt(query.pageSize as string) : 50;

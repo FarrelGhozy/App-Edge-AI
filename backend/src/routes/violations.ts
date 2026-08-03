@@ -4,7 +4,7 @@ import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 
 export const violationRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/violations", async ({ query }) => {
     const params = {
       page: query.page ? parseInt(query.page as string) : 1,

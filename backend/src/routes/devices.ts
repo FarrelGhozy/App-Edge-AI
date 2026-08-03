@@ -4,7 +4,9 @@ import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 
 export const deviceRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard())
+  // Device self-register + ping: boleh dari token device (#70 — device
+  // hanya bisa daftar/mem-ping dirinya sendiri, bukan kelola device lain)
   .post("/api/devices/register", async ({ body, store }) => {
     const admin = store?.admin as { id: string; role: string } | undefined;
     const req = body as { deviceId?: string; name: string; location?: string };
@@ -12,6 +14,13 @@ export const deviceRoutes = new Elysia()
     const device = await registerDevice(req, authenticatedDeviceId);
     return device;
   })
+  .put("/api/devices/:deviceId/ping", async ({ params: { deviceId }, body }) => {
+    const { batteryLevel } = body as { batteryLevel?: number };
+    await pingDevice(deviceId, batteryLevel);
+    return { success: true };
+  })
+  // Semua route admin-only di bawah — guard factory kedua dengan RBAC (#70)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/devices", async () => {
     return await listDevices();
   })
@@ -29,11 +38,6 @@ export const deviceRoutes = new Elysia()
     const data = body as { name?: string; location?: string; isActive?: boolean };
     const device = await prisma.device.update({ where: { deviceId }, data });
     return { success: true, data: device };
-  })
-  .put("/api/devices/:deviceId/ping", async ({ params: { deviceId }, body }) => {
-    const { batteryLevel } = body as { batteryLevel?: number };
-    await pingDevice(deviceId, batteryLevel);
-    return { success: true };
   })
   .post("/api/sync/request/:deviceId", async ({ params: { deviceId }, store }) => {
     const admin = store?.admin as { id: string } | undefined;

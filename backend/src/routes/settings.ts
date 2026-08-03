@@ -3,7 +3,7 @@ import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 
 export const settingRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/settings", async () => {
     const settings = await prisma.globalSetting.findMany();
     const map: Record<string, string> = {};

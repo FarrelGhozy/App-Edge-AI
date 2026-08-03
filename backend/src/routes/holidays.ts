@@ -10,7 +10,7 @@ import {
 } from "../services/holiday";
 
 export const holidayRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/holidays", async ({ query }) => {
     const year = query.year ? parseInt(query.year as string) : undefined;
     return listHolidays(year);

@@ -5,7 +5,7 @@ import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 
 export const ruleRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/rules", async () => {
     return await listRules();
   })
