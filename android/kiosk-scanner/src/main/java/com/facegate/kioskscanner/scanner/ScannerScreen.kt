@@ -109,7 +109,9 @@ fun ScannerScreen(
     var canvasHeight by remember { mutableFloatStateOf(0f) }
 
     // Is front camera? Affects coordinate mirroring
-    val isFrontCamera = true // default kiosk pakai front camera
+    val isFrontCamera by remember {
+        mutableStateOf(CameraSelector.DEFAULT_FRONT_CAMERA.lensFacing == CameraSelector.LENS_FACING_FRONT)
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (!cameraPermissionGranted.value) {
@@ -181,6 +183,9 @@ fun ScannerScreen(
                             imageProxy.close()
                         }
                         val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+                        // #68: mirroring ditentukan dari lensFacing cameraSelector yang
+                        // di-bind (bukan hardcode) → overlay sejajar di resolusi apa pun.
+                        // CameraSelector.lensFacing konsisten dengan CameraCharacteristics.LENS_FACING.
                         try {
                             cameraProvider.unbindAll()
                             cameraProvider.bindToLifecycle(

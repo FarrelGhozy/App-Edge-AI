@@ -15,6 +15,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // #89: BuildConfig.DEBUG dipakai untuk logging HTTP (BODY hanya debug)
+    buildFeatures {
+        buildConfig = true
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
