@@ -96,12 +96,13 @@ class SyncManager @Inject constructor(
         if (response.isSuccessful && response.body() != null) {
             val faceSync = response.body()!!
             if (faceSync.data.isNotEmpty()) {
-                // Save face vectors
+                // Upsert idempoten (REPLACE conflict strategy) — NO deleteAll()
+                // before insert, otherwise unchanged vectors get wiped and the
+                // in-RAM index is lost (issue #78).
                 val vectors = faceSync.data.map { it.toEntity() }
-                faceVectorDao.deleteAll()
                 faceVectorDao.insertAll(vectors)
 
-                // Save student data from joined query
+                // Save student data from joined query (upsert)
                 val students = faceSync.data.mapNotNull { dto ->
                     if (dto.studentName != null && dto.nim != null) {
                         StudentEntity(
@@ -117,10 +118,16 @@ class SyncManager @Inject constructor(
                     studentDao.insertAll(students)
                 }
 
-                // Rebuild face index in RAM
-                faceMatcher.buildIndex(vectors.map { it.toIndexEntry() })
+                // Rebuild index from the FULL local store — the response may be a
+                // partial delta, so the index must reflect all cached vectors.
+                val allLocal = faceVectorDao.getAll()
+                faceMatcher.buildIndex(allLocal.map { it.toIndexEntry() })
+            }
 
-                syncMetadata.setLastFaceSync(faceSync.since ?: "")
+            // Advance watermark to the server's max(updated_at), never to "" —
+            // an empty watermark forces a full re-download every sync.
+            if (faceSync.since != null && faceSync.since.isNotBlank()) {
+                syncMetadata.setLastFaceSync(faceSync.since)
             }
             return faceSync.data.size
         }

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { computeFacesWatermark } from "../services/syncWatermark";
 
 const mockFindMany = mock<any>();
 const mockFindUnique = mock<any>();
@@ -167,6 +168,38 @@ describe("sync service", () => {
 
     it("zero pending when all synced", () => {
       expect(1000 - 1000).toBe(0);
+    });
+  });
+
+  // ──────────────────────────────────────────────
+  // Faces watermark (issue #78)
+  // ──────────────────────────────────────────────
+  describe("faces watermark", () => {
+    it("advances to max(updated_at) of returned rows, not echo of since", () => {
+      const rows = [
+        { updated_at: new Date("2026-08-03T10:00:00Z") },
+        { updated_at: new Date("2026-08-03T12:30:00Z") },
+        { updated_at: new Date("2026-08-03T11:00:00Z") },
+      ];
+      const watermark = computeFacesWatermark(rows, "2026-08-01T00:00:00Z");
+      expect(watermark).toBe("2026-08-03T12:30:00.000Z");
+    });
+
+    it("keeps client since when no rows returned (no data to advance)", () => {
+      const watermark = computeFacesWatermark([], "2026-08-03T12:30:00Z");
+      expect(watermark).toBe("2026-08-03T12:30:00Z");
+    });
+
+    it("returns null when no rows and no previous since (first sync)", () => {
+      expect(computeFacesWatermark([], undefined)).toBeNull();
+    });
+
+    it("single row advances to that row's timestamp", () => {
+      const watermark = computeFacesWatermark(
+        [{ updated_at: new Date("2026-08-03T09:15:00Z") }],
+        "2026-08-01T00:00:00Z"
+      );
+      expect(watermark).toBe("2026-08-03T09:15:00.000Z");
     });
   });
 });

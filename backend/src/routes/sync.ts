@@ -3,6 +3,7 @@ import { batchSyncSchema, recordScan } from "../services/attendance";
 import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
+import { computeFacesWatermark } from "../services/syncWatermark";
 
 export const syncRoutes = new Elysia()
   .use(authGuard)
@@ -50,7 +51,12 @@ export const syncRoutes = new Elysia()
       };
     });
 
-    return { data, since: since || null };
+    // Watermark = server-side max(updated_at) of returned rows, NOT an echo of
+    // the client's `since`. Clients persist this as their next `since` so the
+    // following sync only fetches the delta (issue #78).
+    const watermark = computeFacesWatermark(rows, since);
+
+    return { data, since: watermark };
   })
   .post("/api/sync/attendance", async ({ body }) => {
     const created = [];

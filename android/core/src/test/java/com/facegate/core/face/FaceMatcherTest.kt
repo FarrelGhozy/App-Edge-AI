@@ -207,17 +207,20 @@ class FaceMatcherTest {
 
     @Test
     fun `stress - concurrent buildIndex and match should never crash`() {
-        // Issue #75: CopyOnWriteArrayList must survive concurrent rebuild (sync
-        // worker) while match() reads (VideoMatchEngine, Dispatchers.Default).
+        // Issue #75: index must be consistent under concurrent rebuild (sync
+        // worker) and reads (VideoMatchEngine, Dispatchers.Default). With a
+        // clear()+add() COW list, two racing builds could interleave and leave
+        // the index doubled (5+5=10) or half-built — the volatile snapshot swap
+        // guarantees every reader sees a complete, correct list.
         val vectors = (1..5).map { entry("s$it", normalize(makeVector(it.toFloat() / 5f, 0.2f))) }
         matcher.buildIndex(vectors)
         val query = normalize(makeVector(0.8f, 0.1f))
 
         val threads = (1..8).map { t ->
             Thread {
-                repeat(200) { i ->
-                    if (i % 10 == 0) {
-                        // Simulate sync rebuild: clear + re-add
+                repeat(400) { i ->
+                    if (i % 5 == 0) {
+                        // Simulate sync rebuild: rebuild from a shuffled copy
                         matcher.buildIndex(vectors.shuffled())
                     } else {
                         // Simulate live match
@@ -233,8 +236,10 @@ class FaceMatcherTest {
         threads.forEach { it.start() }
         threads.forEach { it.join() }
 
-        // Index must remain consistent afterwards
-        assertTrue(matcher.size() in 0..5)
-        assertFalse("match must not throw", matcher.match(query).let { false })
+        // Index must remain EXACTLY consistent afterwards (never doubled/interleaved)
+        assertEquals("concurrent rebuild must not double entries", 5, matcher.size())
+        // Each original vector still present and matchable
+        val res = matcher.match(query)
+        assertNotNull(res.studentId)
     }
 }

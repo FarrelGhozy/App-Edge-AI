@@ -28,22 +28,31 @@ class FaceMatcher(
         private const val MEDIUM_GAP = 0.08f
     }
 
-    // Flat list of (studentId, normalizedVector) — one entry per pose vector.
-    // CopyOnWriteArrayList: buildIndex() (from sync workers) mutates the list on
-    // a background thread while VideoMatchEngine.match() reads it on
-    // Dispatchers.Default — a plain MutableList causes ConcurrentModificationException
-    // / half-built index reads. COW gives readers a consistent snapshot (issue #75).
-    private val faceIndex = java.util.concurrent.CopyOnWriteArrayList<IndexEntry>()
+    // Immutable snapshot of (studentId, normalizedVector) — one entry per pose.
+    // Written only by swapping a fresh immutable list (atomically, via @Volatile),
+    // so readers on Dispatchers.Default always observe a complete, consistent
+    // index. This is the correct fix for the buildIndex-vs-match race (#75): a
+    // CopyOnWriteArrayList with clear()+add() is NOT atomic — two concurrent
+    // builds could interleave and end with doubled entries.
+    @Volatile
+    private var faceIndex: List<IndexEntry> = emptyList()
 
     override fun buildIndex(vectors: List<IndexEntry>) {
-        faceIndex.clear()
+        val built = ArrayList<IndexEntry>(vectors.size)
         for (entry in vectors) {
             val normalized = if (entry.vector.isL2Normalized()) entry.vector
                              else normalize(entry.vector.clone())
-            faceIndex.add(entry.copy(vector = normalized))
+            built.add(entry.copy(vector = normalized))
         }
-        val studentCount = faceIndex.map { it.studentId }.distinct().size
-        Log.d(TAG, "Index built: ${faceIndex.size} vectors for $studentCount students, dim=${vectors.firstOrNull()?.vector?.size ?: 0}")
+        // Atomic swap: readers see either the old complete snapshot or the new
+        // complete one — never a half-built index.
+        faceIndex = built
+        val studentCount = built.map { it.studentId }.distinct().size
+        Log.d(TAG, "Index built: ${built.size} vectors for $studentCount students, dim=${vectors.firstOrNull()?.vector?.size ?: 0}")
+    }
+
+    override fun clear() {
+        faceIndex = emptyList()
     }
 
     override fun match(embedding: FloatArray): MatchResult {
@@ -137,10 +146,6 @@ class FaceMatcher(
 
     fun matchBatch(embeddings: List<FloatArray>): List<MatchResult> {
         return embeddings.map { match(it) }
-    }
-
-    override fun clear() {
-        faceIndex.clear()
     }
 
     override fun size(): Int = faceIndex.size
