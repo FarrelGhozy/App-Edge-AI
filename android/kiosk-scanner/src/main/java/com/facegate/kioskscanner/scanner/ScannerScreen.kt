@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,6 +53,22 @@ fun ScannerScreen(
     val syncStatus by viewModel.syncStatus.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
     val imageSize by viewModel.imageSize.collectAsState()
+
+    // Auto-dismiss after success/error so the kiosk returns to scan mode
+    // without manual intervention (issue #69). 3s for success, 4s for error.
+    LaunchedEffect(state) {
+        when (state) {
+            is ScannerViewModel.UIState.Success -> {
+                delay(3000)
+                viewModel.resetState()
+            }
+            is ScannerViewModel.UIState.Error -> {
+                delay(4000)
+                viewModel.resetState()
+            }
+            else -> {}
+        }
+    }
 
     val cameraPermissionGranted = remember {
         mutableStateOf(
@@ -277,6 +294,15 @@ fun ScannerScreen(
                                     color = Color(0xFFFFCDD2),
                                     fontSize = 14.sp
                                 )
+                            }
+                            Spacer(Modifier.height(24.dp))
+                            // Manual reset for gate operators (issue #69) — the
+                            // overlay also auto-dismisses after 3s.
+                            Button(
+                                onClick = { viewModel.resetState() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+                            ) {
+                                Text("Scan Berikutnya", color = Color(0xFF2E7D32))
                             }
                         }
                     }

@@ -152,6 +152,13 @@ class VideoMatchEngine @Inject constructor(
     /** True if actively collecting. */
     fun isCollecting(): Boolean = frameBuffer.isCollecting()
 
+    /** Abort & reset any in-flight frame collection (issue #69: kiosk must be
+     *  reusable immediately after a scan without restarting). */
+    fun resetCollection() {
+        frameBuffer.stop()
+        frameBuffer.clear()
+    }
+
     /**
      * Process collected frames: embed, fuse, and match.
      *

@@ -396,12 +396,15 @@ class ScannerViewModel @Inject constructor(
 
     fun resetState() {
         _state.value = UIState.Idle
+        _isProcessing.value = false
         faceSteadyStartTime = 0L
+        lastFrameCaptureTime = 0L
         _isFaceDetected.value = false
         _isFaceCentered.value = false
         _statusMessage.value = "Arahkan wajah ke kamera"
         _faceOverlay.value = FaceOverlayState()
         videoMatchEngine.resetLiveness()
+        videoMatchEngine.resetCollection()
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
