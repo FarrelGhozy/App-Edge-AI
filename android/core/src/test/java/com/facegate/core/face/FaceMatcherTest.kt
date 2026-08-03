@@ -8,9 +8,10 @@ class FaceMatcherTest {
 
     private lateinit var matcher: FaceMatcher
     private val threshold = 0.70f
+    private val dim = 512
 
     private fun makeVector(vararg values: Float): FloatArray {
-        val arr = FloatArray(192)
+        val arr = FloatArray(dim)
         for (i in arr.indices) {
             arr[i] = if (i < values.size) values[i] else 0.01f * (i % 10)
         }
@@ -30,7 +31,7 @@ class FaceMatcherTest {
 
     @Before
     fun setup() {
-        matcher = FaceMatcher(threshold = threshold)
+        matcher = FaceMatcher(baseThreshold = threshold)
     }
 
     @Test

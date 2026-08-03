@@ -9,6 +9,7 @@ import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.engine.*
 import com.facegate.core.face.*
 import javax.inject.Inject
+import javax.inject.Named
 
 sealed class MatchEngineResult {
     data class Matched(
@@ -38,7 +39,7 @@ sealed class MatchEngineResult {
 class MatchEngine @Inject constructor(
     private val faceDetector: FaceDetectorWrapper,
     private val faceEmbedder: FaceEmbedder,
-    private val faceMatcher: FaceMatcher,
+    @Named("video") private val faceMatcher: FaceMatcher,
     private val livenessDetector: LivenessDetector,
     private val toggleEngine: ToggleEngine,
     private val violationDetector: ViolationDetector,

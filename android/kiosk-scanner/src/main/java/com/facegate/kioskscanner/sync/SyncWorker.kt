@@ -19,6 +19,7 @@ import com.facegate.core.face.FaceMatcher
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.util.concurrent.TimeUnit
+import javax.inject.Named
 
 @HiltWorker
 class SyncWorker @AssistedInject constructor(
@@ -29,7 +30,7 @@ class SyncWorker @AssistedInject constructor(
     private val faceVectorDao: FaceVectorDao,
     private val studentDao: StudentDao,
     private val campusRuleDao: CampusRuleDao,
-    private val faceMatcher: FaceMatcher,
+    @Named("video") private val faceMatcher: FaceMatcher,
     private val syncMetadata: SyncMetadata,
     private val devicePreferences: DevicePreferences
 ) : CoroutineWorker(context, workerParams) {

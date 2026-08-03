@@ -27,7 +27,7 @@ import javax.inject.Inject
 class VideoMatchEngine @Inject constructor(
     private val faceDetector: FaceDetectorProvider,
     private val faceEmbedder: FaceEmbedderProvider,
-    private val faceMatcher: FaceMatcher,
+    @javax.inject.Named("video") private val faceMatcher: FaceMatcher,
     private val livenessDetector: LivenessDetector,
     private val toggleEngine: ToggleEngine,
     private val violationDetector: ViolationDetector,
@@ -171,7 +171,11 @@ class VideoMatchEngine @Inject constructor(
             // 1. Extract embeddings for each frame
             val embedResults = frames.mapNotNull { entry ->
                 try {
+<<<<<<< HEAD
                     val faceRect = entry.faceRect ?: return@mapNotNull null
+=======
+                    val faceRect = entry.faceRect ?: return@map null
+>>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
                     val faceCrop = cropFace(entry.bitmap, faceRect)
                     val emb = faceEmbedder.embed(faceCrop)
                     if (faceCrop !== entry.bitmap) faceCrop.recycle()

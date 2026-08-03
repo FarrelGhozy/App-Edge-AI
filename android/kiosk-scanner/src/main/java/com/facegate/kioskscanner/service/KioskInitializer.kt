@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Singleton
@@ -29,7 +30,7 @@ class KioskInitializer @Inject constructor(
     private val apiService: ApiService,
     private val faceVectorDao: FaceVectorDao,
     private val campusRuleDao: CampusRuleDao,
-    private val faceMatcher: FaceMatcher,
+    @Named("video") private val faceMatcher: FaceMatcher,
     private val faceDetectorProvider: FaceDetectorProvider,
     private val faceEmbedderProvider: FaceEmbedderProvider,
     private val voiceFeedback: VoiceFeedback,

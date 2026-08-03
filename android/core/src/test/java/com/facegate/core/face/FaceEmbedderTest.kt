@@ -25,19 +25,19 @@ class FaceEmbedderTest {
     }
 
     @Test
-    fun `default embedding dimension should be 512`() {
-        assertEquals(512, embedder.getEmbeddingDim())
+    fun `default embedding dimension should be 192 for TFLite MobileFaceNet`() {
+        assertEquals(192, embedder.getEmbeddingDim())
     }
 
     @Test
     fun `averageEmbeddings with empty array should return array of dim size`() {
         val result = embedder.averageEmbeddings(emptyArray())
-        assertEquals(512, result.size)
+        assertEquals(192, result.size)
     }
 
     @Test
     fun `averageEmbeddings with single vector should normalize correctly`() {
-        val v = vec(512, 0.5f)
+        val v = vec(192, 0.5f)
         val result = embedder.averageEmbeddings(arrayOf(v))
         assertEquals(v.size, result.size)
         // L2 norm should be ~1.0
@@ -48,12 +48,12 @@ class FaceEmbedderTest {
 
     @Test
     fun `averageEmbeddings with multiple vectors should compute average`() {
-        val v1 = vec(512, 1f)
-        val v2 = vec(512, 3f)
-        val v3 = vec(512, 5f)
+        val v1 = vec(192, 1f)
+        val v2 = vec(192, 3f)
+        val v3 = vec(192, 5f)
 
         val result = embedder.averageEmbeddings(arrayOf(v1, v2, v3))
-        assertEquals(512, result.size)
+        assertEquals(192, result.size)
         var sumSq = 0f
         for (v in result) sumSq += v * v
         assertTrue("L2 norm should be ~1.0", kotlin.math.abs(sumSq - 1f) < 0.01f)
@@ -61,11 +61,11 @@ class FaceEmbedderTest {
 
     @Test
     fun `averageEmbeddings with varying sizes should handle gracefully`() {
-        val v1 = vec(512, 1f)
-        val v2 = vec(512, 0.5f)
+        val v1 = vec(192, 1f)
+        val v2 = vec(192, 0.5f)
         val result = embedder.averageEmbeddings(arrayOf(v1, v2))
         assertNotNull(result)
-        assertEquals(512, result.size)
+        assertEquals(192, result.size)
     }
 
     @Test
@@ -74,8 +74,8 @@ class FaceEmbedderTest {
     }
 
     @Test
-    fun `getEmbeddingDim should return default 512`() {
-        assertEquals(512, embedder.getEmbeddingDim())
+    fun `getEmbeddingDim should return default 192`() {
+        assertEquals(192, embedder.getEmbeddingDim())
     }
 
     @Test
@@ -86,6 +86,6 @@ class FaceEmbedderTest {
     @Test
     fun `embedding dim can be overridden`() {
         // Only test the getter - init with non-existent model will fail silently
-        assertEquals(512, embedder.getEmbeddingDim())
+        assertEquals(192, embedder.getEmbeddingDim())
     }
 }

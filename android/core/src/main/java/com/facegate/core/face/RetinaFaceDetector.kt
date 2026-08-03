@@ -12,11 +12,14 @@ import java.nio.FloatBuffer
  * RetinaFace-500MF face detection via ONNX Runtime.
  *
  * Model: det_500m.onnx from InsightFace buffalo_sc pack.
- * Input:  [1, 3, H, W] float32 normalized [0,1]
- * Output:
- *   - bboxes:  [N, 4]  (x1, y1, x2, y2) on grid scale
- *   - scores:   [N, 1]  face confidence
- *   - landmarks:[N, 10] (5 keypoints × 2)
+ * Input:  [1, 3, H, W] float32, normalized (pixel - 127.5) / 128.0, RGB
+ * Output: 9 tensors, 3 scales (stride 8/16/32) × (scores [N,1], boxes [N,4], landmarks [N,10])
+ *   with N = (640/stride)^2 × 2 anchors: 12800, 3200, 800.
+ *
+ * Decode follows InsightFace reference (retinaface.py):
+ *   anchor_centers = meshgrid(x, y) * stride, duplicated ×2 anchors
+ *   bbox = distance2bbox(centers, preds*stride)
+ *   kps  = distance2kps(centers, preds*stride)
  */
 class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
 
@@ -26,15 +29,28 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
         private const val CONFIDENCE_THRESHOLD = 0.5f
         private const val NMS_THRESHOLD = 0.5f
         private const val INPUT_NAME = "input.1"
+<<<<<<< HEAD
         // 3 FPN levels × 3 heads (scores, boxes, landmarks) = 9 outputs
         private val OUTPUT_SCORES = listOf("443", "468", "493")  // [12800,1], [3200,1], [800,1]
         private val OUTPUT_BOXES = listOf("446", "471", "496")   // [12800,4], [3200,4], [800,4]
         private val OUTPUT_LANDMARKS = listOf("449", "474", "499") // [12800,10], [3200,10], [800,10]
+=======
+        private const val INPUT_MEAN = 127.5f
+        private const val INPUT_STD = 128.0f
+        private val FEAT_STRIDES = intArrayOf(8, 16, 32)
+        private const val NUM_ANCHORS = 2
+        private const val NUM_KPS = 5
+>>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
     }
 
     private var session: OrtSession? = null
     private var ortEnv: ai.onnxruntime.OrtEnvironment? = null
     private var ready = false
+
+    // Output tensor names ordered by scale (stride 8, 16, 32)
+    private var scoreNames: List<String> = emptyList()
+    private var boxNames: List<String> = emptyList()
+    private var kpsNames: List<String> = emptyList()
 
     override fun init(): Boolean {
         if (ready) return true
@@ -45,8 +61,30 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
             }
             session = manager.detectorSession
             ortEnv = manager.environment
-            ready = session != null
-            Log.d(TAG, "RetinaFace initialized: $ready")
+            if (session == null) return false
+
+            // Map outputs by shape: [N,1]=scores, [N,4]=boxes, [N,10]=landmarks,
+                        // ordered by row count desc (12800 → stride 8, 3200 → stride 16, 800 → stride 32)
+                        val outputInfo = session!!.getOutputInfo()
+                        fun rowsOf(entry: Map.Entry<String, ai.onnxruntime.NodeInfo>): Long =
+                            (entry.value.info as? ai.onnxruntime.TensorInfo)?.shape?.getOrElse(0) { -1L } ?: -1L
+                        fun colsOf(entry: Map.Entry<String, ai.onnxruntime.NodeInfo>): Long =
+                            (entry.value.info as? ai.onnxruntime.TensorInfo)?.shape?.getOrElse(1) { -1L } ?: -1L
+
+                        scoreNames = outputInfo.entries.filter { colsOf(it) == 1L }
+                            .sortedByDescending { rowsOf(it) }.map { it.key }
+                        boxNames = outputInfo.entries.filter { colsOf(it) == 4L }
+                            .sortedByDescending { rowsOf(it) }.map { it.key }
+                        kpsNames = outputInfo.entries.filter { colsOf(it) == 10L }
+                            .sortedByDescending { rowsOf(it) }.map { it.key }
+
+            if (scoreNames.size != 3 || boxNames.size != 3 || kpsNames.size != 3) {
+                Log.e(TAG, "Unexpected output layout: scores=${scoreNames.size} boxes=${boxNames.size} kps=${kpsNames.size}")
+                return false
+            }
+
+            ready = true
+            Log.d(TAG, "RetinaFace initialized: $ready (outputs: $scoreNames)")
             ready
         } catch (e: Exception) {
             Log.e(TAG, "Init failed: ${e.message}", e)
@@ -60,14 +98,18 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
             if (!init()) return emptyList()
         }
 
+        var inputTensor: OnnxTensor? = null
+        var results: OrtSession.Result? = null
         try {
-            // 1. Preprocess: resize + normalize to [0,1] + NCHW layout
-            val (inputTensor, scaleX, scaleY) = preprocess(bitmap)
+            // 1. Preprocess: resize + normalize to (pix-127.5)/128 + NCHW layout
+            val (tensor, scaleX, scaleY) = preprocess(bitmap)
+            inputTensor = tensor
 
             // 2. Run inference
             val inputMap = mapOf(INPUT_NAME to inputTensor)
-            val results = session!!.run(inputMap)
+            results = session!!.run(inputMap)
 
+<<<<<<< HEAD
             // 3. Parse all 9 outputs (3 FPN levels)
             val allScores = mutableListOf<FloatArray>()
             val allBoxes = mutableListOf<FloatArray>()
@@ -154,23 +196,90 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
                         val lx = (anchor.cx + landmark[idx * 2] * variance0 * anchor.w) * scaleX
                         val ly = (anchor.cy + landmark[idx * 2 + 1] * variance0 * anchor.h) * scaleY
                         lx to ly
-                    }
-                } else emptyList()
+=======
+            // 3. Parse + decode each scale (InsightFace reference)
+            val candidates = mutableListOf<RetinaFaceCandidate>()
+            for (scaleIdx in 0 until 3) {
+                val stride = FEAT_STRIDES[scaleIdx]
 
-                candidates.add(
-                    RetinaFaceCandidate(
-                        rect = Rect(
-                            x1.toInt().coerceAtLeast(0),
-                            y1.toInt().coerceAtLeast(0),
-                            x2.toInt().coerceAtMost(bitmap.width),
-                            y2.toInt().coerceAtMost(bitmap.height)
-                        ),
-                        confidence = score,
-                        landmarks = lmPoints
+                val scoreBuf = readTensorFloatBuffer(results, scoreNames[scaleIdx]) ?: continue
+                val boxBuf = readTensorFloatBuffer(results, boxNames[scaleIdx]) ?: continue
+                val kpsBuf = readTensorFloatBuffer(results, kpsNames[scaleIdx]) ?: continue
+
+                val height = INPUT_SIZE / stride
+                val width = INPUT_SIZE / stride
+                val k = height * width
+                val totalAnchors = k * NUM_ANCHORS
+
+                if (scoreBuf.remaining() < totalAnchors) {
+                    Log.w(TAG, "Scale $stride: score buffer ${scoreBuf.remaining()} < $totalAnchors")
+                    continue
+                }
+                // DEBUG: report max score per scale
+                var maxScore = -1f
+                for (i in 0 until scoreBuf.remaining()) {
+                    val v = scoreBuf[i]
+                    if (v > maxScore) maxScore = v
+                }
+                Log.d(TAG, "[$stride] buffer=${scoreBuf.remaining()} maxScore=$maxScore")
+
+                // Anchor centers: meshgrid(x, y) * stride, duplicated ×2 anchors
+                // order matches insightface: np.stack([c]*2, axis=1).reshape(-1,2) → c0,c0,c1,c1,...
+                val centers = FloatArray(totalAnchors * 2)
+                var ci = 0
+                for (row in 0 until height) {
+                    for (col in 0 until width) {
+                        val cx = (col * stride).toFloat()
+                        val cy = (row * stride).toFloat()
+                        repeat(NUM_ANCHORS) {
+                            centers[ci++] = cx
+                            centers[ci++] = cy
+                        }
+>>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
+                    }
+                }
+
+                for (i in 0 until totalAnchors) {
+                    val score = scoreBuf[i]
+                    if (score < CONFIDENCE_THRESHOLD) continue
+
+                    val cx = centers[i * 2]
+                    val cy = centers[i * 2 + 1]
+
+                    // distance2bbox: x1=cx-d0, y1=cy-d1, x2=cx+d2, y2=cy+d3 (preds scaled by stride)
+                    val x1 = cx - boxBuf[i * 4 + 0] * stride
+                    val y1 = cy - boxBuf[i * 4 + 1] * stride
+                    val x2 = cx + boxBuf[i * 4 + 2] * stride
+                    val y2 = cy + boxBuf[i * 4 + 3] * stride
+
+                    // Scale from 640-grid coords → original bitmap coords
+                    val rect = Rect(
+                        (x1 * scaleX).toInt().coerceAtLeast(0),
+                        (y1 * scaleY).toInt().coerceAtLeast(0),
+                        (x2 * scaleX).toInt().coerceAtMost(bitmap.width),
+                        (y2 * scaleY).toInt().coerceAtMost(bitmap.height)
                     )
-                )
+                    if (rect.width() <= 0 || rect.height() <= 0) continue
+
+                    // distance2kps: px = cx + d[2i], py = cy + d[2i+1] (scaled by stride)
+                    val landmarks = ArrayList<Pair<Float, Float>>(NUM_KPS)
+                    for (k in 0 until NUM_KPS) {
+                        val px = (cx + kpsBuf[i * 10 + k * 2] * stride) * scaleX
+                        val py = (cy + kpsBuf[i * 10 + k * 2 + 1] * stride) * scaleY
+                        landmarks.add(px to py)
+                    }
+
+                    candidates.add(
+                        RetinaFaceCandidate(
+                            rect = rect,
+                            confidence = score,
+                            landmarks = landmarks
+                        )
+                    )
+                }
             }
 
+<<<<<<< HEAD
             Log.d(TAG, "After decoding: ${candidates.size} candidates pass threshold=$CONFIDENCE_THRESHOLD")
             if (candidates.isNotEmpty()) {
                 val c = candidates.first()
@@ -178,9 +287,12 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
             }
 
             // 5. NMS
+=======
+            // 4. NMS across all scales
+>>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
             val kept = nonMaxSuppression(candidates, NMS_THRESHOLD)
 
-            // 6. Convert to FaceBox
+            // 5. Convert to FaceBox
             return kept.map { cand ->
                 FaceBox(
                     boundingBox = cand.rect,
@@ -191,6 +303,18 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
         } catch (e: Exception) {
             Log.e(TAG, "Detect error: ${e.message}", e)
             return emptyList()
+        } finally {
+            try { results?.close() } catch (_: Exception) {}
+            try { inputTensor?.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun readTensorFloatBuffer(results: OrtSession.Result, name: String): FloatBuffer? {
+        return try {
+            // NOTE: Result.get(String) returns Optional<OnnxValue> in ONNX Runtime 1.20
+            (results.get(name).orElse(null) as? OnnxTensor)?.floatBuffer
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -257,10 +381,10 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
         for (row in 0 until INPUT_SIZE) {
             for (col in 0 until INPUT_SIZE) {
                 val pixel = pixels[row * INPUT_SIZE + col]
-                // Normalize [0,1]
-                inputData[idx] = ((pixel shr 16) and 0xFF) / 255.0f      // R → channel 0
-                inputData[INPUT_SIZE * INPUT_SIZE + idx] = ((pixel shr 8) and 0xFF) / 255.0f // G → channel 1
-                inputData[2 * INPUT_SIZE * INPUT_SIZE + idx] = (pixel and 0xFF) / 255.0f    // B → channel 2
+                // Normalize (pixel - 127.5) / 128.0 — InsightFace convention
+                inputData[idx] = (((pixel shr 16) and 0xFF) - INPUT_MEAN) / INPUT_STD       // R → channel 0
+                inputData[INPUT_SIZE * INPUT_SIZE + idx] = (((pixel shr 8) and 0xFF) - INPUT_MEAN) / INPUT_STD // G → channel 1
+                inputData[2 * INPUT_SIZE * INPUT_SIZE + idx] = ((pixel and 0xFF) - INPUT_MEAN) / INPUT_STD    // B → channel 2
                 idx++
             }
         }
