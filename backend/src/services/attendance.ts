@@ -33,14 +33,23 @@ export async function recordScan(data: {
 
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
 
+  // #107: normalisasi action ke lowercase SAAT WRITE. Kiosk kirim "keluar"/
+  // "kembali" (lowercase, ScannerViewModel:283) dan SEMUA query backend
+  // (dashboard, attendance.ts, report.ts) membandingkan dengan literal
+  // "keluar"/"kembali" (lowercase). Tanpa normalisasi, data uppercase (mis.
+  // payload lama/API langsung) TIDAK pernah cocok — statistik & revalidasi
+  // pelanggaran jadi salah. Normalisasi di sini = solusi tunggal yg benar.
+  const action = (data.action || "").trim().toLowerCase();
+  const isOutAction = action === "keluar";
+
   // #64: re-validasi violation di SERVER. Kiosk menetapkan isViolation secara
   // lokal tanpa data permit/holiday; server punya data itu dan bisa membatalkan
-  // false positive. Aturan: pelanggaran hanya valid jika action=KELUAR, masuk
+  // false positive. Aturan: pelanggaran hanya valid jika action=keluar, masuk
   // restricted hour, DAN tidak punya permit aktif DAN hari ini bukan libur.
   let isViolation = data.isViolation || false;
   let violationType: string | null | undefined = data.violationType;
 
-  if (data.action === "KELUAR") {
+  if (isOutAction) {
     const dayOfWeek = ts.getDay(); // 0 = Minggu
     const time = ts.toTimeString().slice(0, 5); // HH:MM
 
@@ -85,7 +94,7 @@ export async function recordScan(data: {
     data: {
       studentId: data.studentId,
       studentName: data.studentName,
-      action: data.action,
+      action, // #107: tersimpan ternormalisasi (lowercase)
       timestamp: ts,
       confidenceScore: data.confidenceScore,
       isViolation,

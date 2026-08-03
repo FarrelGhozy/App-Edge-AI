@@ -27,6 +27,7 @@ const mockPrisma: any = {
   },
   permit: {
     findMany: mock(() => []),
+    findFirst: mock(() => null),
   },
 };
 
@@ -111,6 +112,45 @@ describe("attendance service", () => {
         violationType: "terlambat",
       });
       expect(result).toBeDefined();
+    });
+
+    it("#107: action case dinormalisasi ke lowercase saat write", async () => {
+      mockPrisma.student.findUnique.mockResolvedValue({
+        id: "s1", name: "Test", nim: "123",
+      });
+      mockPrisma.attendanceLog.create.mockImplementation(async (args: any) => args.data);
+
+      const upper = await recordScan({ ...scanInput, action: "KELUAR" });
+      expect(upper.action).toBe("keluar");
+      const mixed = await recordScan({ ...scanInput, action: "KeMbAlI" });
+      expect(mixed.action).toBe("kembali");
+    });
+
+    it("#107: revalidasi #64 jalan untuk action lowercase (kiosk)", async () => {
+      // Kiosk kirim lowercase "keluar" (ScannerViewModel.kt). Sebelumnya
+      // recordScan cek `=== "KELUAR"` (uppercase) → blok revalidasi #64 SELALU
+      // di-skip untuk data kiosk → pelanggaran tak pernah dibatalkan server.
+      mockPrisma.student.findUnique.mockResolvedValue({
+        id: "s1", name: "Test", nim: "123",
+      });
+      // Senin malam 23:30 → restricted (rule overnight 22:00-05:00), tapi ada permit
+      const ts = new Date("2026-08-10T23:30:00+07:00");
+      mockPrisma.campusRule.findMany.mockResolvedValue([
+        { dayOfWeek: 1, startTime: "22:00", endTime: "05:00", isRestricted: true },
+      ]);
+      mockPrisma.permit.findFirst.mockResolvedValue({ id: "permit-1", status: "approved" });
+      mockPrisma.holiday.findFirst.mockResolvedValue(null);
+
+      const result = await recordScan({
+        ...scanInput,
+        action: "keluar",
+        isViolation: true,
+        violationType: "restricted_hours",
+        timestamp: ts.getTime(),
+      });
+      // permit aktif → server batalkan false positive
+      expect(result.isViolation).toBe(false);
+      expect(result.violationType).toBeNull();
     });
   });
 

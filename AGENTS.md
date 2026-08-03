@@ -67,24 +67,24 @@ CameraX → RetinaFace-500MF ONNX (detection, det_500m.onnx)
 
 **Stack saat ini (branch `insightface`)**: ONNX Runtime Mobile — InsightFace buffalo_sc.
 - Detection: `det_500m.onnx` — RetinaFace-500MF (input `[1,3,H,W]`, output boxes+scores+landmarks)
-- Embedding: `w600k_mbf.onnx` — MobileFaceNet @ WebFace600K (**output `[1,512]`**, L2-normalized, 112×112, pixel/255)
+- Embedding: `w600k_mbf.onnx` — MobileFaceNet @ WebFace600K (**output `[1,512]`**, L2-normalized, 112×112, preprocessing `(pix - 127.5) / 128` = range ~[-1,1))
 - Fallback (legacy, tidak aktif): ML Kit detection + MobileFaceNet TFLite
 
-⚠️ **KNOWN ISSUE (temuan audit)**: model `w600k_mbf.onnx` output **512-d**, tapi `OnnxFaceEmbedder.kt: EMBEDDING_DIM = 192` dan schema DB `vector(192)` — **dimensi belum disinkronkan ke 512**. Ini penyebab potensial `VECTOR_DIMENSION_MISMATCH` saat upload face setelah build dibetulkan.
+> ✅ **AKTUAL (terverifikasi)**: `OnnxFaceEmbedder.kt: embeddingDim = 512` dan schema DB `vector(512)` sudah sinkron. Tidak ada mismatch dimensi. (Klaim lama "masih 192/vector(192)" di bawah sudah usang.)
 
 ## Model History (Jul 2026)
 - **Old**: `arcface_512.tflite` — FP16, **broken architecture** (conversion script was a skeleton, not real Inception-ResNet v1). Produced non-discriminative embeddings → false positive 100%.
 - **Then**: `mobilefacenet.tflite` — proven 192-d model from GitHub release, 5 MB, LFW 99.4% (digunakan di pipeline TFLite lama).
 - **Now**: InsightFace `w600k_mbf.onnx` — 512-d, LFW 99.70%, CFP-FP 98.00% (migrasi aktif di branch `insightface`).
 
-**Preprocessing fix**: Changed from `pixel / 127.5 - 1.0` (range [-1, 1]) to `pixel / 255.0` (range [0, 1]).
+**Preprocessing fix**: Changed from `pixel / 127.5 - 1.0` (range [-1, 1]) to `(pix - 127.5) / 128` (range ~[-1,1)) — InsightFace `buffalo_sc` convention, konsisten antara embedder & detector.
 
-**Specifications**:
-- Input: 112×112 RGB, normalized to [0, 1] (pixel/255.0)
-- Output: **512-d** L2-normalized float vector (ONNX model asli; kode masih klaim 192 — harus dibetulkan)
-- Database: `vector(512)` in PostgreSQL (schema masih `vector(192)` — harus dibetulkan)
+**Specifications (AKTUAL, branch `insightface`)**:
+- Input: 112×112 RGB, normalized `(pix - 127.5) / 128` (range ~[-1,1))
+- Output: **512-d** L2-normalized float vector (ONNX w600k_mbf, dimension = 512)
+- Database: `vector(512)` (sudah disinkronkan — tidak ada mismatch)
 
-**IMPORTANT**: If upload fails with dimension mismatch, verify vector is **512-d** (model InsightFace w600k_mbf output 512). Update `OnnxFaceEmbedder.kt EMBEDDING_DIM` → 512 dan `schema.prisma vector(192)` → `vector(512)`.
+**IMPORTANT**: Embedding saat ini **512-d** (ONNX w600k_mbf). `OnnxFaceEmbedder.EMBEDDING_DIM = 512` dan `schema.prisma vector(512)` sudah sinkron — jangan ubah ke 192. Jangan ubah preprocessing ke pixel/255; model InsightFace memakai `(pix - 127.5) / 128`.
 
 ## Realtime Data Architecture
 
@@ -148,12 +148,12 @@ Two types:
 
 ### Error :500 saat upload face
 1. Pastikan ekstensi `pgvector` sudah aktif: `CREATE EXTENSION IF NOT EXISTS vector;`
-2. Model ONNX (w600k_mbf) menghasilkan **512-dimensi** — schema harus `vector(512)`, cek `OnnxFaceEmbedder.kt: EMBEDDING_DIM = 512` (jangan pakai klaim lama 192-d — model InsightFace asli output 512)
+2. Model ONNX (w600k_mbf) menghasilkan **512-dimensi** — schema sudah `vector(512)`, `OnnxFaceEmbedder.kt: EMBEDDING_DIM = 512` (jangan pakai klaim lama 192-d — model InsightFace asli output 512)
 3. Jalankan `npx prisma db push` setelah mengubah schema
 4. Cek error detail di log backend — sekarang uploadFace memberikan pesan error spesifik
 
 ### Masalah akurasi face recognition
-1. **Preprocessing salah** — Pastikan FaceEmbedder pakai `pixel/255.0` (range [0,1]), bukan `pixel/127.5-1` ([-1,1])
+1. **Preprocessing salah** — Pastikan FaceEmbedder pakai `(pix - 127.5) / 128` (range ~[-1,1), konvensi InsightFace buffalo_sc), bukan `pixel/255.0` ([0,1])
 2. **Model rusak** — Jangan gunakan `arcface_512.tflite` (dari conversion script skeleton). Pakai InsightFace ONNX `w600k_mbf.onnx` (512-d)
 3. **Enrollment tidak crop** — Pastikan admin app crop wajah sebelum embed (fix ada di FaceRegisterViewModel.kt)
 4. **SyncWorker missing pose** — Semua 5 pose harus tersimpan dengan label CENTER/LEFT/RIGHT/UP/DOWN
@@ -175,7 +175,7 @@ npx prisma generate         # Regenerate Prisma client
 | # | File | Perubahan |
 |---|---|---|
 | 1 | `FaceEmbedder.kt` | Model default: `arcface_512.tflite` (broken) → `mobilefacenet.tflite` (proven) → **InsightFace ONNX `w600k_mbf.onnx` (512-d, branch `insightface`)** |
-| 2 | `FaceEmbedder.kt` | Preprocessing: `pixel/127.5-1` ([-1,1]) → `pixel/255.0` ([0,1]) |
+| 2 | `FaceEmbedder.kt` | Preprocessing: `pixel/127.5-1` ([-1,1]) → `(pix - 127.5) / 128` (~[-1,1), konvensi InsightFace buffalo_sc) |
 | 3 | `FaceEmbedder.kt` | Dequantization: output quantized sekarang di-dequantize pakai scale + zeroPoint |
 | 4 | `SyncWorker.kt` | FaceVectorEntity dibuat dengan `pose` field (sebelumnya empty → PK conflict → 1 vector per student) |
 | 5 | `SyncWorker.kt` | Ganti insert loop dengan `deleteAll()` + `insertAll()` batch |

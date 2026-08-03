@@ -46,13 +46,20 @@ export const attendanceRoutes = new Elysia()
 
     const logs = await prisma.attendanceLog.findMany({
       where: { timestamp: { gte: today, lt: tomorrow } },
-      orderBy: { timestamp: "desc" }
+      orderBy: { timestamp: "asc" } // #108: asc supaya action terakhir benar & skenario keluar->kembali akurat
     });
 
-    const outsideIds = new Set<string>();
+    // #108: iterate asc, map action terakhir per student (nimpa = ambil yang
+    // terakhir). Kebalikan dari mutasi set desc yg gagal saat keluar->kembali.
+    const lastAction = new Map<string, "keluar" | "kembali">();
     for (const l of logs) {
-      if (l.action === "keluar") outsideIds.add(l.studentId);
-      else if (l.action === "kembali") outsideIds.delete(l.studentId);
+      if (l.action === "keluar" || l.action === "kembali") {
+        lastAction.set(l.studentId, l.action);
+      }
+    }
+    const outsideIds = new Set<string>();
+    for (const [studentId, action] of lastAction) {
+      if (action === "keluar") outsideIds.add(studentId);
     }
 
     return {
