@@ -152,6 +152,9 @@ class FaceEmbedder(private val context: Context) {
      */
     private fun preprocess(bitmap: Bitmap): ByteBuffer {
         val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        // Guard: createScaledBitmap may return the SAME bitmap when input already
+        // has the target size — never recycle a bitmap owned by the caller (#76).
+        val shouldRecycle = resized !== bitmap
         val pixels = IntArray(inputSize * inputSize)
         resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
 
@@ -162,7 +165,7 @@ class FaceEmbedder(private val context: Context) {
                 buffer.put(((pixel shr 8) and 0xFF).toByte())  // G
                 buffer.put((pixel and 0xFF).toByte())           // B
             }
-            resized.recycle()
+            if (shouldRecycle) resized.recycle()
             return buffer
         } else {
             val buffer = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4)
@@ -177,7 +180,7 @@ class FaceEmbedder(private val context: Context) {
                 buffer.putFloat(g)
                 buffer.putFloat(b)
             }
-            resized.recycle()
+            if (shouldRecycle) resized.recycle()
             return buffer
         }
     }

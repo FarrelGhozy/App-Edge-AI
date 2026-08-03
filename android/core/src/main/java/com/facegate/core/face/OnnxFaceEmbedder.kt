@@ -110,6 +110,9 @@ class OnnxFaceEmbedder(private val context: Context) : FaceEmbedderProvider {
      */
     private fun preprocess(bitmap: Bitmap): OnnxTensor {
         val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        // Guard: createScaledBitmap may return the SAME bitmap when input already
+        // has the target size — never recycle a bitmap owned by the caller (#76).
+        val shouldRecycle = resized !== bitmap
         val pixels = IntArray(inputSize * inputSize)
         resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
 
@@ -129,7 +132,7 @@ class OnnxFaceEmbedder(private val context: Context) : FaceEmbedderProvider {
                 idx++
             }
         }
-        resized.recycle()
+        if (shouldRecycle) resized.recycle()
 
         val shape = longArrayOf(1, 3, inputSize.toLong(), inputSize.toLong())
         return OnnxTensor.createTensor(ortEnv!!, FloatBuffer.wrap(inputData), shape)

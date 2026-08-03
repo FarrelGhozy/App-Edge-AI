@@ -224,6 +224,9 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
      */
     private fun preprocess(bitmap: Bitmap): Triple<OnnxTensor, Float, Float> {
         val resized = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
+        // Guard: createScaledBitmap may return the SAME bitmap when input already
+        // has the target size — never recycle a bitmap owned by the caller (#76).
+        val shouldRecycle = resized !== bitmap
         val scaleX = bitmap.width.toFloat() / INPUT_SIZE
         val scaleY = bitmap.height.toFloat() / INPUT_SIZE
 
@@ -244,7 +247,7 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
             }
         }
 
-        resized.recycle()
+        if (shouldRecycle) resized.recycle()
 
         val buffer = FloatBuffer.wrap(inputData)
         val shape = longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
