@@ -31,15 +31,65 @@ export async function recordScan(data: {
   const student = await prisma.student.findUnique({ where: { id: data.studentId } });
   if (!student) throw new Error("STUDENT_NOT_FOUND");
 
+  const ts = data.timestamp ? new Date(data.timestamp) : new Date();
+
+  // #64: re-validasi violation di SERVER. Kiosk menetapkan isViolation secara
+  // lokal tanpa data permit/holiday; server punya data itu dan bisa membatalkan
+  // false positive. Aturan: pelanggaran hanya valid jika action=KELUAR, masuk
+  // restricted hour, DAN tidak punya permit aktif DAN hari ini bukan libur.
+  let isViolation = data.isViolation || false;
+  let violationType: string | null | undefined = data.violationType;
+
+  if (data.action === "KELUAR") {
+    const dayOfWeek = ts.getDay(); // 0 = Minggu
+    const time = ts.toTimeString().slice(0, 5); // HH:MM
+
+    // Rules hari itu — re-evaluasi dengan logika overnight (#83)
+    const rules = await prisma.campusRule.findMany({
+      where: { dayOfWeek, isRestricted: true }
+    });
+
+    const restricted = rules.some(r => {
+      const overnight = r.endTime < r.startTime;
+      if (overnight) return time >= r.startTime || time <= r.endTime;
+      return time >= r.startTime && time <= r.endTime;
+    });
+
+    if (!restricted) {
+      isViolation = false;
+      violationType = null;
+    } else {
+      // Restricted hours — tapi boleh dibatalkan oleh permit aktif atau holiday
+      const hasActivePermit = await prisma.permit.findFirst({
+        where: {
+          studentId: data.studentId,
+          status: "approved",
+          startDate: { lte: ts },
+          endDate: { gte: ts }
+        }
+      });
+      const dayStart = new Date(ts); dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(ts); dayEnd.setHours(23, 59, 59, 999);
+      const isHoliday = await prisma.holiday.findFirst({
+        where: { date: { gte: dayStart, lte: dayEnd } }
+      });
+
+      if (hasActivePermit || isHoliday) {
+        isViolation = false;
+        violationType = null;
+      }
+    }
+  }
+
   const log = await prisma.attendanceLog.create({
     data: {
       studentId: data.studentId,
       studentName: data.studentName,
       action: data.action,
-      timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+      timestamp: ts,
       confidenceScore: data.confidenceScore,
-      isViolation: data.isViolation || false,
-      violationType: data.violationType,
+      isViolation,
+      violationType,
       deviceId: data.deviceId,
       photoCapture: data.photoCapture,
       isSynced: true

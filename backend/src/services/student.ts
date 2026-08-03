@@ -108,22 +108,6 @@ export async function getStudent(id: string) {
   };
 }
 
-async function triggerSyncForAllDevices() {
-  try {
-    const activeDevices = await prisma.device.findMany({
-      where: { isActive: true },
-      select: { deviceId: true }
-    });
-    for (const device of activeDevices) {
-      await prisma.syncRequest.create({
-        data: { deviceId: device.deviceId }
-      });
-    }
-  } catch (_) {
-    // Silently fail
-  }
-}
-
 export async function createStudent(data: {
   nim: string;
   name: string;
@@ -133,13 +117,11 @@ export async function createStudent(data: {
   email?: string;
 }) {
   const student = await prisma.student.create({ data });
-  await triggerSyncForAllDevices();
   return student;
 }
 
 export async function updateStudent(id: string, data: Record<string, unknown>) {
   const student = await prisma.student.update({ where: { id }, data });
-  await triggerSyncForAllDevices();
   return student;
 }
 
@@ -150,18 +132,12 @@ export async function deleteStudent(id: string) {
     await tx.attendanceLog.deleteMany({ where: { studentId: id } });
     await tx.permit.deleteMany({ where: { studentId: id } });
     await tx.faceVector.deleteMany({ where: { studentId: id } });
-    const student = await tx.student.delete({ where: { id } });
-    return student;
-  }).then(async (student) => {
-    // Notifikasi sync hanya setelah commit sukses.
-    await triggerSyncForAllDevices();
-    return student;
+    return tx.student.delete({ where: { id } });
   });
 }
 
 export async function deleteFace(studentId: string) {
   const result = await prisma.faceVector.deleteMany({ where: { studentId } });
-  await triggerSyncForAllDevices();
   return { deleted: result.count > 0 };
 }
 
@@ -191,7 +167,6 @@ export async function uploadFace(studentId: string, pose: string, vector: number
       pose,
       vectorStr
     );
-    await triggerSyncForAllDevices();
     return result;
   } catch (error: any) {
     if (error.message?.includes("vector")) {
@@ -236,7 +211,6 @@ export async function batchUploadFaces(studentId: string, vectors: { pose: strin
         );
       })
     );
-    await triggerSyncForAllDevices();
     return { uploaded: vectors.length };
   } catch (error: any) {
     if (error.message?.includes("vector")) {

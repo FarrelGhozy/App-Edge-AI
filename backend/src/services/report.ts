@@ -123,30 +123,37 @@ export async function violationReport(from: string, to: string) {
 }
 
 export async function outsideNow() {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // #82: jangan hanya lihat log sejak tengah malam — santri keluar kemarin
+  // 23:50 belum kembali harus tetap terhitung "di luar". Ambil log sejak
+  // awal hari kemarin (24-48 jam cukup untuk menutup gap lintas tengah malam),
+  // lalu status ditentukan dari ACTION TERAKHIR per student.
+  const since = new Date();
+  since.setDate(since.getDate() - 1);
+  since.setHours(0, 0, 0, 0);
 
   const logs = await prisma.attendanceLog.findMany({
-    where: { timestamp: { gte: todayStart } },
-    orderBy: { timestamp: "desc" }
+    where: { timestamp: { gte: since } },
+    orderBy: [{ studentId: "asc" }, { timestamp: "asc" }]
   });
 
-  const outsideIds = new Set<string>();
+  // Map studentId -> action terakhir (urutan asc, iterasi menimpa = ambil terakhir)
+  const lastAction = new Map<string, "keluar" | "kembali">();
+  const lastKeluarTimes: Record<string, Date> = {};
   for (const l of logs) {
-    if (l.action === "keluar") outsideIds.add(l.studentId);
-    else if (l.action === "kembali") outsideIds.delete(l.studentId);
+    if (l.action === "keluar" || l.action === "kembali") {
+      lastAction.set(l.studentId, l.action);
+      if (l.action === "keluar") lastKeluarTimes[l.studentId] = l.timestamp;
+    }
+  }
+
+  const outsideIds = new Set<string>();
+  for (const [studentId, action] of lastAction) {
+    if (action === "keluar") outsideIds.add(studentId);
   }
 
   const students = await prisma.student.findMany({
     where: { id: { in: Array.from(outsideIds) }, isActive: true }
   });
-
-  const lastKeluarTimes: Record<string, Date> = {};
-  for (const l of logs) {
-    if (l.action === "keluar" && !lastKeluarTimes[l.studentId]) {
-      lastKeluarTimes[l.studentId] = l.timestamp;
-    }
-  }
 
   return {
     count: students.length,

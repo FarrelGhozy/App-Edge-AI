@@ -15,6 +15,7 @@ import {
 } from "../services/student";
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
+import { audit } from "../services/audit";
 
 export const studentRoutes = new Elysia()
   .use(authGuard("admin", "superadmin"))
@@ -38,10 +39,11 @@ export const studentRoutes = new Elysia()
     }
     return student;
   })
-  .post("/api/students", async ({ body }) => {
+  .post("/api/students", async ({ body, admin }) => {
     try {
       const student = await createStudent(body);
       notifyDevicesChange();
+      await audit(admin, { action: "CREATE", entityType: "STUDENTS", entityId: student.id, details: `nim=${body.nim}` });
       return student;
     } catch (error: any) {
       if (error.code === "P2002") {
@@ -56,21 +58,24 @@ export const studentRoutes = new Elysia()
       );
     }
   }, { body: createStudentSchema })
-  .put("/api/students/:id", async ({ params: { id }, body }) => {
+  .put("/api/students/:id", async ({ params: { id }, body, admin }) => {
     const student = await updateStudent(id, body as Record<string, unknown>);
     notifyDevicesChange();
+    await audit(admin, { action: "UPDATE", entityType: "STUDENTS", entityId: id });
     return student;
   }, { body: updateStudentSchema })
-  .delete("/api/students/:id", async ({ params: { id } }) => {
+  .delete("/api/students/:id", async ({ params: { id }, admin }) => {
     await deleteStudent(id);
     notifyDevicesChange();
+    await audit(admin, { action: "DELETE", entityType: "STUDENTS", entityId: id });
     return { success: true };
   })
   // ─── Upload single pose vector ───
-  .post("/api/students/:id/face", async ({ params: { id }, body }) => {
+  .post("/api/students/:id/face", async ({ params: { id }, body, admin }) => {
     try {
       await uploadFace(id, body.pose, body.vector);
       notifyDevicesChange();
+      await audit(admin, { action: "UPDATE", entityType: "STUDENTS", entityId: id, details: "face upload (single)" });
       return { success: true };
     } catch (error: any) {
       if (error.message === "STUDENT_NOT_FOUND") {
@@ -110,10 +115,11 @@ export const studentRoutes = new Elysia()
     }
   }, { body: uploadFaceSchema })
   // ─── Upload all 5 pose vectors in batch ───
-  .post("/api/students/:id/faces", async ({ params: { id }, body }) => {
+  .post("/api/students/:id/faces", async ({ params: { id }, body, admin }) => {
     try {
       const result = await batchUploadFaces(id, body.vectors);
       notifyDevicesChange();
+      await audit(admin, { action: "UPDATE", entityType: "STUDENTS", entityId: id, details: `face batch (${body.vectors.length} pose)` });
       return { success: true, ...result };
     } catch (error: any) {
       if (error.message === "STUDENT_NOT_FOUND") {
@@ -152,7 +158,7 @@ export const studentRoutes = new Elysia()
       );
     }
   }, { body: batchUploadFacesSchema })
-  .delete("/api/students/:id/face", async ({ params: { id } }) => {
+  .delete("/api/students/:id/face", async ({ params: { id }, admin }) => {
     const result = await deleteFace(id);
     if (!result.deleted) {
       return new Response(
@@ -161,5 +167,6 @@ export const studentRoutes = new Elysia()
       );
     }
     notifyDevicesChange();
+    await audit(admin, { action: "UPDATE", entityType: "STUDENTS", entityId: id, details: "face delete" });
     return { success: true };
   });

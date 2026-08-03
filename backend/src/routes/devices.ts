@@ -7,8 +7,7 @@ export const deviceRoutes = new Elysia()
   .use(authGuard())
   // Device self-register + ping: boleh dari token device (#70 — device
   // hanya bisa daftar/mem-ping dirinya sendiri, bukan kelola device lain)
-  .post("/api/devices/register", async ({ body, store }) => {
-    const admin = store?.admin as { id: string; role: string } | undefined;
+  .post("/api/devices/register", async ({ body, admin }) => {
     const req = body as { deviceId?: string; name: string; location?: string };
     const authenticatedDeviceId = admin?.role === "device" ? admin.id : undefined;
     const device = await registerDevice(req, authenticatedDeviceId);
@@ -39,8 +38,7 @@ export const deviceRoutes = new Elysia()
     const device = await prisma.device.update({ where: { deviceId }, data });
     return { success: true, data: device };
   })
-  .post("/api/sync/request/:deviceId", async ({ params: { deviceId }, store }) => {
-    const admin = store?.admin as { id: string } | undefined;
+  .post("/api/sync/request/:deviceId", async ({ params: { deviceId }, admin }) => {
     const request = await prisma.syncRequest.create({
       data: {
         deviceId,

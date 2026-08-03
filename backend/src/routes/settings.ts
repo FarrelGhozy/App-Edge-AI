@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
+import { audit } from "../services/audit";
 
 export const settingRoutes = new Elysia()
   .use(authGuard("admin", "superadmin"))
@@ -10,7 +11,7 @@ export const settingRoutes = new Elysia()
     for (const s of settings) map[s.key] = s.value;
     return map;
   })
-  .put("/api/settings", async ({ body }) => {
+  .put("/api/settings", async ({ body, admin }) => {
     const entries = body as Record<string, string>;
     for (const [key, value] of Object.entries(entries)) {
       await prisma.globalSetting.upsert({
@@ -19,5 +20,6 @@ export const settingRoutes = new Elysia()
         create: { key, value }
       });
     }
+    await audit(admin, { action: "UPDATE", entityType: "SETTINGS", entityId: "global", details: Object.keys(entries).join(",") });
     return { success: true };
   });

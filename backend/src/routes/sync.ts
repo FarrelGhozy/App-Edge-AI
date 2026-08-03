@@ -58,26 +58,43 @@ export const syncRoutes = new Elysia()
 
     return { data, since: watermark };
   })
-  .post("/api/sync/attendance", async ({ body }) => {
+  .post("/api/sync/attendance", async ({ body, admin }) => {
     const created = [];
+    const skipped = [];
+    // #84: batch fetch semua student sekali (hilangkan N+1 loop findUnique)
+    const ids = (body.logs as { studentId: string }[]).map(l => l.studentId);
+    const students = await prisma.student.findMany({ where: { id: { in: ids } } });
+    const studentMap = new Map(students.map(s => [s.id, s]));
+
     for (const log of body.logs) {
-      const student = await prisma.student.findUnique({ where: { id: log.studentId } });
-      if (student) {
-        const record = await recordScan({
-          studentId: log.studentId,
-          studentName: student.name,
-          action: log.action,
-          confidenceScore: log.confidenceScore,
-          isViolation: log.isViolation,
-          violationType: log.violationType,
-          deviceId: log.deviceId,
-          photoCapture: log.photoCapture,
-          timestamp: log.timestamp
-        });
-        created.push(record);
+      const student = studentMap.get(log.studentId);
+      if (!student) {
+        // #84: JANGAN silent skip — laporkan supaya kiosk tahu & antrean tidak
+        // hilang tanpa jejak (data loss offline).
+        skipped.push({ studentId: log.studentId, reason: "student_not_found" });
+        continue;
       }
+      const record = await recordScan({
+        studentId: log.studentId,
+        studentName: student.name,
+        action: log.action,
+        confidenceScore: log.confidenceScore,
+        isViolation: log.isViolation,
+        violationType: log.violationType,
+        deviceId: log.deviceId,
+        photoCapture: log.photoCapture,
+        timestamp: log.timestamp
+      });
+      created.push(record);
     }
-    return { success: true, data: { synced: created.length } };
+    return {
+      success: true,
+      data: {
+        synced: created.length,
+        skipped: skipped.length,
+        skippedLogs: skipped // #84: eksplisit, tidak silent
+      }
+    };
   }, { body: batchSyncSchema })
   .get("/api/sync/rules", async () => {
     const rules = await prisma.campusRule.findMany();
@@ -151,11 +168,21 @@ export const syncRoutes = new Elysia()
     await notifyDevicesChange(requestedBy);
     return { success: true, data: { triggeredDevices: true } };
   })
-  .post("/api/sync/complete", async ({ body }) => {
-    const data = body as { deviceId: string; syncType?: string; status?: string; logsCount?: number };
+  .post("/api/sync/complete", async ({ body, admin }) => {
+    // #86: deviceId WAJIB dari identitas JWT (admin.id = deviceId dari
+    // loginDevice), BUKAN dari body. Token device lain tidak bisa menandai
+    // SyncRequest / menulis SyncLog milik device lain.
+    const deviceId = admin?.id;
+    if (!deviceId) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized: device identity required" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const data = body as { syncType?: string; status?: string; logsCount?: number };
     await prisma.syncLog.create({
       data: {
-        deviceId: data.deviceId,
+        deviceId,
         syncType: data.syncType || "manual",
         status: data.status || "success",
         logsCount: data.logsCount || 0
@@ -163,9 +190,15 @@ export const syncRoutes = new Elysia()
     });
 
     await prisma.syncRequest.updateMany({
-      where: { deviceId: data.deviceId, isProcessed: false },
+      where: { deviceId, isProcessed: false },
       data: { isProcessed: true, processedAt: new Date() }
     });
 
-    return { success: true };
+    // #81: SyncRequest lama yang sudah processed dihapus (tabel tak tumbuh tanpa batas)
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.syncRequest.deleteMany({
+      where: { isProcessed: true, processedAt: { lte: cutoff } }
+    });
+
+    return { success: true, deviceId };
   });
