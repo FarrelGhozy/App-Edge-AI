@@ -27,6 +27,13 @@ class SessionManager(private val context: Context) {
         return context.dataStore.data.first()[TOKEN_KEY]
     }
 
+    // #127: perbarui access token hasil refresh tanpa menimpa identitas admin.
+    suspend fun saveToken(token: String) {
+        context.dataStore.edit { prefs ->
+            prefs[TOKEN_KEY] = token
+        }
+    }
+
     suspend fun saveSession(
         token: String,
         adminId: String,

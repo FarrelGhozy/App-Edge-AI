@@ -51,6 +51,13 @@ class DashboardViewModel @Inject constructor(
                 }
             }
         }
+        // #127: token kedaluwarsa & refresh gagal → logout otomatis (bukan
+        // diam membeku di data lama). UI beralih ke layar login via isLoggedOut.
+        viewModelScope.launch {
+            sseClient.sessionExpired.collect {
+                logout()
+            }
+        }
     }
 
     fun logout() {

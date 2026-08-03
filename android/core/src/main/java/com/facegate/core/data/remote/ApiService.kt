@@ -143,6 +143,13 @@ interface ApiService {
         @Query("studentId") studentId: String? = null
     ): Response<ViolationListResponse>
 
+    // #125: endpoint detail violation by id — ViolationDetailViewModel harus
+    // fetch violation yang TEPAT, bukan mencari di daftar studentId (salah).
+    @GET("api/violations/{id}")
+    suspend fun getViolationById(
+        @Path("id") id: String
+    ): Response<ApiResponse<ViolationDto>>
+
     @PUT("api/violations/{id}/resolve")
     suspend fun resolveViolation(
         @Path("id") id: String,

@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.facegate.adminapp.navigation.Screen
 import com.facegate.adminapp.ui.components.*
 import com.facegate.adminapp.ui.theme.*
 
@@ -44,7 +45,9 @@ fun PermitListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { navController.navigate("permit_create") },
+                // #115: route yang benar (terdaftar di AppNavigator) — yang lama
+                // "permit_create" tak ada → crash.
+                onClick = { navController.navigate(Screen.PermitForm.route) },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
                 Icon(Icons.Default.Add, "Buat Izin")
@@ -74,7 +77,7 @@ fun PermitListScreen(
                         name = permit.studentName,
                         purpose = permit.type,
                         status = permit.status ?: "pending",
-                        onClick = { navController.navigate("permit_detail/${permit.id}") }
+                        onClick = { navController.navigate(Screen.PermitDetail.createRoute(permit.id)) }
                     )
                 }
             }

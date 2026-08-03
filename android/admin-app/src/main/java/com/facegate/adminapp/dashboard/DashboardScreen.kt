@@ -152,8 +152,11 @@ fun DashboardScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             StatCard(
-                                title = "Terdaftar",
-                                value = formatNumber(state.totalStudents),
+                                // #126: kartu ini harus menampilkan jumlah WAJAH
+                                // terdaftar (enrollment coverage), bukan totalStudents
+                                // lagi (dulu duplikat kartu "Total Santri").
+                                title = "Wajah Terdaftar",
+                                value = formatNumber(state.registeredFaces),
                                 icon = Icons.Default.Face,
                                 containerColor = SuccessGreen,
                                 iconTint = SuccessGreen,

@@ -5,7 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -171,8 +173,23 @@ fun StudentListScreen(
                         onRefresh = { viewModel.refresh() },
                         modifier = Modifier.fillMaxSize()
                     ) {
+                        // #124: deteksi scroll-end → muat halaman berikutnya.
+                        val listState: LazyListState = rememberLazyListState()
+                        val shouldLoadMore by remember {
+                            derivedStateOf {
+                                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                                val total = listState.layoutInfo.totalItemsCount
+                                lastVisible >= total - 3
+                            }
+                        }
+                        LaunchedEffect(shouldLoadMore) {
+                            if (shouldLoadMore && state.hasMore && !state.isLoadingMore && !state.isLoading) {
+                                viewModel.loadMore()
+                            }
+                        }
                         LazyColumn(
-                            contentPadding = PaddingValues(16.dp),
+                            state = listState,
+                            contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 32.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(state.students, key = { it.id }) { student ->
@@ -187,6 +204,19 @@ fun StudentListScreen(
                                         navController.navigate(Screen.StudentDetail.createRoute(student.id))
                                     }
                                 )
+                            }
+                            // #124: indikator loading bawah saat memuat halaman berikutnya.
+                            if (state.isLoadingMore) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                                    }
+                                }
                             }
                         }
                     }
