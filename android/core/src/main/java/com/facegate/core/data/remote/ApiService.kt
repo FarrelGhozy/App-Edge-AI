@@ -29,6 +29,10 @@ interface ApiService {
     @POST("api/students")
     suspend fun createStudent(@Body request: CreateStudentRequest): Response<StudentDto>
 
+    // #99: import batch satu request (hindari 1 HTTP/baris)
+    @POST("api/students/import")
+    suspend fun importStudents(@Body request: ImportStudentRequest): Response<ImportResultResponse>
+
     @PUT("api/students/{id}")
     suspend fun updateStudent(
         @Path("id") id: String,
@@ -161,6 +165,12 @@ interface ApiService {
     // =========== DEVICES ===========
     @GET("api/devices")
     suspend fun getDevices(): Response<List<DeviceDto>>
+
+    // #97: ambil detail 1 device langsung dari server (hindari fetch semua)
+    @GET("api/devices/{deviceId}")
+    suspend fun getDevice(
+        @Path("deviceId") deviceId: String
+    ): Response<DeviceDto>
 
     @PUT("api/devices/{deviceId}/ping")
     suspend fun pingDeviceWithBattery(

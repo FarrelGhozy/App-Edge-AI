@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -73,7 +74,7 @@ fun AttendanceScreen(
                 ) {
                     // Date filter
                     item {
-                        var showDatePicker by remember { mutableStateOf(false) }
+                        var showDatePicker by rememberSaveable { mutableStateOf(false) }
                         val datePickerState = rememberDatePickerState(
                             initialSelectedDateMillis = if (state.filterDate.isNotBlank()) {
                                 try {

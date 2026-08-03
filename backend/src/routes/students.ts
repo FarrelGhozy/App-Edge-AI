@@ -16,6 +16,7 @@ import {
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 import { audit } from "../services/audit";
+import prisma from "../services/prisma";
 
 export const studentRoutes = new Elysia()
   .use(authGuard("admin", "superadmin"))
@@ -58,6 +59,50 @@ export const studentRoutes = new Elysia()
       );
     }
   }, { body: createStudentSchema })
+  // ─── Import CSV/JSON batch (1 request, bukan 1/baris — #99) ───
+  .post("/api/students/import", async ({ body, admin }) => {
+    const rows = (body as { students: Array<Record<string, unknown>> }).students ?? [];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Tidak ada data untuk diimpor" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    let successRows = 0;
+    let failedRows = 0;
+    const errors: Array<{ row: number; error: string }> = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        await createStudent(row as never);
+        successRows++;
+      } catch (error: any) {
+        failedRows++;
+        errors.push({
+          row: i + 1,
+          error: error?.code === "P2002" ? "NIM sudah terdaftar" : (error?.message ?? "gagal")
+        });
+      }
+    }
+    // Catat batch import (model ImportBatch selama ini tak terpakai — #99)
+    await prisma.importBatch.create({
+      data: {
+        filename: (body as { filename?: string }).filename ?? "csv",
+        totalRows: rows.length,
+        successRows,
+        failedRows,
+        errors: errors.length > 0 ? JSON.stringify(errors) : null
+      }
+    });
+    if (successRows > 0) notifyDevicesChange();
+    await audit(admin, {
+      action: "CREATE",
+      entityType: "STUDENTS",
+      entityId: "batch",
+      details: `import ${rows.length} baris (ok=${successRows}, gagal=${failedRows})`
+    });
+    return { success: true, total: rows.length, successRows, failedRows, errors };
+  })
   .put("/api/students/:id", async ({ params: { id }, body, admin }) => {
     const student = await updateStudent(id, body as Record<string, unknown>);
     notifyDevicesChange();

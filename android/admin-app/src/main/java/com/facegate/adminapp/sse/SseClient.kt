@@ -31,6 +31,10 @@ class SseClient @Inject constructor(
 
     private var job: Job? = null
 
+    // #96: backoff eksponensial 1s → 30s; reset setelah stream bertahan lama.
+    private var retryDelayMs = 1_000L
+    private var lastStableConnectAt = 0L
+
     fun connect(scope: CoroutineScope) {
         disconnect()
         job = scope.launch(Dispatchers.IO) {
@@ -42,6 +46,17 @@ class SseClient @Inject constructor(
                         .build()
 
                     val response = okHttpClient.newCall(request).execute()
+                    // #96: 401 = token kedaluwarsa → retry sia-sia & boros baterai.
+                    if (response.code == 401) {
+                        response.close()
+                        break
+                    }
+                    if (!response.isSuccessful) {
+                        response.close()
+                        delay(retryDelayMs)
+                        retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
+                        continue
+                    }
                     val body = response.body ?: continue
                     val source = body.source()
 
@@ -52,7 +67,11 @@ class SseClient @Inject constructor(
                         val line = source.readUtf8Line() ?: break
                         when {
                             line.startsWith("event:") -> eventType = line.removePrefix("event:").trim()
-                            line.startsWith("data:") -> eventData.append(line.removePrefix("data:").trim())
+                            line.startsWith("data:") -> {
+                                // #96: data multi-baris digabung dengan newline (SSE spec)
+                                if (eventData.isNotEmpty()) eventData.append('\n')
+                                eventData.append(line.removePrefix("data:").trim())
+                            }
                             line.isEmpty() -> {
                                 if (eventData.isNotEmpty()) {
                                     _events.tryEmit(SseEvent(eventType.ifEmpty { "message" }, eventData.toString()))
@@ -63,10 +82,19 @@ class SseClient @Inject constructor(
                         }
                     }
                     source.close()
+
+                    // Koneksi stabil ≥30 detik → reset backoff.
+                    val now = System.currentTimeMillis()
+                    if (lastStableConnectAt != 0L && now - lastStableConnectAt >= 30_000L) {
+                        retryDelayMs = 1_000L
+                    }
+                    lastStableConnectAt = now
                 } catch (_: kotlinx.coroutines.CancellationException) {
                     break
                 } catch (_: Exception) {
-                    delay(5000)
+                    // #96: exponential backoff, cap 30s.
+                    delay(retryDelayMs)
+                    retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
                 }
             }
         }

@@ -1,5 +1,6 @@
 package com.facegate.adminapp.permits
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.remote.ApiService
@@ -27,25 +28,47 @@ data class PermitFormState(
 
 @HiltViewModel
 class PermitFormViewModel @Inject constructor(
-    private val apiService: ApiService
+    private val apiService: ApiService,
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(PermitFormState())
+    private val _uiState = MutableStateFlow(
+        // #106: pulihkan isian form setelah process death / rotasi.
+        PermitFormState(
+            type = savedStateHandle["type"] ?: "izin_harian",
+            selectedStudentId = savedStateHandle["studentId"],
+            startDate = savedStateHandle["startDate"] ?: "",
+            endDate = savedStateHandle["endDate"] ?: "",
+            startTime = savedStateHandle["startTime"] ?: "",
+            endTime = savedStateHandle["endTime"] ?: "",
+            reason = savedStateHandle["reason"] ?: ""
+        )
+    )
     val uiState: StateFlow<PermitFormState> = _uiState.asStateFlow()
 
     fun loadStudents() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(error = null)
             try {
-                val response = apiService.getStudents(page = 1, pageSize = 200)
-                if (response.isSuccessful && response.body() != null) {
-                    val briefs = response.body()!!.data.map { dto ->
+                // #98: loop semua halaman — santri >200 pertama harus muncul
+                // di dropdown (sebelumnya permit tak bisa dibuat utk mereka).
+                val all = mutableListOf<StudentBrief>()
+                var page = 1
+                while (true) {
+                    val response = apiService.getStudents(page = page, pageSize = 200)
+                    if (!response.isSuccessful || response.body() == null) {
+                        _uiState.value = _uiState.value.copy(error = "Gagal memuat data mahasiswa")
+                        return@launch
+                    }
+                    val body = response.body()!!
+                    all += body.data.map { dto ->
                         StudentBrief(id = dto.id, nim = dto.nim, name = dto.name)
                     }
-                    _uiState.value = _uiState.value.copy(students = briefs)
-                } else {
-                    _uiState.value = _uiState.value.copy(error = "Gagal memuat data mahasiswa")
+                    // pageSize*totalPages cukup; hentikan saat halaman penuh habis
+                    if (body.data.isEmpty() || page * body.pageSize >= body.total) break
+                    page++
                 }
+                _uiState.value = _uiState.value.copy(students = all)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(error = "Gagal terhubung ke server")
             }
@@ -53,30 +76,37 @@ class PermitFormViewModel @Inject constructor(
     }
 
     fun setStudent(id: String) {
+        savedStateHandle["studentId"] = id
         _uiState.value = _uiState.value.copy(selectedStudentId = id)
     }
 
     fun setType(type: String) {
+        savedStateHandle["type"] = type
         _uiState.value = _uiState.value.copy(type = type)
     }
 
     fun setStartDate(date: String) {
+        savedStateHandle["startDate"] = date
         _uiState.value = _uiState.value.copy(startDate = date)
     }
 
     fun setEndDate(date: String) {
+        savedStateHandle["endDate"] = date
         _uiState.value = _uiState.value.copy(endDate = date)
     }
 
     fun setStartTime(time: String) {
+        savedStateHandle["startTime"] = time
         _uiState.value = _uiState.value.copy(startTime = time)
     }
 
     fun setEndTime(time: String) {
+        savedStateHandle["endTime"] = time
         _uiState.value = _uiState.value.copy(endTime = time)
     }
 
     fun setReason(reason: String) {
+        savedStateHandle["reason"] = reason
         _uiState.value = _uiState.value.copy(reason = reason)
     }
 

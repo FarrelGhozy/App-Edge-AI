@@ -31,7 +31,9 @@ export const deviceRoutes = new Elysia()
         headers: { "Content-Type": "application/json" }
       });
     }
-    return { success: true, data: device };
+    // #97: return raw object (konsisten dengan GET /api/devices) agar
+    // client bisa Response<DeviceDto> tanpa wrapper.
+    return device;
   })
   .put("/api/devices/:deviceId", async ({ params: { deviceId }, body }) => {
     const data = body as { name?: string; location?: string; isActive?: boolean };

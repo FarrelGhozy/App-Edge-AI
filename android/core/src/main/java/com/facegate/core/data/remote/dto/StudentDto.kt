@@ -54,3 +54,25 @@ data class CreateStudentRequest(
     val phone: String? = null,
     val email: String? = null
 )
+
+// #99: request batch import (1 HTTP request untuk ratusan santri)
+@Serializable
+data class ImportStudentRequest(
+    val filename: String? = null,
+    val students: List<CreateStudentRequest>
+)
+
+@Serializable
+data class ImportResultResponse(
+    val success: Boolean = false,
+    val total: Int = 0,
+    @SerialName("successRows") val successRows: Int = 0,
+    @SerialName("failedRows") val failedRows: Int = 0,
+    val errors: List<ImportRowError> = emptyList()
+)
+
+@Serializable
+data class ImportRowError(
+    val row: Int,
+    val error: String
+)

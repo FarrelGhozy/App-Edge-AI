@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,7 +32,7 @@ fun DashboardScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val pullRefreshState = rememberPullToRefreshState()
-    var showLogoutConfirm by remember { mutableStateOf(false) }
+    var showLogoutConfirm by rememberSaveable { mutableStateOf(false) }
     // #95: dashboard punya data valid → error refresh tampil sebagai banner,
     // bukan menutup seluruh layar.
     val hasData = state.totalStudents > 0 || state.recentScans.isNotEmpty()
