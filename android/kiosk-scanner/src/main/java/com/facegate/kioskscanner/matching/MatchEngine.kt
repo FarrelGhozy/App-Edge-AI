@@ -17,7 +17,8 @@ sealed class MatchEngineResult {
         val studentName: String,
         val action: ToggleAction,
         val isViolation: Boolean = false,
-        val violationMessage: String? = null
+        val violationMessage: String? = null,
+        val confidence: Float = 1f
     ) : MatchEngineResult()
 
     data class Unknown(val confidence: Float) : MatchEngineResult()
@@ -173,7 +174,8 @@ class MatchEngine @Inject constructor(
             studentName = student.name,
             action = toggle.action,
             isViolation = violation.isViolation,
-            violationMessage = violation.message
+            violationMessage = violation.message,
+            confidence = matchResult.confidence
         )
     }
 

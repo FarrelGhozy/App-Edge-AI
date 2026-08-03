@@ -270,7 +270,8 @@ class VideoMatchEngine @Inject constructor(
                 studentName = student.name,
                 action = toggle.action,
                 isViolation = violation.isViolation,
-                violationMessage = violation.message
+                violationMessage = violation.message,
+                confidence = matchResult.confidence
             )
         } catch (e: Exception) {
             Log.e(TAG, "Video processing error", e)
@@ -318,7 +319,8 @@ class VideoMatchEngine @Inject constructor(
                     studentName = student.name,
                     action = toggle.action,
                     isViolation = violation.isViolation,
-                    violationMessage = violation.message
+                    violationMessage = violation.message,
+                    confidence = matchResult.confidence
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Single match error", e)

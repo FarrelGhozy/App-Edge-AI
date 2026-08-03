@@ -278,7 +278,7 @@ class ScannerViewModel @Inject constructor(
                                 studentName = result.studentName,
                                 action = action,
                                 timestamp = System.currentTimeMillis(),
-                                confidenceScore = 1.0f,
+                                confidenceScore = result.confidence,
                                 isViolation = result.isViolation,
                                 violationType = if (result.isViolation) result.violationMessage else null,
                                 deviceId = deviceId
