@@ -17,7 +17,7 @@ export async function dashboardSummary() {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const todayEnd = new Date(todayStart.getTime() + 86400000);
 
-  const [violationsToday, recentScans] = await Promise.all([
+  const [violationsToday, recentScans, registeredFaces] = await Promise.all([
     prisma.violation.count({
       where: { timestamp: { gte: todayStart, lt: todayEnd } },
     }),
@@ -25,6 +25,10 @@ export async function dashboardSummary() {
       orderBy: { timestamp: "desc" },
       take: 10,
     }),
+    // #94: jumlah santri dengan minimal 1 wajah terdaftar (distinct student_id)
+    prisma.$queryRawUnsafe<Array<{ count: string }>>(
+      `SELECT COUNT(DISTINCT student_id)::text AS count FROM face_vectors`
+    ),
   ]);
 
   return {
@@ -32,5 +36,6 @@ export async function dashboardSummary() {
     currentlyOutside,
     violationsToday,
     recentScans,
+    registeredFaces: parseInt(registeredFaces[0]?.count ?? "0", 10),
   };
 }

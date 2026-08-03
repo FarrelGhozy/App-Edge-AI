@@ -19,8 +19,10 @@ export function addClient(controller: ReadableStreamDefaultController): SseClien
       try {
         const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
         controller.enqueue(encoder.encode(msg));
-      } catch {
+      } catch (e) {
+        // #102: client terputus — lepas & log ringkas (bukan silent swallow)
         clients.delete(id);
+        console.error(`[sse] client ${id} terputus saat kirim event ${event}:`, e);
       }
     },
     close() {

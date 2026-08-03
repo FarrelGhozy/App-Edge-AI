@@ -98,7 +98,10 @@ export async function recordScan(data: {
 
   try {
     emitToAdmins("scan_realtime", log);
-  } catch {}
+  } catch (e) {
+    // #102: jangan telan error broadcast — log supaya debug kiosk tak dapat update.
+    console.error("[attendance] emitToAdmins(scan_realtime) gagal:", e);
+  }
 
   return log;
 }

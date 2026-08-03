@@ -32,6 +32,9 @@ fun DashboardScreen(
     val state by viewModel.uiState.collectAsState()
     val pullRefreshState = rememberPullToRefreshState()
     var showLogoutConfirm by remember { mutableStateOf(false) }
+    // #95: dashboard punya data valid → error refresh tampil sebagai banner,
+    // bukan menutup seluruh layar.
+    val hasData = state.totalStudents > 0 || state.recentScans.isNotEmpty()
 
     LaunchedEffect(Unit) {
         viewModel.loadSummary()
@@ -94,7 +97,7 @@ fun DashboardScreen(
     ) { padding ->
         when {
             state.isLoading -> LoadingState(modifier = Modifier.padding(padding))
-            state.error != null -> ErrorState(
+            state.error != null && !hasData -> ErrorState(
                 message = state.error,
                 onRetry = { viewModel.refresh() },
                 modifier = Modifier.padding(padding)

@@ -20,6 +20,7 @@ data class DashboardState(
     val totalStudents: Int = 0,
     val currentlyOutside: Int = 0,
     val violationsToday: Int = 0,
+    val registeredFaces: Int = 0,
     val recentScans: List<AttendanceLogDto> = emptyList(),
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
@@ -84,9 +85,12 @@ class DashboardViewModel @Inject constructor(
     fun loadSummary(isRefresh: Boolean = false, isAutoRefresh: Boolean = false) {
         viewModelScope.launch {
             val current = _uiState.value
+            val hasStaleData = current.totalStudents > 0 || current.recentScans.isNotEmpty()
             _uiState.value = current.copy(
-                isLoading = !isRefresh && !isAutoRefresh && current.totalStudents == 0,
+                isLoading = !isRefresh && !isAutoRefresh && !hasStaleData,
                 isRefreshing = isRefresh,
+                // #95: JANGAN reset error untuk refresh — hindari jeda di mana
+                // layar berkedip antar pemuatan.
                 error = null
             )
             try {
@@ -97,13 +101,28 @@ class DashboardViewModel @Inject constructor(
                         totalStudents = data.totalStudents,
                         currentlyOutside = data.currentlyOutside,
                         violationsToday = data.violationsToday,
-                        recentScans = data.recentScans
+                        registeredFaces = data.registeredFaces,
+                        recentScans = data.recentScans,
+                        isLoading = false,
+                        isRefreshing = false
                     )
                 } else {
-                    _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal memuat data")
+                    // #95: kalau sudah punya data, refresh gagal TIDAK menghapus
+                    // dashboard — cukup tandai error sebagai banner.
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        isRefreshing = false,
+                        error = if (hasStaleData) "Gagal memperbarui data" else "Gagal memuat data"
+                    )
                 }
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, isRefreshing = false, error = "Gagal terhubung ke server")
+                // #95: jaringan drop saat auto-refresh sesaat → jangan tutup
+                // dashboard; pertahankan data lama + tampilkan pesan ringan.
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    error = if (hasStaleData) "Gagal terhubung ke server" else "Gagal terhubung ke server"
+                )
             }
         }
     }
