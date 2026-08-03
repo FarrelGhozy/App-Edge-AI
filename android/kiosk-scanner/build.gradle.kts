@@ -57,6 +57,8 @@ dependencies {
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // Required for @HiltWorker codegen (HiltWorkerFactory + AssistedFactory per worker).
+    ksp(libs.hilt.work.compiler)
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
