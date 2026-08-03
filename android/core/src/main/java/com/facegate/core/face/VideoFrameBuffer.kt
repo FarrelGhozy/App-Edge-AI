@@ -16,6 +16,11 @@ class VideoFrameBuffer(
 ) {
     companion object {
         private const val TAG = "VideoFrameBuffer"
+
+        /** Minimum IoU between consecutive frames — a lower overlap means the
+         *  face jumped / was replaced (different person) → collection aborted
+         *  to avoid fusing faces of different people (issue #80). */
+        const val MIN_FACE_IOU = 0.35f
     }
 
     data class FrameEntry(
@@ -33,6 +38,7 @@ class VideoFrameBuffer(
     private val frames = mutableListOf<FrameEntry>()
     private var startTime: Long = 0L
     private var collecting = false
+    private var lastFaceRect: Rect? = null
 
     /** Start a new collection cycle. */
     fun start() {
@@ -42,13 +48,52 @@ class VideoFrameBuffer(
         Log.d(TAG, "Collection started: max=$maxFrames duration=${collectDurationMs}ms")
     }
 
-    /** Add a frame to the buffer. Returns true if added, false if buffer full. */
+    /**
+     * Add a frame to the buffer. Returns true if added.
+     * Returns false (and ABORTS the collection) if the face box jumped
+     * dramatically from the previous frame — signals a different person or the
+     * user leaving the frame. Caller must reset its scan state.
+     */
     fun add(frame: FrameEntry): Boolean {
         if (!collecting) return false
         if (frames.size >= maxFrames) return false
+
+        // Face consistency check (issue #80): same face must stay in frame.
+        val prev = lastFaceRect
+        if (prev != null && frame.faceRect != null) {
+            val cur = frame.faceRect
+            val iou = computeIoU(
+                prev.left, prev.top, prev.right, prev.bottom,
+                cur.left, cur.top, cur.right, cur.bottom
+            )
+            if (iou < MIN_FACE_IOU) {
+                Log.w(TAG, "Face box jumped (IoU=${"%.2f".format(iou)}) — aborting collection")
+                clear()
+                return false
+            }
+        }
+        lastFaceRect = frame.faceRect
         frames.add(frame)
         Log.d(TAG, "Frame added: ${frames.size}/$maxFrames (qs=${"%.3f".format(frame.qualityScore)})")
         return true
+    }
+
+    /** Intersection-over-union of two rects; 0 if either is empty. Pure
+     *  geometry (no Rect methods) so it can be unit-tested without Robolectric. */
+    internal fun computeIoU(
+        aLeft: Int, aTop: Int, aRight: Int, aBottom: Int,
+        bLeft: Int, bTop: Int, bRight: Int, bBottom: Int
+    ): Float {
+        val left = maxOf(aLeft, bLeft)
+        val top = maxOf(aTop, bTop)
+        val right = minOf(aRight, bRight)
+        val bottom = minOf(aBottom, bBottom)
+        if (right <= left || bottom <= top) return 0f
+        val interArea = (right - left) * (bottom - top)
+        val aArea = (aRight - aLeft) * (aBottom - aTop)
+        val bArea = (bRight - bLeft) * (bBottom - bTop)
+        val union = aArea + bArea - interArea
+        return if (union <= 0) 0f else interArea.toFloat() / union
     }
 
     /** True if buffer reached max capacity. */

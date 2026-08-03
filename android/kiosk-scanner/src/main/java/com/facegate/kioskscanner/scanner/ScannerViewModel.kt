@@ -134,7 +134,19 @@ class ScannerViewModel @Inject constructor(
 
         if (face == null) {
             resetDetectionState()
-            // If we were collecting frames, let the collection continue
+            // Issue #80: if the face disappears mid-collection, ABORT the
+            // collection — continuing would fuse frames of whoever walks in
+            // next (or match when the user has already left the frame).
+            if (videoMatchEngine.isCollecting()) {
+                videoMatchEngine.resetCollection()
+                _statusMessage.value = "Arahkan wajah ke kamera"
+                _faceOverlay.value = _faceOverlay.value.copy(
+                    isCollecting = false,
+                    progress = 0f,
+                    collectedCount = 0
+                )
+                faceSteadyStartTime = 0L
+            }
             if (!videoMatchEngine.isCollecting()) {
                 bitmap.recycle()
             }
@@ -190,8 +202,23 @@ class ScannerViewModel @Inject constructor(
             // Throttle: ambil 1 frame setiap FRAME_INTERVAL_MS
             if (currentTime - lastFrameCaptureTime >= FRAME_INTERVAL_MS) {
                 val qualityScore = computeQualityScore(face)
-                videoMatchEngine.addFrame(bitmap, face, qualityScore)
+                val added = videoMatchEngine.addFrame(bitmap, face, qualityScore)
                 lastFrameCaptureTime = currentTime
+
+                if (!added) {
+                    // Frame rejected (box jumped / different person → collection
+                    // aborted by buffer; issue #80). Reset steady timer so the
+                    // scan must restart with a consistent face.
+                    faceSteadyStartTime = 0L
+                    _statusMessage.value = "Arahkan wajah ke kamera"
+                    _faceOverlay.value = _faceOverlay.value.copy(
+                        isCollecting = false,
+                        progress = 0f,
+                        collectedCount = 0
+                    )
+                    bitmap.recycle()
+                    return
+                }
 
                 _statusMessage.value = "Mengambil gambar... ${videoMatchEngine.getCollectedCount()}/15"
             } else {

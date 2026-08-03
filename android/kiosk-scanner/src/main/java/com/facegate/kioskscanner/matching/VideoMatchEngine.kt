@@ -153,8 +153,13 @@ class VideoMatchEngine @Inject constructor(
     fun isCollecting(): Boolean = frameBuffer.isCollecting()
 
     /** Abort & reset any in-flight frame collection (issue #69: kiosk must be
-     *  reusable immediately after a scan without restarting). */
+     *  reusable immediately after a scan without restarting; issue #80: abort
+     *  when the face disappears or jumps). Recycles stored bitmaps to avoid
+     *  leaks — the caller transfers ownership once frames are added. */
     fun resetCollection() {
+        frameBuffer.getFrames().forEach { entry ->
+            if (!entry.bitmap.isRecycled) entry.bitmap.recycle()
+        }
         frameBuffer.stop()
         frameBuffer.clear()
     }
