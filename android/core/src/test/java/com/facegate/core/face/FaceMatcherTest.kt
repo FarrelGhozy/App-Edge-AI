@@ -177,4 +177,37 @@ class FaceMatcherTest {
         ))
         assertEquals(3, matcher.size())
     }
+
+    @Test
+    fun `stress - concurrent buildIndex and match should never crash`() {
+        // Issue #75: CopyOnWriteArrayList must survive concurrent rebuild (sync
+        // worker) while match() reads (VideoMatchEngine, Dispatchers.Default).
+        val vectors = (1..5).map { entry("s$it", normalize(makeVector(it.toFloat() / 5f, 0.2f))) }
+        matcher.buildIndex(vectors)
+        val query = normalize(makeVector(0.8f, 0.1f))
+
+        val threads = (1..8).map { t ->
+            Thread {
+                repeat(200) { i ->
+                    if (i % 10 == 0) {
+                        // Simulate sync rebuild: clear + re-add
+                        matcher.buildIndex(vectors.shuffled())
+                    } else {
+                        // Simulate live match
+                        try {
+                            matcher.match(query)
+                        } catch (e: java.util.ConcurrentModificationException) {
+                            throw AssertionError("ConcurrentModificationException during concurrent match/buildIndex", e)
+                        }
+                    }
+                }
+            }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+
+        // Index must remain consistent afterwards
+        assertTrue(matcher.size() in 0..5)
+        assertFalse("match must not throw", matcher.match(query).let { false })
+    }
 }

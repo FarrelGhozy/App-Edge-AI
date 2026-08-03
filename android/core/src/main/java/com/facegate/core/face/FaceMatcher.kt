@@ -28,8 +28,12 @@ class FaceMatcher(
         private const val MEDIUM_GAP = 0.08f
     }
 
-    // Flat list of (studentId, normalizedVector) — one entry per pose vector
-    private val faceIndex = mutableListOf<IndexEntry>()
+    // Flat list of (studentId, normalizedVector) — one entry per pose vector.
+    // CopyOnWriteArrayList: buildIndex() (from sync workers) mutates the list on
+    // a background thread while VideoMatchEngine.match() reads it on
+    // Dispatchers.Default — a plain MutableList causes ConcurrentModificationException
+    // / half-built index reads. COW gives readers a consistent snapshot (issue #75).
+    private val faceIndex = java.util.concurrent.CopyOnWriteArrayList<IndexEntry>()
 
     override fun buildIndex(vectors: List<IndexEntry>) {
         faceIndex.clear()
