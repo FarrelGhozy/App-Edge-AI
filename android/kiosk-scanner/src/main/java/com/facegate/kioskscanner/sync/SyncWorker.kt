@@ -161,15 +161,26 @@ class SyncWorker @AssistedInject constructor(
                 violationType = log.violationType,
                 deviceId = log.deviceId,
                 photoCapture = log.photoCapture,
+                clientId = log.clientId, // #119: idempotency key
                 timestamp = log.timestamp
             )
         }
 
         val response = apiService.syncAttendance(AttendanceBatchRequest(requests))
-        if (response.isSuccessful) {
-            val ids = unsynced.map { it.id }
-            attendanceLogDao.markManySynced(ids)
-            Log.d(TAG, "Uploaded ${ids.size} logs successfully")
+        if (response.isSuccessful && response.body() != null) {
+            // #114: log yang di-skip server (student tidak ditemukan) harus
+            // TETAP di antrean offline — jangan tandai synced (anti data loss).
+            val skippedIds = response.body()!!
+                .data?.skippedLogs.orEmpty()
+                .map { it.studentId }
+                .toSet()
+            val syncedIds = unsynced
+                .filter { it.studentId !in skippedIds }
+                .map { it.id }
+            if (syncedIds.isNotEmpty()) {
+                attendanceLogDao.markManySynced(syncedIds)
+            }
+            Log.d(TAG, "Uploaded ${unsynced.size} logs: ${syncedIds.size} synced, ${skippedIds.size} skipped (kept queued)")
         }
     }
 
@@ -183,7 +194,11 @@ class SyncWorker @AssistedInject constructor(
                 val faces = syncData.data
 
                 if (faces.isNotEmpty()) {
-                    // Save face vectors — delete stale, then insert all fresh
+                    // #112: JANGAN deleteAll() dulu! Response adalah DELTA sejak
+                    // watermark — menghapus semua vektor lalu insert delta saja
+                    // membuat vektor santri lain HILANG (index mengecil, wajah
+                    // santri yang tidak berubah tak lagi dikenali). Upsert
+                    // (REPLACE) idempoten — samakan dengan SyncManager.
                     val faceEntities = faces.map { dto ->
                         com.facegate.core.data.local.entity.FaceVectorEntity(
                             studentId = dto.studentId,
@@ -192,7 +207,6 @@ class SyncWorker @AssistedInject constructor(
                         )
                     }
 
-                    faceVectorDao.deleteAll()
                     faceVectorDao.insertAll(faceEntities)
 
                     // Save student data from joined query
@@ -214,9 +228,11 @@ class SyncWorker @AssistedInject constructor(
                         Log.d(TAG, "Saved ${studentEntities.size} students")
                     }
 
-                    // Rebuild face index in RAM from downloaded data
-                    faceMatcher.buildIndex(faceEntities.map { it.toIndexEntry() })
-                    Log.d(TAG, "Face index rebuilt: ${faceEntities.size} vectors for ${faceEntities.map { it.studentId }.distinct().size} students in RAM")
+                    // #112: rebuild index dari SELURUH store lokal (bukan delta)
+                    // — index RAM harus mencerminkan semua vektor yang ter-cache.
+                    val allLocal = faceVectorDao.getAll()
+                    faceMatcher.buildIndex(allLocal.map { it.toIndexEntry() })
+                    Log.d(TAG, "Face index rebuilt: ${allLocal.size} vectors for ${allLocal.map { it.studentId }.distinct().size} students (from full store)")
 
                     Log.d(TAG, "Synced ${faces.size} faces + ${studentEntities.size} students")
                 }

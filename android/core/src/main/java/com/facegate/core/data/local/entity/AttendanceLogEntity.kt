@@ -16,5 +16,8 @@ data class AttendanceLogEntity(
     val violationType: String? = null,
     val deviceId: String? = null,
     val photoCapture: String? = null,
+    // #119: idempotency key — UUID unik per log offline, dikirim ke server saat
+    // batch sync. Retry tidak membuat duplikat (server dedup by clientId).
+    val clientId: String? = null,
     val isSynced: Boolean = false
 )

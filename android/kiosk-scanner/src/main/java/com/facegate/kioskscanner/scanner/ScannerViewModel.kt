@@ -86,6 +86,11 @@ class ScannerViewModel @Inject constructor(
     private val _syncStatus = MutableStateFlow<String?>(null)
     val syncStatus: StateFlow<String?> = _syncStatus.asStateFlow()
 
+    // #130: kunci re-init kamera — increment utk me-rebind CameraX setelah
+    // error (mis. bindToLifecycle gagal) tanpa restart activity.
+    private val _cameraRetry = MutableStateFlow(0)
+    val cameraRetry: StateFlow<Int> = _cameraRetry.asStateFlow()
+
     // Face-steady timer: replace EAR blink (gak bisa dengan RetinaFace 5 landmark)
     private var faceSteadyStartTime: Long = 0L
     private var lastFrameCaptureTime: Long = 0L
@@ -113,152 +118,161 @@ class ScannerViewModel @Inject constructor(
     }
 
     fun onFrameCaptured(imageProxy: ImageProxy) {
-        if (_state.value is UIState.Success || _state.value is UIState.Error) return
-        if (_isProcessing.value) return
+            // #129: imageProxy (image buffer kamera) HARUS selalu di-close pada SEMUA
+            // path (success, error, throttle-skip, dsb.). Kalau tidak, buffer kamera
+            // bocor tiap frame → OOM di kiosk yang berjalan nonstop. try/finally
+            // menjamin imageProxy.close() dieksekusi apapun hasilnya.
+            try {
+                if (_state.value is UIState.Success || _state.value is UIState.Error) return
+                if (_isProcessing.value) return
 
-        val mediaImage = imageProxy.image
-        if (mediaImage == null) {
-            resetDetectionState()
-            return
-        }
+                val mediaImage = imageProxy.image
+                if (mediaImage == null) {
+                    resetDetectionState()
+                    return
+                }
 
-        val currentTime = System.currentTimeMillis()
-        val bitmap = imageProxyToBitmap(imageProxy) ?: return
-        lastImageWidth = bitmap.width
-        lastImageHeight = bitmap.height
-        _imageSize.value = lastImageWidth to lastImageHeight
+                val currentTime = System.currentTimeMillis()
+                val bitmap = imageProxyToBitmap(imageProxy) ?: return
+                lastImageWidth = bitmap.width
+                lastImageHeight = bitmap.height
+                _imageSize.value = lastImageWidth to lastImageHeight
 
-        // ─── RetinaFace detection ───
-        val startDetect = System.nanoTime()
-        val faces = videoMatchEngine.detectFromBitmap(bitmap)
-        val detectTimeMs = (System.nanoTime() - startDetect) / 1_000_000L
-        Log.d(TAG, "Frame ${lastImageWidth}x$lastImageHeight: ${faces.size} faces detected in ${detectTimeMs}ms")
-        val face = faces.maxByOrNull { it.confidence }
+                // ─── RetinaFace detection ───
+                val startDetect = System.nanoTime()
+                val faces = videoMatchEngine.detectFromBitmap(bitmap)
+                val detectTimeMs = (System.nanoTime() - startDetect) / 1_000_000L
+                Log.d(TAG, "Frame ${lastImageWidth}x$lastImageHeight: ${faces.size} faces detected in ${detectTimeMs}ms")
+                val face = faces.maxByOrNull { it.confidence }
 
-        // #101: error inference (output shape berubah / sesi rusak) tidak boleh
-        // diam-diam jadi "tidak ada wajah" — tampilkan feedback ke operator.
-        val detectError = videoMatchEngine.lastDetectError()
-        if (detectError != null && _state.value is UIState.Idle) {
-            _state.value = UIState.Error("Deteksi wajah bermasalah: $detectError")
-            return
-        }
-
-        if (face == null) {
-            resetDetectionState()
-            // Issue #80: if the face disappears mid-collection, ABORT the
-            // collection — continuing would fuse frames of whoever walks in
-            // next (or match when the user has already left the frame).
-            if (videoMatchEngine.isCollecting()) {
-                videoMatchEngine.resetCollection()
-                _statusMessage.value = "Arahkan wajah ke kamera"
-                _faceOverlay.value = _faceOverlay.value.copy(
-                    isCollecting = false,
-                    progress = 0f,
-                    collectedCount = 0
-                )
-                faceSteadyStartTime = 0L
-            }
-            if (!videoMatchEngine.isCollecting()) {
-                bitmap.recycle()
-            }
-            return
-        }
-
-        Log.d(TAG, "Best face: conf=${"%.3f".format(face.confidence)} rect=${face.boundingBox}")
-
-        _isFaceDetected.value = true
-        _debugDetection.value = null // Legacy, digantikan overlay
-
-        // ─── Quality & centered check ───
-        val centered = videoMatchEngine.isFaceCentered(face, bitmap.width.toFloat(), bitmap.height.toFloat())
-        _isFaceCentered.value = centered
-
-        val yawEstimated = estimateYaw(face) // Approx from landmarks
-        val qualityOK = abs(yawEstimated) < 25f && centered
-
-        // ─── Update overlay UI tiap frame ───
-        updateOverlay(face, bitmap.width, bitmap.height, qualityOK, centered, currentTime)
-
-        if (!qualityOK) {
-            faceSteadyStartTime = 0L
-            _statusMessage.value = if (!centered) "Posisikan wajah di tengah"
-                                   else "Hadapkan wajah lurus ke kamera"
-            if (!videoMatchEngine.isCollecting()) bitmap.recycle()
-            return
-        }
-
-        // ─── Face-steady liveness ───
-        // RetinaFace cuma 5 landmark → gak bisa EAR blink.
-        // Solusi: wajah harus stabil di tengah + yaw <25° selama STEADY_DURATION_MS.
-        // Anti-spoof deep learning tetap jalan di pipeline setelah collect.
-        if (faceSteadyStartTime == 0L) {
-            faceSteadyStartTime = currentTime
-        }
-        val steadyDuration = currentTime - faceSteadyStartTime
-        if (steadyDuration < STEADY_DURATION_MS) {
-            _statusMessage.value = "Tahan pose..."
-            if (!videoMatchEngine.isCollecting()) bitmap.recycle()
-            return
-        }
-
-        // ─── Start frame collection ───
-        if (!videoMatchEngine.isCollecting()) {
-            videoMatchEngine.startFrameCollection()
-            _statusMessage.value = "Mengambil gambar..."
-            lastFrameCaptureTime = currentTime
-        }
-
-        // ─── Collect frames ───
-        if (videoMatchEngine.isCollecting()) {
-            // Throttle: ambil 1 frame setiap FRAME_INTERVAL_MS
-            if (currentTime - lastFrameCaptureTime >= FRAME_INTERVAL_MS) {
-                val qualityScore = computeQualityScore(face)
-                val added = videoMatchEngine.addFrame(bitmap, face, qualityScore)
-                lastFrameCaptureTime = currentTime
-
-                if (!added) {
-                    // Frame rejected (box jumped / different person → collection
-                    // aborted by buffer; issue #80). Reset steady timer so the
-                    // scan must restart with a consistent face.
-                    faceSteadyStartTime = 0L
-                    _statusMessage.value = "Arahkan wajah ke kamera"
-                    _faceOverlay.value = _faceOverlay.value.copy(
-                        isCollecting = false,
-                        progress = 0f,
-                        collectedCount = 0
-                    )
+                // #101: error inference (output shape berubah / sesi rusak) tidak
+                // boleh diam-diam jadi "tidak ada wajah" — feedback ke operator.
+                val detectError = videoMatchEngine.lastDetectError()
+                if (detectError != null && _state.value is UIState.Idle) {
+                    _state.value = UIState.Error("Deteksi wajah bermasalah: $detectError")
                     bitmap.recycle()
                     return
                 }
 
-                _statusMessage.value = "Mengambil gambar... ${videoMatchEngine.getCollectedCount()}/15"
-            } else {
-                // Throttle skip — bitmap not stored, must recycle
+                if (face == null) {
+                    resetDetectionState()
+                    // Issue #80: wajah hilang di tengah koleksi → ABORT. Melanjutkan
+                    // akan memfusi frame orang berikutnya yang masuk.
+                    if (videoMatchEngine.isCollecting()) {
+                        videoMatchEngine.resetCollection()
+                        _statusMessage.value = "Arahkan wajah ke kamera"
+                        _faceOverlay.value = _faceOverlay.value.copy(
+                            isCollecting = false,
+                            progress = 0f,
+                            collectedCount = 0
+                        )
+                        faceSteadyStartTime = 0L
+                    }
+                    if (!videoMatchEngine.isCollecting()) {
+                        bitmap.recycle()
+                    }
+                    return
+                }
+
+                Log.d(TAG, "Best face: conf=${"%.3f".format(face.confidence)} rect=${face.boundingBox}")
+
+                _isFaceDetected.value = true
+                _debugDetection.value = null // Legacy, digantikan overlay
+
+                // ─── Quality & centered check ───
+                val centered = videoMatchEngine.isFaceCentered(face, bitmap.width.toFloat(), bitmap.height.toFloat())
+                _isFaceCentered.value = centered
+
+                val yawEstimated = estimateYaw(face) // Approx from landmarks
+                val qualityOK = abs(yawEstimated) < 25f && centered
+
+                // ─── Update overlay UI tiap frame ───
+                updateOverlay(face, bitmap.width, bitmap.height, qualityOK, centered, currentTime)
+
+                if (!qualityOK) {
+                    faceSteadyStartTime = 0L
+                    _statusMessage.value = if (!centered) "Posisikan wajah di tengah"
+                                           else "Hadapkan wajah lurus ke kamera"
+                    if (!videoMatchEngine.isCollecting()) bitmap.recycle()
+                    return
+                }
+
+                // ─── Face-steady liveness ───
+                // RetinaFace cuma 5 landmark → tak bisa EAR blink. Solusi: wajah
+                // harus stabil di tengah + yaw <25° selama STEADY_DURATION_MS.
+                if (faceSteadyStartTime == 0L) {
+                    faceSteadyStartTime = currentTime
+                }
+                val steadyDuration = currentTime - faceSteadyStartTime
+                if (steadyDuration < STEADY_DURATION_MS) {
+                    _statusMessage.value = "Tahan pose..."
+                    if (!videoMatchEngine.isCollecting()) bitmap.recycle()
+                    return
+                }
+
+                // ─── Start frame collection ───
+                if (!videoMatchEngine.isCollecting()) {
+                    videoMatchEngine.startFrameCollection()
+                    _statusMessage.value = "Mengambil gambar..."
+                    lastFrameCaptureTime = currentTime
+                }
+
+                // ─── Collect frames ───
+                if (videoMatchEngine.isCollecting()) {
+                    // Throttle: ambil 1 frame setiap FRAME_INTERVAL_MS
+                    if (currentTime - lastFrameCaptureTime >= FRAME_INTERVAL_MS) {
+                        val qualityScore = computeQualityScore(face)
+                        val added = videoMatchEngine.addFrame(bitmap, face, qualityScore)
+                        lastFrameCaptureTime = currentTime
+
+                        if (!added) {
+                            // Frame rejected (box melompat / beda orang → buffer
+                            // abort; issue #80). Reset steady timer agar scan
+                            // restart dgn wajah yang konsisten.
+                            faceSteadyStartTime = 0L
+                            _statusMessage.value = "Arahkan wajah ke kamera"
+                            _faceOverlay.value = _faceOverlay.value.copy(
+                                isCollecting = false,
+                                progress = 0f,
+                                collectedCount = 0
+                            )
+                            bitmap.recycle()
+                            return
+                        }
+
+                        _statusMessage.value = "Mengambil gambar... ${videoMatchEngine.getCollectedCount()}/15"
+                    } else {
+                        // Throttle skip — bitmap not stored, must recycle
+                        bitmap.recycle()
+                    }
+
+                    // Update overlay progress
+                    _faceOverlay.value = _faceOverlay.value.copy(
+                        progress = videoMatchEngine.getCollectionProgress(),
+                        isCollecting = true,
+                        collectedCount = videoMatchEngine.getCollectedCount()
+                    )
+
+                    // Check if collection complete
+                    if (videoMatchEngine.isCollectionComplete()) {
+                        _statusMessage.value = "Memproses..."
+                        _isProcessing.value = true
+                        processVideoFrames()
+                        // Don't recycle bitmap here — it's stored in buffer
+                        return
+                    }
+
+                    // If collection ongoing, don't recycle bitmap (it's stored)
+                    return
+                }
+
                 bitmap.recycle()
+            } finally {
+                // #129: release image buffer kamera — menjamin tidak bocor meski
+                // ada early-return di atas.
+                imageProxy.close()
             }
-
-            // Update overlay progress
-            _faceOverlay.value = _faceOverlay.value.copy(
-                progress = videoMatchEngine.getCollectionProgress(),
-                isCollecting = true,
-                collectedCount = videoMatchEngine.getCollectedCount()
-            )
-
-            // Check if collection complete
-            if (videoMatchEngine.isCollectionComplete()) {
-                _statusMessage.value = "Memproses..."
-                _isProcessing.value = true
-                processVideoFrames()
-                // Don't recycle bitmap here — it's stored in buffer
-                return
-            }
-
-            // If collection ongoing, don't recycle bitmap (it's stored)
-            return
         }
-
-        bitmap.recycle()
-    }
 
     private fun resetDetectionState() {
         faceSteadyStartTime = 0L
@@ -292,7 +306,10 @@ class ScannerViewModel @Inject constructor(
                                 confidenceScore = result.confidence,
                                 isViolation = result.isViolation,
                                 violationType = if (result.isViolation) result.violationMessage else null,
-                                deviceId = deviceId
+                                deviceId = deviceId,
+                                // #119: idempotency key unik per log offline —
+                                // retry sync tidak membuat duplikat di server.
+                                clientId = java.util.UUID.randomUUID().toString()
                             )
                             attendanceLogDao.insert(log)
                             launch { syncManager.syncLogsOnly() }
@@ -335,7 +352,9 @@ class ScannerViewModel @Inject constructor(
                             )
                         }
                         is MatchEngineResult.LivenessFailed -> {
-                            _state.value = UIState.Error("Kedipkan mata untuk verifikasi")
+                            // #130: pipeline pakai anti-spoof DL + face-steady, BUKAN
+                            // EAR blink — instruksi "kedipkan mata" menyesatkan.
+                            _state.value = UIState.Error("Verifikasi gagal — hadapkan wajah, jangan tutupi")
                         }
                         is MatchEngineResult.NoFace -> {
                             // #104: jangan biarkan status "Memproses..." menggantung —
@@ -458,9 +477,36 @@ class ScannerViewModel @Inject constructor(
         videoMatchEngine.resetCollection()
     }
 
+    // #130: kamera gagal di-bind (bindToLifecycle error) → set UIState.Error
+    // supaya operator melihat pesan + tombol "Coba Lagi" (bukan layar hitam).
+    fun onCameraError(message: String) {
+        _state.value = UIState.Error("Kamera gagal: $message")
+    }
+
+    // #130: retry kamera — increment key re-init supaya AndroidView di
+    // ScannerScreen me-rebind CameraX (unbindAll + bindToLifecycle ulang).
+    fun retryCamera() {
+        _cameraRetry.value++
+        resetState()
+    }
+
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
         return try {
-            imageProxy.toBitmap()
+            // #130: buat bitmap sejajar arah PreviewView. ImageProxy.toBitmap()
+            // versi ini tidak terima rotationDegrees → decode lalu rotasi manual
+            // dgn Matrix sesuai orientasi sensor. Tanpa ini bbox overlay meleset
+            // pada rotasi sensor (mis. portrait 90°).
+            val raw = imageProxy.toBitmap()
+            val rotation = imageProxy.imageInfo.rotationDegrees
+            if (rotation == 0) {
+                raw
+            } else {
+                val matrix = android.graphics.Matrix()
+                matrix.postRotate(rotation.toFloat())
+                val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+                if (rotated !== raw) raw.recycle()
+                rotated
+            }
         } catch (e: Exception) {
             Log.e(TAG, "toBitmap error", e)
             null

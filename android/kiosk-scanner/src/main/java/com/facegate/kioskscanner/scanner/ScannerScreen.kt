@@ -32,6 +32,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -160,47 +162,52 @@ fun ScannerScreen(
             }
         } else {
             // ─── CameraX Preview ───
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        val cameraProvider = cameraProviderFuture.get()
-                        val preview = Preview.Builder().build().also {
-                            it.surfaceProvider = previewView.surfaceProvider
-                        }
-                        val analyzer = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-                        analyzer.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                            // #93: guard lama (`!isProcessing && state !is Success/Error`) adalah
-                            // stale closure dari komposisi pertama (AndroidView factory jalan sekali)
-                            // dan salah tipe — dihapus. Guard sebenarnya ada di dalam
-                            // ScannerViewModel.onFrameCaptured yang memakai _state/_isProcessing
-                            // internal (stateflow), jadi aman dari double-processing.
-                            viewModel.onFrameCaptured(imageProxy)
-                            imageProxy.close()
-                        }
-                        val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-                        // #68: mirroring ditentukan dari lensFacing cameraSelector yang
-                        // di-bind (bukan hardcode) → overlay sejajar di resolusi apa pun.
-                        // CameraSelector.lensFacing konsisten dengan CameraCharacteristics.LENS_FACING.
-                        try {
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
-                                ctx as androidx.lifecycle.LifecycleOwner,
-                                cameraSelector,
-                                preview,
-                                analyzer
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
-                    previewView
-                }
-            )
+            // #130: key(cameraRetry) memaksa AndroidView di-*recycle* saat
+            // viewModel.retryCamera() dipanggil → factory jalan ulang & CameraX
+            // di-bind fresh (recovery tanpa restart activity).
+            val cameraRetry by viewModel.cameraRetry.collectAsState()
+            key(cameraRetry) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        val previewView = PreviewView(ctx)
+                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                        cameraProviderFuture.addListener({
+                            val cameraProvider = cameraProviderFuture.get()
+                            val preview = Preview.Builder().build().also {
+                                it.surfaceProvider = previewView.surfaceProvider
+                            }
+                            val analyzer = ImageAnalysis.Builder()
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .build()
+                            analyzer.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
+                                // #93: guard sebenarnya ada di dalam onFrameCaptured
+                                // (stateflow internal) — aman dari double-processing.
+                                // #129: imageProxy.close() dipanggil DI DALAM
+                                // onFrameCaptured (try/finally) — jangan close ganda.
+                                viewModel.onFrameCaptured(imageProxy)
+                            }
+                            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+                            // #68: mirroring dari lensFacing cameraSelector (bukan
+                            // hardcode) → overlay sejajar di resolusi apa pun.
+                            try {
+                                cameraProvider.unbindAll()
+                                cameraProvider.bindToLifecycle(
+                                    ctx as androidx.lifecycle.LifecycleOwner,
+                                    cameraSelector,
+                                    preview,
+                                    analyzer
+                                )
+                            } catch (e: Exception) {
+                                // #130: JANGAN telan diam — expose ke UI + tombol retry.
+                                e.printStackTrace()
+                                viewModel.onCameraError(e.message ?: "tidak dapat membuka kamera")
+                            }
+                        }, ContextCompat.getMainExecutor(ctx))
+                        previewView
+                    }
+                )
+            }
 
             // ─── Face Bounding Box Overlay ───
             Canvas(
@@ -311,11 +318,24 @@ fun ScannerScreen(
                 val syncStatusText = syncStatus
                 if (syncStatusText != null) {
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        syncStatusText,
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 11.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    ) {
+                        // #130: spinner saat sync berjalan — indikator progres
+                        // eksplisit (bukan teks diam).
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            color = Color.White.copy(alpha = 0.7f),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            syncStatusText,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
 
@@ -401,9 +421,14 @@ fun ScannerScreen(
                         .align(Alignment.TopEnd)
                         .padding(top = 48.dp, end = 8.dp)
                         .size(40.dp)
-                        .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                    // #130: aksesibilitas — deskripsi utk pembaca layar.
+                    enabled = syncStatus == null
                 ) {
-                    Text("↻", color = Color.White, fontSize = 20.sp)
+                    Text("↻", color = Color.White, fontSize = 20.sp,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Sinkronkan data"
+                        })
                 }
             }
         }

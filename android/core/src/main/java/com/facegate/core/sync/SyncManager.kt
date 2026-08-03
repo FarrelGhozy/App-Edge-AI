@@ -76,16 +76,29 @@ class SyncManager @Inject constructor(
                     violationType = entity.violationType,
                     deviceId = entity.deviceId,
                     photoCapture = entity.photoCapture,
+                    clientId = entity.clientId, // #119: idempotency key
                     timestamp = entity.timestamp
                 )
             }
         )
 
         val response = apiService.syncAttendance(batch)
-        if (response.isSuccessful) {
-            val ids = unsynced.map { it.id }
-            attendanceLogDao.markManySynced(ids)
-            return unsynced.size
+        if (response.isSuccessful && response.body() != null) {
+            // #114: jangan tandai SEMUA synced. Log yang di-skip server (mis.
+            // student tidak ditemukan) harus TETAP di antrean offline agar tidak
+            // hilang tanpa jejak — mark hanya yang benar-benar diterima.
+            val skippedIds = response.body()!!
+                .data?.skippedLogs.orEmpty()
+                .map { it.studentId }
+                .toSet()
+            val syncedIds = unsynced
+                .filter { it.studentId !in skippedIds }
+                .map { it.id }
+            if (syncedIds.isNotEmpty()) {
+                attendanceLogDao.markManySynced(syncedIds)
+            }
+            android.util.Log.d("SyncManager", "Uploaded ${unsynced.size} logs: ${syncedIds.size} synced, ${skippedIds.size} skipped (kept queued)")
+            return syncedIds.size
         }
         return 0
     }

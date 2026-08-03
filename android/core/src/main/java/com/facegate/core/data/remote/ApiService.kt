@@ -70,7 +70,7 @@ interface ApiService {
     ): Response<AttendanceListResponse>
 
     @POST("api/sync/attendance")
-    suspend fun syncAttendance(@Body request: AttendanceBatchRequest): Response<StatusResponse>
+    suspend fun syncAttendance(@Body request: AttendanceBatchRequest): Response<SyncBatchResponse>
 
     @GET("api/sync/faces")
     suspend fun syncFaces(@Query("since") since: String? = null): Response<FaceSyncResponse>

@@ -24,7 +24,6 @@ import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedder
 import com.facegate.core.face.FaceMatcher
 import com.facegate.core.face.LivenessDetector
-import com.facegate.core.sync.SyncManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -69,7 +68,7 @@ object CoreModule {
             context,
             AppDatabase::class.java,
             "facegate.db"
-        ).addMigrations(MIGRATION_1_2).build()
+        ).addMigrations(MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build()
     }
 
     @Provides
@@ -168,27 +167,5 @@ object CoreModule {
     @Singleton
     fun provideDevicePreferences(@ApplicationContext context: Context): DevicePreferences {
         return DevicePreferences(context)
-    }
-
-    @Provides
-    @Singleton
-    fun provideSyncManager(
-        apiService: ApiService,
-        attendanceLogDao: AttendanceLogDao,
-        faceVectorDao: FaceVectorDao,
-        studentDao: StudentDao,
-        campusRuleDao: CampusRuleDao,
-        syncMetadata: SyncMetadata,
-        faceMatcher: FaceMatcher
-    ): SyncManager {
-        return SyncManager(
-            apiService = apiService,
-            attendanceLogDao = attendanceLogDao,
-            faceVectorDao = faceVectorDao,
-            studentDao = studentDao,
-            campusRuleDao = campusRuleDao,
-            syncMetadata = syncMetadata,
-            faceMatcher = faceMatcher
-        )
     }
 }
