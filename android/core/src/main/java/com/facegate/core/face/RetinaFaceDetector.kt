@@ -40,6 +40,13 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
     private var ortEnv: ai.onnxruntime.OrtEnvironment? = null
     private var ready = false
 
+    // #101: error inference terakhir — dipakai kiosk untuk feedback, jangan
+    // ditelan diam-diam jadi "tidak ada wajah" (retina 5 landmark tidak punya
+    // sinyal kecuali kita expose error-nya).
+    @Volatile
+    var lastDetectError: String? = null
+        private set
+
     // Output tensor names ordered by scale (stride 8, 16, 32)
     private var scoreNames: List<String> = emptyList()
     private var boxNames: List<String> = emptyList()
@@ -187,6 +194,7 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
             val kept = nonMaxSuppression(candidates, NMS_THRESHOLD)
 
             // 5. Convert to FaceBox
+            lastDetectError = null
             return kept.map { cand ->
                 FaceBox(
                     boundingBox = cand.rect,
@@ -195,6 +203,9 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
                 )
             }
         } catch (e: Exception) {
+            // #101: jangan telan — simpan error supaya kiosk bisa tampilkan
+            // feedback & operator tahu inference-nya gagal (bukan "tidak ada wajah").
+            lastDetectError = "detect failed: ${e.message}"
             Log.e(TAG, "Detect error: ${e.message}", e)
             return emptyList()
         } finally {

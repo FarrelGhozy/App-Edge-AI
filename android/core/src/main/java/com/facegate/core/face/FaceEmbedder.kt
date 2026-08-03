@@ -119,19 +119,6 @@ class FaceEmbedder(private val context: Context) {
     }
 
     /**
-     * Batch embed multiple face crops into a single matrix.
-     * Each row = 1 embedding vector.
-     */
-    fun embedBatch(bitmaps: List<Bitmap>): Array<FloatArray> {
-        if (interpreter == null) {
-            val ok = init()
-            if (!ok || interpreter == null)
-                throw IllegalStateException(initError ?: "FaceEmbedder belum diinisialisasi")
-        }
-        return bitmaps.map { embed(it) }.toTypedArray()
-    }
-
-    /**
      * Average multiple embeddings into one template.
      * Useful for multi-frame registration: embed 5 frames → centroid → store.
      */

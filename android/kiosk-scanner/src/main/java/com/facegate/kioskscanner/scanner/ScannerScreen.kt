@@ -1,8 +1,11 @@
 package com.facegate.kioskscanner.scanner
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.delay
@@ -83,6 +87,17 @@ fun ScannerScreen(
         cameraPermissionGranted.value = granted
     }
 
+    // #92: deny-forever (Android 11+: "Don't ask again") — launcher langsung
+    // return denied tanpa dialog. Satu-satunya jalan keluar: buka app settings.
+    fun openAppSettings() {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null)
+            )
+        )
+    }
+
     LaunchedEffect(Unit) {
         if (!cameraPermissionGranted.value) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -98,15 +113,47 @@ fun ScannerScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (!cameraPermissionGranted.value) {
-            // Permission denied
+            // Permission denied — #92: kalau sudah di-deny forever (launcher tak
+            // akan menampilkan dialog lagi), tawarkan "Buka Pengaturan" sebagai
+            // satu-satunya jalan keluar; kalau masih bisa diminta ulang, tombol
+            // "Berikan Izin" tetap pakai launcher.
+            val activity = context as? android.app.Activity
+            // #92: deny-forever — launcher tak tampilkan dialog jika sudah
+            // diblokir permanen; sebaliknya anggap masih bisa diminta ulang.
+            val permanentlyDenied = activity != null &&
+                    !ActivityCompat.shouldShowRequestPermissionRationale(
+                        activity, Manifest.permission.CAMERA
+                    )
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text("Izin kamera diperlukan", color = Color.White, fontSize = 18.sp)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (permanentlyDenied) {
+                        "Kamera diblokir permanen. Buka Pengaturan untuk mengizinkan."
+                    } else {
+                        "Izinkan akses kamera untuk memindai wajah."
+                    },
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 40.dp)
+                )
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                    Text("Berikan Izin")
+                if (permanentlyDenied) {
+                    Button(onClick = { openAppSettings() }) {
+                        Text("Buka Pengaturan")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                        Text("Coba Lagi", color = Color.White.copy(alpha = 0.8f))
+                    }
+                } else {
+                    Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                        Text("Berikan Izin")
+                    }
                 }
             }
         } else {
@@ -125,9 +172,12 @@ fun ScannerScreen(
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                         analyzer.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                            if (!isProcessing && state !is ScannerViewModel.UIState.Success && state !is ScannerViewModel.UIState.Error) {
-                                viewModel.onFrameCaptured(imageProxy)
-                            }
+                            // #93: guard lama (`!isProcessing && state !is Success/Error`) adalah
+                            // stale closure dari komposisi pertama (AndroidView factory jalan sekali)
+                            // dan salah tipe — dihapus. Guard sebenarnya ada di dalam
+                            // ScannerViewModel.onFrameCaptured yang memakai _state/_isProcessing
+                            // internal (stateflow), jadi aman dari double-processing.
+                            viewModel.onFrameCaptured(imageProxy)
                             imageProxy.close()
                         }
                         val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA

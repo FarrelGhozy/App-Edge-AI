@@ -16,6 +16,7 @@ import com.facegate.core.sync.SyncManager
 import com.facegate.kioskscanner.matching.MatchEngineResult
 import com.facegate.kioskscanner.matching.VideoMatchEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -102,7 +103,9 @@ class ScannerViewModel @Inject constructor(
             val studentName: String,
             val actionLabel: String,
             val isViolation: Boolean = false,
-            val message: String? = null
+            val message: String? = null,
+            // #91: decision level CONFIDENT/MEDIUM/WEAK untuk UX
+            val decisionLabel: String? = null
         ) : UIState()
         data class Error(
             val message: String = "Silakan hubungi admin"
@@ -131,6 +134,14 @@ class ScannerViewModel @Inject constructor(
         val detectTimeMs = (System.nanoTime() - startDetect) / 1_000_000L
         Log.d(TAG, "Frame ${lastImageWidth}x$lastImageHeight: ${faces.size} faces detected in ${detectTimeMs}ms")
         val face = faces.maxByOrNull { it.confidence }
+
+        // #101: error inference (output shape berubah / sesi rusak) tidak boleh
+        // diam-diam jadi "tidak ada wajah" — tampilkan feedback ke operator.
+        val detectError = videoMatchEngine.lastDetectError()
+        if (detectError != null && _state.value is UIState.Idle) {
+            _state.value = UIState.Error("Deteksi wajah bermasalah: $detectError")
+            return
+        }
 
         if (face == null) {
             resetDetectionState()
@@ -306,7 +317,13 @@ class ScannerViewModel @Inject constructor(
                                 studentName = result.studentName,
                                 actionLabel = label,
                                 isViolation = result.isViolation,
-                                message = result.violationMessage
+                                message = result.violationMessage,
+                                decisionLabel = when (result.decision) {
+                                    com.facegate.core.face.MatchDecision.CONFIDENT -> "Terverifikasi ✅"
+                                    com.facegate.core.face.MatchDecision.MEDIUM -> "Cocok ⚠️"
+                                    com.facegate.core.face.MatchDecision.WEAK -> "Cocok lemah ❗"
+                                    else -> null
+                                }
                             )
                             _statusMessage.value = ""
                         }
@@ -321,7 +338,10 @@ class ScannerViewModel @Inject constructor(
                             _state.value = UIState.Error("Kedipkan mata untuk verifikasi")
                         }
                         is MatchEngineResult.NoFace -> {
-                            // Will retry on next frame
+                            // #104: jangan biarkan status "Memproses..." menggantung —
+                            // reset ke panduan default supaya frame berikutnya bisa scan lagi.
+                            _statusMessage.value = "Arahkan wajah ke kamera"
+                            faceSteadyStartTime = 0L
                         }
                         is MatchEngineResult.QualityFailed -> {
                             _state.value = UIState.Error(result.reason)
@@ -329,6 +349,10 @@ class ScannerViewModel @Inject constructor(
                     }
                     _isProcessing.value = false
                 }
+            } catch (e: CancellationException) {
+                // #105: cancellation harus di-propagasi, bukan ditelan sebagai error UI.
+                _isProcessing.value = false
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Video processing error", e)
                 _state.value = UIState.Error("Proses gagal, coba lagi")

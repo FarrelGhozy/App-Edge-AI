@@ -80,6 +80,14 @@ class VideoMatchEngine @Inject constructor(
     }
 
     /**
+     * #101: expose error inference terakhir dari detector (RetinaFace).
+     * Null = tidak ada error; non-null = inference gagal (bukan "tidak ada wajah").
+     */
+    fun lastDetectError(): String? {
+        return (faceDetector as? RetinaFaceDetector)?.lastDetectError
+    }
+
+    /**
      * Check if face is properly centered in the frame.
      */
     fun isFaceCentered(box: FaceBox, imageWidth: Float, imageHeight: Float): Boolean {
@@ -271,7 +279,9 @@ class VideoMatchEngine @Inject constructor(
                 action = toggle.action,
                 isViolation = violation.isViolation,
                 violationMessage = violation.message,
-                confidence = matchResult.confidence
+                confidence = matchResult.confidence,
+                // #91: decision level dipetakan ke UX (CONFIDENT/MEDIUM/WEAK)
+                decision = matchResult.decision
             )
         } catch (e: Exception) {
             Log.e(TAG, "Video processing error", e)
