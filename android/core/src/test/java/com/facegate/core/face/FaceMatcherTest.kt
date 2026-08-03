@@ -1,5 +1,6 @@
 package com.facegate.core.face
 
+import android.graphics.Bitmap
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -241,5 +242,48 @@ class FaceMatcherTest {
         // Each original vector still present and matchable
         val res = matcher.match(query)
         assertNotNull(res.studentId)
+    }
+
+    @Test
+    fun `thin gap no longer false-rejects genuine match (issue 66)`() {
+        // Issue #66: AMBIGUITY_RATIO 0.15 penalized genuine matches with a thin
+        // (but real) gap. With 0.08, best=0.75 vs second=0.65 (gap 0.10) must
+        // MATCH. Under the old ratio (0.15): adjusted = 0.75-(0.15-0.10)*0.5 =
+        // 0.725 < adaptive 0.73 (video) → false reject. Now: gap ≥ 0.08 → no
+        // ambiguity penalty → adjusted = 0.75 ≥ 0.73 → match.
+        val q = normalize(cleanVector(1f, 0f, 0f))
+        val vBest = normalize(cleanVector(0.75f, kotlin.math.sqrt(1f - 0.75f * 0.75f), 0f))
+        val vSecond = normalize(cleanVector(0.65f, 0f, kotlin.math.sqrt(1f - 0.65f * 0.65f)))
+        matcher.buildIndex(listOf(
+            entry("genuine", vBest),
+            entry("other", vSecond)
+        ))
+        val result = matcher.match(q)
+        assertTrue("genuine match with gap 0.10 must not be false-rejected", result.isMatch)
+        assertEquals("genuine", result.studentId)
+    }
+
+    @Test
+    fun `averageEmbeddings produces L2-normalized centroid`() {
+        // Issue #66: enrollment must store a robust averaged template per pose.
+        // The shared FaceEmbedderProvider default must output an L2-normalized
+        // vector so downstream dot-product matching stays valid.
+        val provider = object : FaceEmbedderProvider {
+            override fun init() = true
+            override fun embed(faceCrop: Bitmap) = FloatArray(embeddingDim)
+            override val embeddingDim = 512
+            override val inputSize = 112
+            override fun release() {}
+            override fun isReady() = true
+        }
+        val a = FloatArray(512).also { it[0] = 1f }  // unit e0
+        val b = FloatArray(512).also { it[1] = 1f }  // unit e1
+        val avg = provider.averageEmbeddings(arrayOf(a, b))
+        // Centroid (0.5, 0.5) → L2 → (0.7071, 0.7071)
+        assertEquals(0.7071f, avg[0], 1e-3f)
+        assertEquals(0.7071f, avg[1], 1e-3f)
+        var norm = 0.0
+        for (x in avg) norm += x * x
+        assertEquals("averaged template must be L2-normalized", 1.0, kotlin.math.sqrt(norm), 1e-4)
     }
 }

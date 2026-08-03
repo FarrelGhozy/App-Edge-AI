@@ -422,36 +422,39 @@ class FaceRegisterViewModel @Inject constructor(
                     detection = null
                 )
 
-                // ─── Select best 1 frame per pose (total = 5) ───
-                val selectedFrames = mutableListOf<CapturedFrameData>()
-                for (pose in poseOrder) {
-                    val queue = poseQueues[pose]!!
-                    if (queue.isEmpty()) continue
-                    // Pick the frame with highest quality score for this pose
-                    val best = queue.maxByOrNull { it.qualityReport.score }!!
-                    selectedFrames.add(best)
+                // ─── Per-pose averaging: embed top-K frames per pose, average
+                //     into ONE robust template vector (issue #66). Previously
+                //     only the single best frame per pose was used — the
+                //     captured sibling frame (2/pose) was discarded, leaving
+                //     template quality at the mercy of one noisy frame. ───
+                val poseVectors = withContext(Dispatchers.Default) {
+                    poseOrder.mapNotNull { pose ->
+                        val queue = poseQueues[pose] ?: return@mapNotNull null
+                        if (queue.isEmpty()) return@mapNotNull null
+                        // Top-K frames by quality score for this pose
+                        val topK = queue
+                            .sortedByDescending { it.qualityReport.score }
+                            .take(MAX_FRAMES_PER_POSE)
+                        val embs = topK.map { data ->
+                            val faceCrop = cropFace(data.bitmap, data.faceRect)
+                            val emb = faceEmbedder.embed(faceCrop)
+                            if (faceCrop !== data.bitmap) faceCrop.recycle()
+                            emb
+                        }.toTypedArray()
+                        // Centroid → L2-normalized (averageEmbeddings normalizes)
+                        PoseVectorEntry(
+                            pose = pose.name,
+                            vector = faceEmbedder.averageEmbeddings(embs).toList()
+                        )
+                    }
                 }
 
-                if (selectedFrames.isEmpty()) {
+                if (poseVectors.isEmpty()) {
                     _state.value = _state.value.copy(
                         step = FaceRegisterStep.ERROR,
                         error = "Tidak ada frame yang valid"
                     )
                     return@launch
-                }
-
-                // Take top N up to framesRequired
-                val sortedFrames = selectedFrames.sortedByDescending { it.qualityReport.score }
-                val finalFrames = sortedFrames.take(_state.value.framesRequired)
-
-                // ─── Embed each selected frame (crop face first, consistent with kiosk) ───
-                val embeddings = withContext(Dispatchers.Default) {
-                    finalFrames.map { data ->
-                        val faceCrop = cropFace(data.bitmap, data.faceRect)
-                        val emb = faceEmbedder.embed(faceCrop)
-                        if (faceCrop !== data.bitmap) faceCrop.recycle()
-                        emb
-                    }.toTypedArray()
                 }
 
                 // Cleanup all bitmaps
@@ -467,15 +470,7 @@ class FaceRegisterViewModel @Inject constructor(
                     message = "Mengunggah data wajah..."
                 )
 
-                // ─── Build per-pose vector list ───
-                val poseVectors = finalFrames.mapIndexed { index, frameData ->
-                    PoseVectorEntry(
-                        pose = frameData.pose.name,
-                        vector = embeddings[index].toList()
-                    )
-                }
-
-                // ─── Upload all 5 pose vectors in one batch ───
+                // ─── Upload all pose vectors in one batch (1 averaged vector per pose) ───
                 val batchRequest = BatchUploadFacesRequest(vectors = poseVectors)
                 val response = withContext(Dispatchers.IO) {
                     apiService.uploadFaces(studentId, batchRequest)

@@ -23,7 +23,10 @@ class FaceMatcher(
 
     companion object {
         private const val TAG = "FaceMatcher"
-        private const val AMBIGUITY_RATIO = 0.15f
+        // Ambiguity penalty ratio (issue #66): 0.15 too aggressive for a large
+        // multi-pose index (10k+ students) — genuine matches with a thin gap
+        // were penalized into false-reject. Tuned down to 0.08 per improvement-plan.
+        private const val AMBIGUITY_RATIO = 0.08f
         private const val HIGH_GAP = 0.15f
         private const val MEDIUM_GAP = 0.08f
     }

@@ -32,8 +32,10 @@ object QualityAnalyzer {
     private const val TAG = "QualityAnalyzer"
 
     // Thresholds (configurable)
-    private const val MIN_LAPLACIAN_VARIANCE = 80f    // below this = blurry
-    private const val MIN_BRIGHTNESS = 40f             // [0, 255]
+    // Issue #66: loosened for low-light gate scenarios (night lamp, shadow,
+    // camera noise) so genuine frames aren't rejected before matching.
+    private const val MIN_LAPLACIAN_VARIANCE = 50f    // below this = blurry (was 80)
+    private const val MIN_BRIGHTNESS = 25f             // [0, 255] (was 40)
     private const val MAX_BRIGHTNESS = 215f
     private const val MIN_FACE_SIZE_RATIO = 0.05f      // at least 5% of image
     private const val MAX_YAW_ANGLE = 35f               // degrees
