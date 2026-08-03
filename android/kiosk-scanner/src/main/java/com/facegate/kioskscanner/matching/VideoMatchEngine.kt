@@ -29,6 +29,7 @@ class VideoMatchEngine @Inject constructor(
     private val faceEmbedder: FaceEmbedderProvider,
     @javax.inject.Named("video") private val faceMatcher: FaceMatcher,
     private val livenessDetector: LivenessDetector,
+    private val antiSpoofDetector: AntiSpoofDetector,
     private val toggleEngine: ToggleEngine,
     private val violationDetector: ViolationDetector,
     private val sessionTracker: SessionTracker,
@@ -39,6 +40,7 @@ class VideoMatchEngine @Inject constructor(
     companion object {
         private const val TAG = "VideoMatchEngine"
         private const val SPOOF_CONFIDENCE_MIN = 0.3f
+        private const val SPOOF_REJECTS_REQUIRED = 1
         private const val MIN_FRAMES_FOR_FUSION = 3
         private const val CENTER_MARGIN_RATIO = 0.25f
     }
@@ -168,6 +170,31 @@ class VideoMatchEngine @Inject constructor(
         Log.d(TAG, "Processing ${frames.size} frames for video matching")
 
         try {
+            // 0. Anti-spoof gate (issue #59): run DL anti-spoof on a sample of the
+            //    collected frames BEFORE embedding. RetinaFace has only 5 landmarks
+            //    (no eye contour) so EAR blink is not available — the MiniFASNet
+            //    anti-spoof model is the primary liveness defense. A static photo /
+            //    print / screen replay must be rejected here.
+            var spoofRejections = 0
+            val antiSpoofStep = maxOf(1, frames.size / 2) // sample ~half the frames
+            for (i in frames.indices step antiSpoofStep) {
+                val frame = frames[i]
+                val rect = frame.faceRect ?: continue
+                val spoof = antiSpoofDetector.detectSpoof(frame.bitmap, rect)
+                if (spoof.isSpoof) {
+                    spoofRejections++
+                    // Early exit on first confirmed spoof.
+                    if (spoofRejections >= SPOOF_REJECTS_REQUIRED) {
+                        Log.w(TAG, "Liveness FAILED: anti-spoof detected attack (real=%.2f)".format(spoof.realConfidence))
+                        livenessDetector.reset()
+                        return@withContext MatchEngineResult.LivenessFailed
+                    }
+                }
+            }
+            if (spoofRejections > 0) {
+                Log.w(TAG, "Anti-spoof flagged $spoofRejections frame(s) but below reject threshold")
+            }
+
             // 1. Extract embeddings for each frame
             val embedResults = frames.mapNotNull { entry ->
                 try {
