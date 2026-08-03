@@ -18,13 +18,6 @@ class OnnxFaceEmbedder(private val context: Context) : FaceEmbedderProvider {
 
     companion object {
         private const val TAG = "OnnxEmbedder"
-<<<<<<< HEAD
-        val INPUT_SIZE = 112
-        val EMBEDDING_DIM = 512
-        private const val INPUT_NAME = "input.1"
-        private const val OUTPUT_NAME = "516"
-=======
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
     }
 
     override val inputSize: Int = 112
@@ -92,16 +85,11 @@ class OnnxFaceEmbedder(private val context: Context) : FaceEmbedderProvider {
             val inputMap = mapOf(inName to inputTensor)
             results = session!!.run(inputMap)
 
-<<<<<<< HEAD
-            val output = (results.get(OUTPUT_NAME).orElse(null)?.value as? Array<FloatArray>)?.get(0)
-                ?: throw IllegalStateException("Unexpected ONNX output format")
-=======
             val tensor = results.get(outName).orElse(null) as? OnnxTensor
                 ?: throw IllegalStateException("Unexpected ONNX output type for '$outName'")
             val buffer: FloatBuffer = tensor.floatBuffer
             val raw = FloatArray(buffer.remaining())
             buffer.get(raw)
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
 
             // InsightFace w600k_mbf does NOT L2-normalize by itself — the Python
             // pipeline normalizes explicitly after inference. Normalize here so

@@ -55,11 +55,8 @@ class OnnxRuntimeManager private constructor(private val context: Context) {
             ortEnv = OrtEnvironment.getEnvironment()
 
             val sessionOpts = OrtSession.SessionOptions()
-<<<<<<< HEAD
-=======
             // ONNX Runtime Android 1.20: addCPU(useArena) — CPU is the default fallback provider.
             sessionOpts.addCPU(true)
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
 
             // Load detection model
             try {

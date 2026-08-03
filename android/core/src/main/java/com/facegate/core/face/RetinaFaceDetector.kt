@@ -29,18 +29,11 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
         private const val CONFIDENCE_THRESHOLD = 0.5f
         private const val NMS_THRESHOLD = 0.5f
         private const val INPUT_NAME = "input.1"
-<<<<<<< HEAD
-        // 3 FPN levels × 3 heads (scores, boxes, landmarks) = 9 outputs
-        private val OUTPUT_SCORES = listOf("443", "468", "493")  // [12800,1], [3200,1], [800,1]
-        private val OUTPUT_BOXES = listOf("446", "471", "496")   // [12800,4], [3200,4], [800,4]
-        private val OUTPUT_LANDMARKS = listOf("449", "474", "499") // [12800,10], [3200,10], [800,10]
-=======
         private const val INPUT_MEAN = 127.5f
         private const val INPUT_STD = 128.0f
         private val FEAT_STRIDES = intArrayOf(8, 16, 32)
         private const val NUM_ANCHORS = 2
         private const val NUM_KPS = 5
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
     }
 
     private var session: OrtSession? = null
@@ -109,94 +102,6 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
             val inputMap = mapOf(INPUT_NAME to inputTensor)
             results = session!!.run(inputMap)
 
-<<<<<<< HEAD
-            // 3. Parse all 9 outputs (3 FPN levels)
-            val allScores = mutableListOf<FloatArray>()
-            val allBoxes = mutableListOf<FloatArray>()
-            val allLandmarks = mutableListOf<FloatArray>()
-            for (name in OUTPUT_SCORES) {
-                results.get(name).orElse(null)?.let { v ->
-                    Log.d(TAG, "Output $name type=${v.value?.javaClass?.name} value=${v.value?.javaClass?.componentType()}")
-                    // Try 3D first, then 2D
-                    val arr3d = v.value as? Array<Array<FloatArray>>
-                    if (arr3d != null) {
-                        arr3d.forEach { batch -> batch.forEach { row -> allScores.add(row) } }
-                    } else {
-                        val arr2d = v.value as? Array<FloatArray>
-                        if (arr2d != null) {
-                            arr2d.forEach { allScores.add(it) }
-                        }
-                    }
-                }
-            }
-            for (name in OUTPUT_BOXES) {
-                results.get(name).orElse(null)?.let { v ->
-                    val arr3d = v.value as? Array<Array<FloatArray>>
-                    if (arr3d != null) {
-                        arr3d.forEach { batch -> batch.forEach { row -> allBoxes.add(row) } }
-                    } else {
-                        val arr2d = v.value as? Array<FloatArray>
-                        if (arr2d != null) {
-                            arr2d.forEach { allBoxes.add(it) }
-                        }
-                    }
-                }
-            }
-            for (name in OUTPUT_LANDMARKS) {
-                results.get(name).orElse(null)?.let { v ->
-                    val arr3d = v.value as? Array<Array<FloatArray>>
-                    if (arr3d != null) {
-                        arr3d.forEach { batch -> batch.forEach { row -> allLandmarks.add(row) } }
-                    } else {
-                        val arr2d = v.value as? Array<FloatArray>
-                        if (arr2d != null) {
-                            arr2d.forEach { allLandmarks.add(it) }
-                        }
-                    }
-                }
-            }
-
-            val numDetections = minOf(allScores.size, allBoxes.size, allLandmarks.size)
-            Log.d(TAG, "Detect: $numDetections raw candidates (scores=${allScores.size}, boxes=${allBoxes.size}, lm=${allLandmarks.size})")
-
-            // 4. Generate/retrieve prior anchors
-            val anchors = getPriorAnchors()
-            if (anchors.size != numDetections) {
-                Log.w(TAG, "Anchor count mismatch: ${anchors.size} anchors vs $numDetections detections")
-            }
-
-            // 5. Decode anchor-relative box deltas → image coordinates, filter by threshold
-            val candidates = mutableListOf<RetinaFaceCandidate>()
-            val numToProcess = minOf(anchors.size, numDetections)
-            for (i in 0 until numToProcess) {
-                val score = allScores[i][0]
-                if (score < CONFIDENCE_THRESHOLD) continue
-
-                val anchor = anchors[i]
-                val box = allBoxes[i]
-                // Decode: cx = anchor_cx + dx * anchor_w, cy = anchor_cy + dy * anchor_h
-                //         w = anchor_w * exp(dw), h = anchor_h * exp(dh)
-                val dx = box[0]; val dy = box[1]; val dw = box[2]; val dh = box[3]
-                // RetinaFace variance: [0.1, 0.2] — baked into the training targets
-                val variance0 = 0.1f; val variance1 = 0.2f
-                val cx = anchor.cx + dx * variance0 * anchor.w
-                val cy = anchor.cy + dy * variance0 * anchor.h
-                val w = anchor.w * kotlin.math.exp(dw * variance1)
-                val h = anchor.h * kotlin.math.exp(dh * variance1)
-                // Convert to x1,y1,x2,y2 in 640×640 input coords → scale to original bitmap coords
-                val x1 = (cx - w / 2f) * scaleX
-                val y1 = (cy - h / 2f) * scaleY
-                val x2 = (cx + w / 2f) * scaleX
-                val y2 = (cy + h / 2f) * scaleY
-
-                val landmark = if (i < allLandmarks.size) allLandmarks[i] else null
-                val lmPoints = if (landmark != null) {
-                    (0 until 5).map { idx ->
-                        // Landmarks also use variance[0]
-                        val lx = (anchor.cx + landmark[idx * 2] * variance0 * anchor.w) * scaleX
-                        val ly = (anchor.cy + landmark[idx * 2 + 1] * variance0 * anchor.h) * scaleY
-                        lx to ly
-=======
             // 3. Parse + decode each scale (InsightFace reference)
             val candidates = mutableListOf<RetinaFaceCandidate>()
             for (scaleIdx in 0 until 3) {
@@ -235,7 +140,6 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
                             centers[ci++] = cx
                             centers[ci++] = cy
                         }
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
                     }
                 }
 
@@ -279,17 +183,7 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
                 }
             }
 
-<<<<<<< HEAD
-            Log.d(TAG, "After decoding: ${candidates.size} candidates pass threshold=$CONFIDENCE_THRESHOLD")
-            if (candidates.isNotEmpty()) {
-                val c = candidates.first()
-                Log.d(TAG, "Best candidate: conf=${"%.4f".format(c.confidence)} rect=${c.rect}")
-            }
-
-            // 5. NMS
-=======
             // 4. NMS across all scales
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
             val kept = nonMaxSuppression(candidates, NMS_THRESHOLD)
 
             // 5. Convert to FaceBox
@@ -316,45 +210,6 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
         } catch (e: Exception) {
             null
         }
-    }
-
-    // RetinaFace-500MF anchor config (from InsightFace buffalo_sc)
-    // 3 FPN levels, 2 square anchors per position
-    // Stride 8:  anchors [16, 32], feature 80×80 → 12800
-    // Stride 16: anchors [64, 128], feature 40×40 → 3200
-    // Stride 32: anchors [256, 512], feature 20×20 → 800
-    private val FPN_STRIDES = intArrayOf(8, 16, 32)
-    private val FPN_MIN_SIZES = arrayOf(
-        intArrayOf(16, 32),
-        intArrayOf(64, 128),
-        intArrayOf(256, 512)
-    )
-    // Prior anchors: pre-generated list of (cx, cy, w, h) for all 16800 positions
-    private var priorAnchors: List<Anchor>? = null
-
-    private data class Anchor(val cx: Float, val cy: Float, val w: Float, val h: Float)
-
-    /** Generate all prior anchors once (cached). */
-    private fun getPriorAnchors(): List<Anchor> {
-        priorAnchors?.let { return it }
-        val anchors = mutableListOf<Anchor>()
-        for (level in FPN_STRIDES.indices) {
-            val stride = FPN_STRIDES[level]
-            val minSizes = FPN_MIN_SIZES[level]
-            val featureSize = INPUT_SIZE / stride
-            for (i in 0 until featureSize) {
-                for (j in 0 until featureSize) {
-                    val cx = (j + 0.5f) * stride
-                    val cy = (i + 0.5f) * stride
-                    for (size in minSizes) {
-                        anchors.add(Anchor(cx, cy, size.toFloat(), size.toFloat()))
-                    }
-                }
-            }
-        }
-        priorAnchors = anchors
-        Log.d(TAG, "Generated ${anchors.size} prior anchors")
-        return anchors
     }
 
     private data class RetinaFaceCandidate(

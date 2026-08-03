@@ -236,19 +236,11 @@ fun ScannerScreen(
                 }
 
                 // Sync status
-<<<<<<< HEAD
-                val ss = syncStatus
-                if (ss != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        ss,
-=======
                 val syncStatusText = syncStatus
                 if (syncStatusText != null) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         syncStatusText,
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 11.sp
                     )

@@ -42,8 +42,6 @@ abstract class KioskModule {
         onnxFaceEmbedder: OnnxFaceEmbedder
     ): FaceEmbedderProvider
 
-<<<<<<< HEAD
-=======
     // NOTE: concrete instances (RetinaFaceDetector, OnnxFaceEmbedder) are
     // provided via @Provides below — no self-referential @Binds (Dagger cycle).
 
@@ -51,20 +49,12 @@ abstract class KioskModule {
     // NOTE: VideoMatchEngine has @Inject constructor — no binding needed here.
     // A previous self-referential @Binds caused a Dagger dependency cycle.
 
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
     companion object {
 
         @Provides
         @Singleton
-<<<<<<< HEAD
-        @ApiBaseUrl
-        fun provideApiBaseUrl(): String {
-            return BuildConfig.API_BASE_URL
-        }
-=======
         @com.facegate.core.di.ApiBaseUrl
         fun provideApiBaseUrl(): String = BuildConfig.API_BASE_URL + "/"
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
 
         @Provides
         @Singleton
@@ -102,8 +92,6 @@ abstract class KioskModule {
 
         @Provides
         @Singleton
-<<<<<<< HEAD
-=======
         @javax.inject.Named("video")
         fun provideVideoFaceMatcher(): FaceMatcher {
             return FaceMatcher(isVideoMode = true) // Video mode untuk kiosk scanner
@@ -111,16 +99,10 @@ abstract class KioskModule {
 
         @Provides
         @Singleton
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
         fun provideVoiceFeedback(
             @ApplicationContext context: android.content.Context
         ): VoiceFeedback {
             return VoiceFeedback(context)
         }
-<<<<<<< HEAD
-
-
-=======
->>>>>>> 1bc714a (fix(core,kiosk): fix ONNX pipeline build failure (#58) + duplicate Hilt bindings (#74))
     }
 }
