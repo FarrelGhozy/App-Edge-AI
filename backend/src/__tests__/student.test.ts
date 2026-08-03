@@ -67,13 +67,10 @@ describe("uploadFace", () => {
     await expect(uploadFace("s1", "INVALID", vec512())).rejects.toThrow("INVALID_POSE");
   });
 
-  it("accepts 192-d vector with pose", async () => {
+  it("rejects 192-d vector with pose (usang — InsightFace kini 512-d)", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
-    mockExecuteRaw.mockResolvedValue({ count: 1 });
-    const r = await uploadFace("s1", "CENTER", vec192());
-    expect(r).toBeDefined();
-    // Verify SQL uses composite key
-    expect(mockExecuteRaw.mock.calls[0][0]).toContain("ON CONFLICT (student_id, pose)");
+    await expect(uploadFace("s1", "CENTER", vec192()))
+      .rejects.toThrow("VECTOR_DIMENSION_MISMATCH");
   });
 
   it("accepts 512-d vector with pose", async () => {
