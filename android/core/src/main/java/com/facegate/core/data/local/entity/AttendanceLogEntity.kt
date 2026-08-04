@@ -1,5 +1,6 @@
 package com.facegate.core.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -18,6 +19,11 @@ data class AttendanceLogEntity(
     val photoCapture: String? = null,
     // #119: idempotency key — UUID unik per log offline, dikirim ke server saat
     // batch sync. Retry tidak membuat duplikat (server dedup by clientId).
+    // Nama kolom eksplisit `client_id` — HARUS konsisten dengan MIGRATION_2_3
+    // (ALTER TABLE ADD COLUMN client_id). Tanpa @ColumnInfo, Room men-deduce
+    // nama = `clientId` (nama field), menyebabkan validasi migrasi gagal:
+    // "Migration didn't properly handle: attendance_logs → client_id vs clientId".
+    @ColumnInfo(name = "client_id")
     val clientId: String? = null,
     val isSynced: Boolean = false
 )

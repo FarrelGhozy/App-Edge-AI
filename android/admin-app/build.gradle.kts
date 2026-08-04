@@ -34,9 +34,9 @@ android {
 
     buildTypes {
         debug {
-            // Local dev: emulator → WSL host (lihat docs/server-config.md),
-            // atau override via local.properties (faceGateApiBaseUrl=...)
-            buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlOverride() ?: "http://10.0.2.2:8150"}\"")
+            // Default: server produksi (Cloudflare Tunnel). Untuk dev lokal,
+            // override via local.properties (faceGateApiBaseUrl=http://10.0.2.2:8150).
+            buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlOverride() ?: "https://facegate.utc.web.id"}\"")
         }
         release {
             isMinifyEnabled = true
