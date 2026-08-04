@@ -313,17 +313,13 @@ class FaceRegisterViewModel @Inject constructor(
                     val previewBmp = best?.let {
                         val faceRect = it.faceRect
                         try {
-                            val crop = Bitmap.createBitmap(
+                            Bitmap.createBitmap(
                                 it.bitmap,
                                 faceRect.left.coerceAtLeast(0),
                                 faceRect.top.coerceAtLeast(0),
                                 faceRect.width().coerceAtMost(it.bitmap.width - faceRect.left.coerceAtLeast(0)),
                                 faceRect.height().coerceAtMost(it.bitmap.height - faceRect.top.coerceAtLeast(0))
                             )
-                            if (rotation != 0) {
-                                val mat = Matrix().apply { postRotate(rotation.toFloat()) }
-                                Bitmap.createBitmap(crop, 0, 0, crop.width, crop.height, mat, true)
-                            } else crop
                         } catch (e: Exception) { null }
                     }
                     _previewBitmap.value = previewBmp
@@ -587,7 +583,22 @@ class FaceRegisterViewModel @Inject constructor(
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
         return try {
-            imageProxy.toBitmap()
+            // ImageProxy.toBitmap() TIDAK menerapkan rotationDegrees → hasilnya
+            // frame sensor yang belum diputar. Padahal detection.boundingBox dari
+            // ML Kit adalah dalam frame upright (sudah diputar). Tanpa rotasi ini
+            // cropFace() memakai koordinat yang salah → embedding sampah → kiosk
+            // selalu menampilkan "Wajah tidak dikenal" (fix yang sama dengan kiosk #130).
+            val raw = imageProxy.toBitmap()
+            val rotation = imageProxy.imageInfo.rotationDegrees
+            if (rotation == 0) {
+                raw
+            } else {
+                val matrix = Matrix()
+                matrix.postRotate(rotation.toFloat())
+                val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+                if (rotated !== raw) raw.recycle()
+                rotated
+            }
         } catch (e: Exception) {
             Log.e(TAG, "toBitmap error", e)
             null
