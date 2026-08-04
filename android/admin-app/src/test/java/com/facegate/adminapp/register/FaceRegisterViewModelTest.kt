@@ -3,7 +3,7 @@ package com.facegate.adminapp.register
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.face.FaceDetectionResult
 import com.facegate.core.face.FaceDetectorWrapper
-import com.facegate.core.face.FaceEmbedder
+import com.facegate.core.face.FaceEmbedderProvider
 import com.facegate.core.face.LivenessDetector
 import com.facegate.core.data.remote.dto.UploadFaceRequest
 import android.util.Log
@@ -25,7 +25,7 @@ class FaceRegisterViewModelTest {
     private lateinit var faceDetector: FaceDetectorWrapper
 
     @MockK
-    private lateinit var faceEmbedder: FaceEmbedder
+    private lateinit var faceEmbedder: FaceEmbedderProvider
 
     @MockK
     private lateinit var livenessDetector: LivenessDetector
@@ -45,7 +45,7 @@ class FaceRegisterViewModelTest {
         every { Log.e(any(), any()) } returns 0
         every { Log.e(any(), any(), any()) } returns 0
 
-        every { faceDetector.init() } returns Unit
+        every { faceDetector.init() } returns true
         every { faceEmbedder.init() } returns true
         every { livenessDetector.reset() } returns Unit
 
