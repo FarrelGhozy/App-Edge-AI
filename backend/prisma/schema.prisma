@@ -31,14 +31,15 @@ model Student {
 }
 
 model FaceVector {
+  id        Int      @id @default(autoincrement())
   studentId String   @map("student_id")
-  pose      String   // pose name: CENTER, LEFT, RIGHT, UP, DOWN
+  pose      String   // pose name: FRONT_1 .. FRONT_N (registrasi video 10 detik, #132/#133)
   vector    Unsupported("vector(512)")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  @@id([studentId, pose])
+  @@index([studentId])
   @@map("face_vectors")
 }
 

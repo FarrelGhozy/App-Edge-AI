@@ -47,42 +47,48 @@ function vec192() { return new Array(192).fill(0.1); }
 function vec512() { return new Array(512).fill(0.05); }
 
 // ────────────────────────────────────────────────────
-// uploadFace (single pose)
+// uploadFace (single vector)
 // ────────────────────────────────────────────────────
 describe("uploadFace", () => {
   beforeEach(resetMocks);
 
   it("rejects 100-d vector", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
-    await expect(uploadFace("s1", "CENTER", new Array(100).fill(0.5))).rejects.toThrow("VECTOR_DIMENSION_MISMATCH");
+    await expect(uploadFace("s1", "FRONT_1", new Array(100).fill(0.5))).rejects.toThrow("VECTOR_DIMENSION_MISMATCH");
   });
 
   it("rejects empty vector", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
-    await expect(uploadFace("s1", "CENTER", [])).rejects.toThrow("VECTOR_DIMENSION_MISMATCH");
+    await expect(uploadFace("s1", "FRONT_1", [])).rejects.toThrow("VECTOR_DIMENSION_MISMATCH");
   });
 
   it("rejects invalid pose", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
-    await expect(uploadFace("s1", "INVALID", vec512())).rejects.toThrow("INVALID_POSE");
+    await expect(uploadFace("s1", "CENTER", vec512())).rejects.toThrow("INVALID_POSE");
+  });
+
+  it("rejects pose beyond MAX_FRAMES (FRONT_11)", async () => {
+    mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
+    await expect(uploadFace("s1", "FRONT_11", vec512())).rejects.toThrow("INVALID_POSE");
   });
 
   it("rejects 192-d vector with pose (usang — InsightFace kini 512-d)", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
-    await expect(uploadFace("s1", "CENTER", vec192()))
+    await expect(uploadFace("s1", "FRONT_1", vec192()))
       .rejects.toThrow("VECTOR_DIMENSION_MISMATCH");
   });
 
-  it("accepts 512-d vector with pose", async () => {
+  it("accepts 512-d vector with FRONT pose", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
+    mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
     mockExecuteRaw.mockResolvedValue({ count: 1 });
-    const r = await uploadFace("s1", "LEFT", vec512());
+    const r = await uploadFace("s1", "FRONT_1", vec512());
     expect(r).toBeDefined();
   });
 
   it("throws STUDENT_NOT_FOUND when missing", async () => {
     mockFindUnique.mockResolvedValue(null);
-    await expect(uploadFace("x", "CENTER", vec192())).rejects.toThrow("STUDENT_NOT_FOUND");
+    await expect(uploadFace("x", "FRONT_1", vec192())).rejects.toThrow("STUDENT_NOT_FOUND");
   });
 });
 
@@ -92,20 +98,14 @@ describe("uploadFace", () => {
 describe("batchUploadFaces", () => {
   beforeEach(resetMocks);
 
-  it("uploads all 5 poses", async () => {
+  it("uploads 10 FRONT frames", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
-    mockPrisma.$transaction.mockImplementation(async (txn: any[]) => txn);
+    mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
     mockExecuteRaw.mockResolvedValue({ count: 1 });
 
-    const vectors = [
-      { pose: "CENTER", vector: vec512() },
-      { pose: "LEFT", vector: vec512() },
-      { pose: "RIGHT", vector: vec512() },
-      { pose: "UP", vector: vec512() },
-      { pose: "DOWN", vector: vec512() },
-    ];
+    const vectors = Array.from({ length: 10 }, (_, i) => ({ pose: `FRONT_${i + 1}`, vector: vec512() }));
     const r = await batchUploadFaces("s1", vectors);
-    expect(r).toEqual({ uploaded: 5 });
+    expect(r).toEqual({ uploaded: 10 });
   });
 
   it("rejects empty vectors array", async () => {
@@ -113,9 +113,9 @@ describe("batchUploadFaces", () => {
     await expect(batchUploadFaces("s1", [])).rejects.toThrow("EMPTY_VECTORS");
   });
 
-  it("rejects invalid pose", async () => {
+  it("rejects invalid pose (legacy CENTER not allowed)", async () => {
     mockFindUnique.mockResolvedValue({ id: "s1", name: "T" });
-    await expect(batchUploadFaces("s1", [{ pose: "BAD", vector: vec512() }])).rejects.toThrow("INVALID_POSE");
+    await expect(batchUploadFaces("s1", [{ pose: "CENTER", vector: vec512() }])).rejects.toThrow("INVALID_POSE");
   });
 });
 

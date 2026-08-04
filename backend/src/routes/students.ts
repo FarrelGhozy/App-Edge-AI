@@ -115,7 +115,7 @@ export const studentRoutes = new Elysia()
     await audit(admin, { action: "DELETE", entityType: "STUDENTS", entityId: id });
     return { success: true };
   })
-  // ─── Upload single pose vector ───
+  // ─── Upload single face vector (FRONT_N, #132) ───
   .post("/api/students/:id/face", async ({ params: { id }, body, admin }) => {
     try {
       await uploadFace(id, body.pose, body.vector);
@@ -159,7 +159,7 @@ export const studentRoutes = new Elysia()
       );
     }
   }, { body: uploadFaceSchema })
-  // ─── Upload all 5 pose vectors in batch ───
+  // ─── Upload batch face vectors (FRONT_1..FRONT_N, #132) ───
   .post("/api/students/:id/faces", async ({ params: { id }, body, admin }) => {
     try {
       const result = await batchUploadFaces(id, body.vectors);

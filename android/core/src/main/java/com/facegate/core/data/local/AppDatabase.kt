@@ -22,7 +22,7 @@ import com.facegate.core.data.local.converter.Converters
         AttendanceLogEntity::class,
         CampusRuleEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -74,6 +74,36 @@ abstract class AppDatabase : RoomDatabase() {
                 if (hasClientId && !hasClientIdSnake) {
                     db.execSQL("ALTER TABLE attendance_logs RENAME COLUMN clientId TO client_id")
                 }
+            }
+        }
+
+        // #132/#133: FaceVector PK [studentId, pose] → id auto-increment agar bisa
+        // menampung banyak vektor FRONT_1..FRONT_N per santri (registrasi video
+        // 10 detik). Ubah primary key TIDAK bisa via ALTER TABLE (Room validasi
+        // skema) → pola create-new + copy + drop + rename. Kolom `vector`
+        // disimpan sebagai BLOB (FloatArray ↔ ByteArray via Converters), sama
+        // dengan skema lama, sehingga data vektor tersalin apa adanya.
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS face_vectors_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        studentId TEXT NOT NULL,
+                        pose TEXT NOT NULL,
+                        vector BLOB NOT NULL,
+                        updatedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO face_vectors_new (studentId, pose, vector, updatedAt)
+                    SELECT studentId, pose, vector, updatedAt FROM face_vectors
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE face_vectors")
+                db.execSQL("ALTER TABLE face_vectors_new RENAME TO face_vectors")
             }
         }
     }

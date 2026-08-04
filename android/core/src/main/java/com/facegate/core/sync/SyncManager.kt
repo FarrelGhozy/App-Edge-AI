@@ -109,11 +109,16 @@ class SyncManager @Inject constructor(
         if (response.isSuccessful && response.body() != null) {
             val faceSync = response.body()!!
             if (faceSync.data.isNotEmpty()) {
-                // Upsert idempoten (REPLACE conflict strategy) — NO deleteAll()
-                // before insert, otherwise unchanged vectors get wiped and the
-                // in-RAM index is lost (issue #78).
-                val vectors = faceSync.data.map { it.toEntity() }
-                faceVectorDao.insertAll(vectors)
+                // #133: FaceVector PK baru id-auto → REPLACE conflict strategy
+                // TIDAK bisa dipakai sebagai upsert (selalu insert baru → duplikasi
+                // antar sync). Pola replace-set per santri: hapus vektor santri yang
+                // ada di delta, lalu insert vektor-vektornya (sama pola backend).
+                // Santri lain tidak disentuh (#78/#112).
+                val facesByStudent = faceSync.data.groupBy { it.studentId }
+                facesByStudent.forEach { (sid, dtos) ->
+                    faceVectorDao.deleteByStudentId(sid)
+                    faceVectorDao.insertAll(dtos.map { it.toEntity() })
+                }
 
                 // Save student data from joined query (upsert)
                 val students = faceSync.data.mapNotNull { dto ->

@@ -31,7 +31,8 @@ export const syncRoutes = new Elysia()
         s.academic_year
       FROM face_vectors fv
       JOIN students s ON s.id = fv.student_id
-      WHERE $1::timestamptz IS NULL OR fv.updated_at > $1::timestamptz`,
+      WHERE $1::timestamptz IS NULL OR fv.updated_at > $1::timestamptz
+      ORDER BY fv.id`,
       since ? new Date(since) : null
     );
 

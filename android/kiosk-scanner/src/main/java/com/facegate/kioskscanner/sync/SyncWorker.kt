@@ -194,20 +194,24 @@ class SyncWorker @AssistedInject constructor(
                 val faces = syncData.data
 
                 if (faces.isNotEmpty()) {
-                    // #112: JANGAN deleteAll() dulu! Response adalah DELTA sejak
-                    // watermark — menghapus semua vektor lalu insert delta saja
-                    // membuat vektor santri lain HILANG (index mengecil, wajah
-                    // santri yang tidak berubah tak lagi dikenali). Upsert
-                    // (REPLACE) idempoten — samakan dengan SyncManager.
-                    val faceEntities = faces.map { dto ->
-                        com.facegate.core.data.local.entity.FaceVectorEntity(
-                            studentId = dto.studentId,
-                            pose = dto.pose,
-                            vector = dto.vector.toFloatArray()
-                        )
+                    // #133: FaceVector PK baru id-auto → REPLACE conflict strategy
+                    // TIDAK bisa dipakai sebagai upsert (id=0 selalu insert baru →
+                    // duplikasi antar sync). Pola replace-set per santri: hapus semua
+                    // vektor santri yang ada di delta, lalu insert vektor-vektornya
+                    // (sama dengan replace per-student di backend batchUploadFaces).
+                    // Santri yang TIDAK ada di delta tidak disentuh (#112).
+                    val facesByStudent = faces.groupBy { it.studentId }
+                    facesByStudent.forEach { (sid, dtos) ->
+                        faceVectorDao.deleteByStudentId(sid)
+                        val entities = dtos.map { dto ->
+                            com.facegate.core.data.local.entity.FaceVectorEntity(
+                                studentId = dto.studentId,
+                                pose = dto.pose,
+                                vector = dto.vector.toFloatArray()
+                            )
+                        }
+                        faceVectorDao.insertAll(entities)
                     }
-
-                    faceVectorDao.insertAll(faceEntities)
 
                     // Save student data from joined query
                     val studentEntities = faces.mapNotNull { dto ->
@@ -234,7 +238,7 @@ class SyncWorker @AssistedInject constructor(
                     faceMatcher.buildIndex(allLocal.map { it.toIndexEntry() })
                     Log.d(TAG, "Face index rebuilt: ${allLocal.size} vectors for ${allLocal.map { it.studentId }.distinct().size} students (from full store)")
 
-                    Log.d(TAG, "Synced ${faces.size} faces + ${studentEntities.size} students")
+                    Log.d(TAG, "Synced ${faces.size} faces for ${facesByStudent.size} students + ${studentEntities.size} students")
                 }
 
                 val s = syncData.since
