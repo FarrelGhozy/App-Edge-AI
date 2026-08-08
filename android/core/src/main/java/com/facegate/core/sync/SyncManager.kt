@@ -108,6 +108,13 @@ class SyncManager @Inject constructor(
         val response = apiService.syncFaces(since)
         if (response.isSuccessful && response.body() != null) {
             val faceSync = response.body()!!
+            // #137: buang vektor dimensi lama (192-d era TFLite) dari DB lokal —
+            // kalau ikut di-index, dotProduct 512×192 crash → match selalu gagal.
+            faceVectorDao.deleteInvalidDimension(512 * 4)
+            // #138: buang vektor & student lokal yang sudah tidak ada di server
+            // (student dihapus / wajah dihapus di admin → vektor lama nyangkut →
+            // jadi "runner-up" dari wajah sama → gap kecil → match ditolak).
+            val pruned = pruneStaleLocalData()
             if (faceSync.data.isNotEmpty()) {
                 // #133: FaceVector PK baru id-auto → REPLACE conflict strategy
                 // TIDAK bisa dipakai sebagai upsert (selalu insert baru → duplikasi
@@ -140,6 +147,11 @@ class SyncManager @Inject constructor(
                 // partial delta, so the index must reflect all cached vectors.
                 val allLocal = faceVectorDao.getAll()
                 faceMatcher.buildIndex(allLocal.map { it.toIndexEntry() })
+            } else if (pruned) {
+                // Delta kosong tapi prune menghapus vektor stale → index perlu
+                // dibangun ulang supaya vektor yang dihapus tidak ikut di-match.
+                val allLocal = faceVectorDao.getAll()
+                faceMatcher.buildIndex(allLocal.map { it.toIndexEntry() })
             }
 
             // Advance watermark to the server's max(updated_at), never to "" —
@@ -161,6 +173,61 @@ class SyncManager @Inject constructor(
             return rules.size
         }
         return 0
+    }
+
+    /**
+     * #138: bersihkan data lokal (student + face vector) yang tidak ada lagi
+     * di server. Sinkronisasi hanya menambah/memperbarui (delta by updated_at);
+     * data yang DIHAPUS di server tidak pernah muncul di delta → nyangkut
+     * selamanya di kiosk. Vektor stale dari wajah yang sama menjadi runner-up
+     * dengan gap kecil → adaptive threshold naik → wajah asli ditolak.
+     *
+     * Kasus:
+     * - Student dihapus di admin → hapus row student + vektornya.
+     * - Wajah dihapus di admin (student tetap) → hapus vektornya (cek faceRegistered).
+     *
+     * @return true jika ada vektor lokal yang dihapus (index perlu rebuild).
+     */
+    private suspend fun pruneStaleLocalData(): Boolean {
+        try {
+            // id → faceRegistered (apakah student masih punya wajah di server)
+            val serverFaces = mutableMapOf<String, Boolean>()
+            var page = 1
+            while (true) {
+                val resp = apiService.getStudents(page = page, pageSize = 100)
+                val body = resp.body()
+                if (!resp.isSuccessful || body == null || body.data.isEmpty()) break
+                for (s in body.data) serverFaces[s.id] = s.faceRegistered
+                if (body.total <= page * body.pageSize) break
+                page++
+            }
+            if (serverFaces.isEmpty()) return false
+
+            val local = studentDao.getAllActive()
+            var prunedStudents = 0
+            var prunedFaces = 0
+            for (student in local) {
+                val registered = serverFaces[student.id]
+                if (registered == null) {
+                    // Student tidak ada di server → hapus vektor + row
+                    prunedFaces += faceVectorDao.getByStudentId(student.id).size
+                    faceVectorDao.deleteByStudentId(student.id)
+                    studentDao.deleteById(student.id)
+                    prunedStudents++
+                } else if (!registered) {
+                    // Student ada tapi wajahnya sudah dihapus di admin → hapus vektor lokal
+                    prunedFaces += faceVectorDao.getByStudentId(student.id).size
+                    faceVectorDao.deleteByStudentId(student.id)
+                }
+            }
+            if (prunedFaces > 0) {
+                android.util.Log.w("SyncManager", "Pruned $prunedStudents stale students + $prunedFaces stale face vectors from local cache")
+            }
+            return prunedFaces > 0
+        } catch (e: Exception) {
+            android.util.Log.w("SyncManager", "Prune stale data failed: ${e.message}")
+            return false
+        }
     }
 
     suspend fun checkSyncRequested(deviceId: String? = null): Boolean = withContext(Dispatchers.IO) {

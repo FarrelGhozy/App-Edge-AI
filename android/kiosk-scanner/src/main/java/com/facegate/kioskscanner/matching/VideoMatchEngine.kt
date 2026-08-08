@@ -339,13 +339,9 @@ class VideoMatchEngine @Inject constructor(
         }
     }
 
-    /** Crop face region with margin. */
+    /** Crop wajah dengan bentuk kotak + margin — wajib square supaya resize
+     *  112×112 di embedder tidak men-distorsi wajah (InsightFace convention). */
     private fun cropFace(bitmap: Bitmap, boundingBox: Rect): Bitmap {
-        val margin = (boundingBox.width() * 0.3f).toInt()
-        val x = (boundingBox.left - margin).coerceAtLeast(0)
-        val y = (boundingBox.top - margin).coerceAtLeast(0)
-        val w = (boundingBox.width() + margin * 2).coerceAtMost(bitmap.width - x)
-        val h = (boundingBox.height() + margin * 2).coerceAtMost(bitmap.height - y)
-        return Bitmap.createBitmap(bitmap, x, y, w, h)
+        return FaceCropUtils.cropSquare(bitmap, boundingBox)
     }
 }

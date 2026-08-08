@@ -11,6 +11,7 @@ import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.BatchUploadFacesRequest
 import com.facegate.core.data.remote.dto.PoseVectorEntry
 import com.facegate.core.face.FaceDetectionResult
+import com.facegate.core.face.FaceCropUtils
 import com.facegate.core.face.FaceDetectorWrapper
 import com.facegate.core.face.FaceEmbedderProvider
 import com.facegate.core.face.LivenessDetector
@@ -123,14 +124,25 @@ class FaceRegisterViewModel @Inject constructor(
 
     fun onFrameCaptured(imageProxy: ImageProxy, studentIdParam: String?) {
         if (isProcessing) return
+        isProcessing = true
+        try {
+            onFrameCapturedInternal(imageProxy, studentIdParam)
+        } catch (e: Exception) {
+            // Satu frame error tidak boleh mengunci isProcessing selamanya —
+            // kalau tidak, frame berikutnya semua di-drop → frameBuffer < MIN_FRAMES.
+            Log.e(TAG, "onFrameCaptured error", e)
+        } finally {
+            isProcessing = false
+        }
+    }
+
+    private fun onFrameCapturedInternal(imageProxy: ImageProxy, studentIdParam: String?) {
         this.studentId = studentIdParam ?: this.studentId
 
         val currentStep = _state.value.step
         if (currentStep != FaceRegisterStep.DETECTING &&
             currentStep != FaceRegisterStep.RECORDING
         ) return
-
-        isProcessing = true
 
         val mediaImage = imageProxy.image
         val rotation = imageProxy.imageInfo.rotationDegrees
@@ -149,7 +161,6 @@ class FaceRegisterViewModel @Inject constructor(
                     currentPitch = 0f
                 )
             }
-            isProcessing = false
             return
         }
 
@@ -158,7 +169,6 @@ class FaceRegisterViewModel @Inject constructor(
 
         val bitmap = imageProxyToBitmap(imageProxy)
         if (bitmap == null) {
-            isProcessing = false
             return
         }
 
@@ -190,16 +200,21 @@ class FaceRegisterViewModel @Inject constructor(
                 )
             }
             bitmap.recycle()
-            isProcessing = false
             return
         }
 
         // ─── RECORDING: kumpulkan frame yang lolos kualitas ───
         if (currentStep == FaceRegisterStep.RECORDING) {
             val now = System.currentTimeMillis()
+            // #139: frame yang in-flight setelah countdown 10 detik selesai harus
+            // DIBUANG — jangan menambah frame & jangan menyentuh state. Kalau
+            // tidak, frame ini bisa menimpa step PREVIEW → rekam "lanjut terus".
+            if (now - recordingStartTime > RECORDING_DURATION_MS) {
+                bitmap.recycle()
+                return
+            }
             if (now - lastCaptureTime < QUALITY_INTERVAL_MS) {
                 bitmap.recycle()
-                isProcessing = false
                 return // throttle
             }
 
@@ -212,8 +227,11 @@ class FaceRegisterViewModel @Inject constructor(
                 ))
                 lastCaptureTime = now
                 val progress = ((now - recordingStartTime).toFloat() / RECORDING_DURATION_MS).coerceIn(0f, 1f)
+                // #139: JANGAN set `step = RECORDING` di sini — jalur frame boleh
+                // hanya update progress/message. Menimpa step dari thread analyzer
+                // bisa memulihkan RECORDING setelah finishRecording() → countdown
+                // sudah mati → frame terkumpul tanpa henti.
                 _state.value = _state.value.copy(
-                    step = FaceRegisterStep.RECORDING,
                     recordingProgress = progress,
                     message = "Rekam... (${frameBuffer.size} frame)"
                 )
@@ -222,8 +240,6 @@ class FaceRegisterViewModel @Inject constructor(
                 bitmap.recycle()
             }
         }
-
-        isProcessing = false
     }
 
     /** Mulai window rekam 10 detik — job countdown otomatis. */
@@ -253,11 +269,15 @@ class FaceRegisterViewModel @Inject constructor(
     /** 10 detik selesai → pilih frame terbaik. */
     private fun finishRecording() {
         if (frameBuffer.size < MIN_FRAMES) {
-            // Terlalu sedikit frame layak → minta ulang
+            // Terlalu sedikit frame layak → STOP (jangan kembali ke DETECTING:
+            // kalau wajah masih terlihat, DETECTING langsung auto-start rekam
+            // lagi → loop rekam 10 detik tanpa henti). Tampilkan error dgn
+            // tombol "Coba Lagi" supaya user aksi manual.
+            val collected = frameBuffer.size
             recycleBuffer()
             _state.value = _state.value.copy(
-                step = FaceRegisterStep.DETECTING,
-                message = "Frame terlalu sedikit ($MIN_FRAMES minimum), coba lagi dengan pencahayaan cukup",
+                step = FaceRegisterStep.ERROR,
+                error = "Frame terlalu sedikit ($collected/$MIN_FRAMES minimum). Pastikan pencahayaan cukup dan wajah tidak bergerak selama 10 detik.",
                 recordingProgress = 0f
             )
             return
@@ -273,8 +293,8 @@ class FaceRegisterViewModel @Inject constructor(
             if (selected.size < MIN_FRAMES) {
                 recycleBuffer()
                 _state.value = _state.value.copy(
-                    step = FaceRegisterStep.DETECTING,
-                    message = "Tidak cukup frame berkualitas, coba lagi",
+                    step = FaceRegisterStep.ERROR,
+                    error = "Tidak cukup frame berkualitas setelah seleksi, coba lagi dengan pencahayaan cukup",
                     recordingProgress = 0f
                 )
                 return@launch
@@ -427,14 +447,10 @@ class FaceRegisterViewModel @Inject constructor(
         recycleBuffer()
     }
 
-    /** Crop face region dari bitmap menggunakan bounding box, dengan margin. */
+    /** Crop wajah dengan bentuk kotak + margin — wajib square supaya resize
+     *  112×112 di embedder tidak men-distorsi wajah (InsightFace convention). */
     private fun cropFace(bitmap: Bitmap, boundingBox: Rect): Bitmap {
-        val margin = (boundingBox.width() * 0.3f).toInt()
-        val x = (boundingBox.left - margin).coerceAtLeast(0)
-        val y = (boundingBox.top - margin).coerceAtLeast(0)
-        val w = (boundingBox.width() + margin * 2).coerceAtMost(bitmap.width - x)
-        val h = (boundingBox.height() + margin * 2).coerceAtMost(bitmap.height - y)
-        return Bitmap.createBitmap(bitmap, x, y, w, h)
+        return FaceCropUtils.cropSquare(bitmap, boundingBox)
     }
 
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {

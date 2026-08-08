@@ -41,8 +41,17 @@ class FaceMatcher(
     private var faceIndex: List<IndexEntry> = emptyList()
 
     override fun buildIndex(vectors: List<IndexEntry>) {
+        // #137: lewati vektor berdimensi salah (mis. 192-d era TFLite lama).
+        // Query scan = 512-d; jika entry 192-d masuk index, dotProduct 512×192
+        // → IndexOutOfBoundsException di SETIAP match → selalu "Wajah tidak dikenal".
+        // Dimensi target = dimensi terbesar di store (campuran lama+baru → pakai baru).
+        val targetDim = vectors.maxOfOrNull { it.vector.size } ?: 0
         val built = ArrayList<IndexEntry>(vectors.size)
         for (entry in vectors) {
+            if (entry.vector.size != targetDim) {
+                Log.w(TAG, "Skip vector student=${entry.studentId} dim=${entry.vector.size} (target $targetDim)")
+                continue
+            }
             val normalized = if (entry.vector.isL2Normalized()) entry.vector
                              else normalize(entry.vector.clone())
             built.add(entry.copy(vector = normalized))
@@ -51,7 +60,7 @@ class FaceMatcher(
         // complete one — never a half-built index.
         faceIndex = built
         val studentCount = built.map { it.studentId }.distinct().size
-        Log.d(TAG, "Index built: ${built.size} vectors for $studentCount students, dim=${vectors.firstOrNull()?.vector?.size ?: 0}")
+        Log.d(TAG, "Index built: ${built.size} vectors for $studentCount students, dim=$targetDim")
     }
 
     override fun clear() {
@@ -154,6 +163,9 @@ class FaceMatcher(
     override fun size(): Int = faceIndex.size
 
     private fun dotProduct(a: FloatArray, b: FloatArray): Float {
+        // #137: defensive — dimensi beda (mis. 192-d lama vs 512-d baru) →
+        // bukan match (skor 0), bukan crash.
+        if (a.size != b.size) return 0f
         var sum = 0f
         for (i in a.indices) {
             sum += a[i] * b[i]

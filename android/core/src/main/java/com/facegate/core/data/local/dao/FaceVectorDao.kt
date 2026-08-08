@@ -34,4 +34,10 @@ interface FaceVectorDao {
 
     @Query("SELECT COUNT(DISTINCT studentId) FROM face_vectors")
     suspend fun countDistinctStudents(): Int
+
+    // #137: hapus vektor berdimensi lama (mis. 192-d era TFLite) yang masih
+    // nyangkut di DB lokal. Kolom `vector` disimpan sebagai ByteArray → byte
+    // length di SQLite = dim * 4.
+    @Query("DELETE FROM face_vectors WHERE length(vector) != :expectedBytes")
+    suspend fun deleteInvalidDimension(expectedBytes: Int)
 }

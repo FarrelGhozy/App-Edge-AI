@@ -48,7 +48,8 @@ class ScannerViewModel @Inject constructor(
     private val attendanceLogDao: AttendanceLogDao,
     private val devicePreferences: DevicePreferences,
     private val voiceFeedback: VoiceFeedback,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val faceVectorDao: com.facegate.core.data.local.dao.FaceVectorDao
 ) : ViewModel() {
 
     companion object {
@@ -452,7 +453,10 @@ class ScannerViewModel @Inject constructor(
                 val deviceId = devicePreferences.getDeviceId() ?: "unknown"
                 val result = syncManager.syncAll(deviceId)
                 if (result.success) {
-                    _syncStatus.value = "OK: ${result.facesDownloaded} wajah, ${result.rulesDownloaded} aturan"
+                    // #137: "wajah baru" (delta) vs "total tersimpan" — user sering
+                    // bingung melihat 0 saat vektor sudah pernah di-download.
+                    val total = faceVectorDao.count()
+                    _syncStatus.value = "OK: ${result.facesDownloaded} wajah baru, ${total} tersimpan, ${result.rulesDownloaded} aturan"
                 } else {
                     _syncStatus.value = "Gagal: ${result.error ?: "unknown"}"
                 }

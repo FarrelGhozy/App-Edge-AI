@@ -191,6 +191,13 @@ class SyncWorker @AssistedInject constructor(
 
             if (response.isSuccessful && response.body() != null) {
                 val syncData = response.body()!!
+                // #137: buang vektor dimensi lama (192-d era TFLite) dari DB
+                // lokal — kalau ikut di-index, dotProduct 512×192 crash → match
+                // selalu gagal ("Wajah tidak dikenal").
+                faceVectorDao.deleteInvalidDimension(512 * 4)
+                // #138: buang vektor & student lokal yang sudah tidak ada di server
+                // (student dihapus / wajah dihapus di admin).
+                val pruned = pruneStaleLocalData()
                 val faces = syncData.data
 
                 if (faces.isNotEmpty()) {
@@ -239,6 +246,11 @@ class SyncWorker @AssistedInject constructor(
                     Log.d(TAG, "Face index rebuilt: ${allLocal.size} vectors for ${allLocal.map { it.studentId }.distinct().size} students (from full store)")
 
                     Log.d(TAG, "Synced ${faces.size} faces for ${facesByStudent.size} students + ${studentEntities.size} students")
+                } else if (pruned) {
+                    // Delta kosong tapi prune menghapus vektor stale → rebuild index.
+                    val allLocal = faceVectorDao.getAll()
+                    faceMatcher.buildIndex(allLocal.map { it.toIndexEntry() })
+                    Log.d(TAG, "Face index rebuilt after prune: ${allLocal.size} vectors")
                 }
 
                 val s = syncData.since
@@ -275,6 +287,60 @@ class SyncWorker @AssistedInject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "syncRules failed", e)
+        }
+    }
+
+    /**
+     * #138: bersihkan data lokal (student + face vector) yang tidak ada lagi
+     * di server. Delta sync tidak pernah menghapus — student yang dihapus di
+     * server nyangkut di kiosk dan jadi "runner-up" dari wajah yang sama
+     * (gap kecil → adaptive threshold naik → wajah asli ditolak).
+     *
+     * Kasus:
+     * - Student dihapus di admin → hapus row student + vektornya.
+     * - Wajah dihapus di admin (student tetap) → hapus vektornya (cek faceRegistered).
+     *
+     * @return true jika ada vektor lokal yang dihapus (index perlu rebuild).
+     */
+    private suspend fun pruneStaleLocalData(): Boolean {
+        try {
+            // id → faceRegistered (apakah student masih punya wajah di server)
+            val serverFaces = mutableMapOf<String, Boolean>()
+            var page = 1
+            while (true) {
+                val resp = apiService.getStudents(page = page, pageSize = 100)
+                val body = resp.body()
+                if (!resp.isSuccessful || body == null || body.data.isEmpty()) break
+                for (s in body.data) serverFaces[s.id] = s.faceRegistered
+                if (body.total <= page * body.pageSize) break
+                page++
+            }
+            if (serverFaces.isEmpty()) return false
+
+            val local = studentDao.getAllActive()
+            var prunedStudents = 0
+            var prunedFaces = 0
+            for (student in local) {
+                val registered = serverFaces[student.id]
+                if (registered == null) {
+                    // Student tidak ada di server → hapus vektor + row
+                    prunedFaces += faceVectorDao.getByStudentId(student.id).size
+                    faceVectorDao.deleteByStudentId(student.id)
+                    studentDao.deleteById(student.id)
+                    prunedStudents++
+                } else if (!registered) {
+                    // Student ada tapi wajahnya sudah dihapus di admin → hapus vektor lokal
+                    prunedFaces += faceVectorDao.getByStudentId(student.id).size
+                    faceVectorDao.deleteByStudentId(student.id)
+                }
+            }
+            if (prunedFaces > 0) {
+                Log.w(TAG, "Pruned $prunedStudents stale students + $prunedFaces stale face vectors from local cache")
+            }
+            return prunedFaces > 0
+        } catch (e: Exception) {
+            Log.w(TAG, "Prune stale data failed: ${e.message}")
+            return false
         }
     }
 
