@@ -106,9 +106,13 @@ class VideoMatchEngine @Inject constructor(
      * EAR-based blink liveness check (same as existing LivenessDetector).
      */
     fun checkLiveness(detection: FaceDetectionResult, currentTimeMs: Long): Boolean {
-        // Uses existing LivenessDetector with EAR blink logic
-        // This requires FaceDetectionResult which uses ML Kit contours
-        // For ONNX-only mode, landmarks from RetinaFace (5 keypoints) can approximate EAR
+        // TODO(EAR-RetinaFace): Jalur ini masih memakai ML Kit contours (FaceDetectionResult).
+        // Pipeline aktif (ONNX-only) tidak punya eye contours — EAR blink TIDAK berjalan di sini;
+        // anti-spoof MiniFASNet (VideoMatchEngine line ~199) adalah liveness defense utama.
+        // Rencana: hitung EAR dari 5 landmark RetinaFace (kiri/kanan mata = landmark idx 0,1;
+        // hidung = 2; mulut = 3,4) — perlu rasio eksperimental karena landmark mata
+        // RetinaFace adalah titik sudut, bukan kontur penuh seperti ML Kit.
+        // Sementara ini kiosk mengandalkan SPOOF_REJECTS_REQUIRED=1 di VideoMatchEngine.
         return livenessDetector.checkLivenessLegacy(
             leftEyeContour = detection.leftEyeContour,
             rightEyeContour = detection.rightEyeContour,

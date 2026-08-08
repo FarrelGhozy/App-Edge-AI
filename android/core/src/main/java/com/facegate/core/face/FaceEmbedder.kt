@@ -120,8 +120,13 @@ class FaceEmbedder(private val context: Context) {
 
     /**
      * Average multiple embeddings into one template.
-     * Useful for multi-frame registration: embed 5 frames → centroid → store.
+     *
+     * @deprecated Enrollment kini memakai desain #132: video 10 detik → 5-10 frame terpilih
+     * → vektor `FRONT_1..FRONT_N` (satu embedding per frame, bukan centroid per pose).
+     * Fungsi ini tidak dipakai di produksi — dipertahankan hanya karena test unit
+     * (FaceEmbedderTest / FaceMatcherTest) masih mereferensikannya.
      */
+    @Deprecated("Enrollment memakai FRONT_1..N multi-frame (#132) — averaging per pose tidak dipakai")
     fun averageEmbeddings(embeddings: Array<FloatArray>): FloatArray {
         if (embeddings.isEmpty()) return FloatArray(embeddingDim)
         val result = FloatArray(embeddingDim)
