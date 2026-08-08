@@ -3,6 +3,7 @@ package com.facegate.adminapp.rules
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.remote.ApiService
+import com.facegate.core.data.remote.dto.RuleRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,13 +76,24 @@ class RuleFormViewModel @Inject constructor(
         _uiState.value = s.copy(isSubmitting = true, error = null)
         viewModelScope.launch {
             try {
-                val body = mapOf<String, Any>(
-                    "dayOfWeek" to s.dayOfWeek,
-                    "startTime" to s.startTime.trim(),
-                    "endTime" to s.endTime.trim(),
-                    "isRestricted" to s.isRestricted,
-                    "studyProgram" to (s.studyProgram.ifBlank { "" }),
-                    "academicYear" to (s.academicYear.ifBlank { "" })
+                // #137: appliesToAll HARUS dikirim eksplisit. Backend default true,
+                // jadi tanpa field ini rule dengan filter prodi/angkatan tetap
+                // berlaku untuk SEMUA santri.
+                val studyProgram = s.studyProgram.trim().ifBlank { null }
+                val academicYear = s.academicYear.trim().ifBlank { null }
+                val appliesToAll = studyProgram == null && academicYear == null
+
+                // #137: pakai RuleRequest (@Serializable) — Map<String, Any> tidak
+                // bisa diserialisasi kotlinx → createRule/updateRule selalu gagal
+                // dengan "Gagal terhubung ke server" (exception sebelum request).
+                val body = RuleRequest(
+                    dayOfWeek = s.dayOfWeek,
+                    startTime = s.startTime.trim(),
+                    endTime = s.endTime.trim(),
+                    isRestricted = s.isRestricted,
+                    appliesToAll = appliesToAll,
+                    studyProgram = studyProgram,
+                    academicYear = academicYear
                 )
                 val response = if (ruleId != null) {
                     apiService.updateRule(ruleId, body)

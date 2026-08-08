@@ -193,7 +193,7 @@ fun DashboardScreen(
                                 title = "Absensi",
                                 subtitle = "Riwayat scan wajah",
                                 icon = Icons.Default.Fingerprint,
-                                accentColor = Teal40,
+                                accentColor = Sky40,
                                 onClick = { navController.navigate(Screen.Attendance.route) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -209,7 +209,7 @@ fun DashboardScreen(
                                 title = "Izin",
                                 subtitle = "Kelola izin keluar",
                                 icon = Icons.Default.Description,
-                                accentColor = Amber40,
+                                accentColor = Deep40,
                                 onClick = { navController.navigate(Screen.Permits.route) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -243,6 +243,31 @@ fun DashboardScreen(
                                 icon = Icons.Default.Settings,
                                 accentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 onClick = { navController.navigate(Screen.Settings.route) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // ── Aturan & Libur ──
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            MenuCard(
+                                title = "Aturan Jam",
+                                subtitle = "Jam terlarang keluar",
+                                icon = Icons.Default.Schedule,
+                                accentColor = Sky40,
+                                onClick = { navController.navigate(Screen.Rules.route) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            MenuCard(
+                                title = "Hari Libur",
+                                subtitle = "Kelola hari libur",
+                                icon = Icons.Default.CalendarToday,
+                                accentColor = WarningOrange,
+                                onClick = { navController.navigate(Screen.Holidays.route) },
                                 modifier = Modifier.weight(1f)
                             )
                         }

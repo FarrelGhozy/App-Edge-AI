@@ -2,36 +2,36 @@ package com.facegate.adminapp.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ── Primary: Indigo ──
-val Indigo10 = Color(0xFF1A0550)
-val Indigo20 = Color(0xFF2E1B6E)
-val Indigo30 = Color(0xFF432B8D)
-val Indigo40 = Color(0xFF5B3FAF)
-val Indigo80 = Color(0xFFC8BDFF)
-val Indigo90 = Color(0xFFE6DEFF)
+// ── Primary: Blue (Material Blue 800) ──
+val Blue10 = Color(0xFF001B3D)
+val Blue20 = Color(0xFF0D47A1)
+val Blue30 = Color(0xFF0F5FBF)
+val Blue40 = Color(0xFF1565C0)   // primary
+val Blue80 = Color(0xFF90CAF9)
+val Blue90 = Color(0xFFD6E4FF)
 
-// ── Secondary: Teal ──
-val Teal10 = Color(0xFF00201F)
-val Teal20 = Color(0xFF003736)
-val Teal30 = Color(0xFF004F4E)
-val Teal40 = Color(0xFF006966)
-val Teal80 = Color(0xFFA7F0EC)
-val Teal90 = Color(0xFFB2DFDB)
+// ── Secondary: Sky Blue ──
+val Sky10 = Color(0xFF00344F)
+val Sky20 = Color(0xFF01579B)
+val Sky30 = Color(0xFF0277BD)
+val Sky40 = Color(0xFF0288D1)   // secondary
+val Sky80 = Color(0xFF81D4FA)
+val Sky90 = Color(0xFFE1F5FE)
 
-// ── Tertiary: Amber/Warm ──
-val Amber10 = Color(0xFF261900)
-val Amber20 = Color(0xFF3F2B00)
-val Amber30 = Color(0xFF5A3F00)
-val Amber40 = Color(0xFF765500)
-val Amber80 = Color(0xFFFFDF9D)
-val Amber90 = Color(0xFFFFEFC5)
+// ── Tertiary: Deep Blue ──
+val Deep10 = Color(0xFF0A2A4A)
+val Deep20 = Color(0xFF123C63)
+val Deep30 = Color(0xFF1E4E7B)
+val Deep40 = Color(0xFF245A8C)  // tertiary
+val Deep80 = Color(0xFFB3D4F0)
+val Deep90 = Color(0xFFD9ECFB)
 
-// ── Neutral ──
-val Neutral10 = Color(0xFF1C1B1F)
-val Neutral20 = Color(0xFF313033)
-val Neutral90 = Color(0xFFE6E1E5)
-val Neutral95 = Color(0xFFF4EFF4)
-val Neutral99 = Color(0xFFFFFBFE)
+// ── Neutral (cool gray, selaras biru) ──
+val Neutral10 = Color(0xFF1B1F24)
+val Neutral20 = Color(0xFF33383F)
+val Neutral90 = Color(0xFFE9EDF2)
+val Neutral95 = Color(0xFFF4F7FA)
+val Neutral99 = Color(0xFFFFFFFF)  // pure white
 
 // ── Status ──
 val SuccessGreen = Color(0xFF2E7D32)

@@ -1,5 +1,6 @@
 package com.facegate.adminapp.rules
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,8 +30,35 @@ fun RuleListScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val pullRefreshState = rememberPullToRefreshState()
+    var ruleToDelete by remember { mutableStateOf<CampusRuleDto?>(null) }
 
     LaunchedEffect(Unit) { viewModel.loadRules() }
+
+    // Konfirmasi hapus
+    ruleToDelete?.let { rule ->
+        AlertDialog(
+            onDismissRequest = { ruleToDelete = null },
+            icon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Hapus aturan?") },
+            text = {
+                Text(
+                    "${dayNames.getOrElse(rule.dayOfWeek) { "?" }} " +
+                        "${rule.startTime} - ${rule.endTime}"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteRule(rule)
+                        ruleToDelete = null
+                    }
+                ) { Text("Hapus", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { ruleToDelete = null }) { Text("Batal") }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -74,7 +102,13 @@ fun RuleListScreen(
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
                         items(state.rules) { rule ->
-                            RuleItem(rule)
+                            RuleItem(
+                                rule = rule,
+                                onClick = {
+                                    navController.navigate(Screen.RuleForm.createRoute(rule.id))
+                                },
+                                onDelete = { ruleToDelete = rule }
+                            )
                         }
                     }
                 }
@@ -86,11 +120,16 @@ fun RuleListScreen(
 private val dayNames = arrayOf("Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu")
 
 @Composable
-fun RuleItem(rule: CampusRuleDto) {
+fun RuleItem(
+    rule: CampusRuleDto,
+    onClick: () -> Unit = {},
+    onDelete: () -> Unit = {}
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -98,7 +137,7 @@ fun RuleItem(rule: CampusRuleDto) {
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 16.dp, bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
@@ -135,6 +174,17 @@ fun RuleItem(rule: CampusRuleDto) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (!rule.appliesToAll) {
+                    val scope = listOfNotNull(rule.studyProgram, rule.academicYear).joinToString(" · ")
+                    if (scope.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "Khusus: $scope",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(8.dp))
             if (rule.isRestricted) {
@@ -146,6 +196,13 @@ fun RuleItem(rule: CampusRuleDto) {
                 StatusBadge(
                     text = "Bebas",
                     color = Color(0xFF4CAF50)
+                )
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Default.Delete,
+                    "Hapus",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

@@ -90,13 +90,16 @@ interface ApiService {
     suspend fun getRules(): Response<List<CampusRuleDto>>
 
     @POST("api/rules")
-    suspend fun createRule(@Body body: Map<String, Any>): Response<Map<String, Any>>
+    suspend fun createRule(@Body body: RuleRequest): Response<ApiResponse<CampusRuleDto>>
 
     @PUT("api/rules/{id}")
     suspend fun updateRule(
         @Path("id") id: String,
-        @Body body: Map<String, Any>
-    ): Response<Map<String, Any>>
+        @Body body: RuleRequest
+    ): Response<ApiResponse<CampusRuleDto>>
+
+    @DELETE("api/rules/{id}")
+    suspend fun deleteRule(@Path("id") id: String): Response<ApiResponse<Unit>>
 
     @GET("api/settings")
     suspend fun getSettings(): Response<Map<String, String>>
