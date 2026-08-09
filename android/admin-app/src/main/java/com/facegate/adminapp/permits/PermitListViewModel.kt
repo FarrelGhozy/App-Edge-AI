@@ -69,9 +69,16 @@ class PermitListViewModel @Inject constructor(
                         page = page
                     )
                 } else {
+                    // #permits-load: tampilkan pesan error asli dari server (mis. 500
+                    // Prisma/schema lama) supaya tidak butuh tebak "Gagal memuat izin".
+                    val serverError = response.errorBody()?.string()?.trim()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false, isRefreshing = false, isLoadingMore = false,
-                        error = "Gagal memuat izin"
+                        error = if (!serverError.isNullOrBlank() && serverError.length < 400) {
+                            serverError
+                        } else {
+                            "Gagal memuat izin"
+                        }
                     )
                 }
             } catch (e: Exception) {
