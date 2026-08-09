@@ -20,7 +20,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready -U facegate
+          --health-cmd "pg_isready -U facegate"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -28,6 +28,10 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
+
+    env:
+      DATABASE_URL: "postgresql://facegate:facegate_pass@localhost:5432/facegate_test?schema=public"
+      JWT_SECRET: "ci-jwt-secret-for-backend-tests-only"
 
     steps:
       - uses: actions/checkout@v4
@@ -39,20 +43,24 @@ jobs:
       # #62: typecheck wajib — code yang tidak kompil tidak boleh lolos CI.
       - run: bunx tsc --noEmit
       - run: bunx prisma generate
-        env:
-          DATABASE_URL: "postgresql://facegate:***@localhost:5432/facegate_test?schema=public"
 
-      - run: bunx prisma db push
-        env:
-          DATABASE_URL: "postgresql://facegate:***@localhost:5432/facegate_test?schema=public"
+      # Image pgvector/pgvector TIDAK auto-create extension di POSTGRES_DB
+      # (hanya file-nya yang tersedia) — harus di-create manual sebelum db push.
+      - name: Enable pgvector extension
+        run: echo "CREATE EXTENSION IF NOT EXISTS vector;" | bunx prisma db execute --url "$DATABASE_URL" --stdin
+
+      - run: bunx prisma db push --accept-data-loss
 
       - run: bun run src/seed.ts
-        env:
-          DATABASE_URL: "postgresql://facegate:***@localhost:5432/facegate_test?schema=public"
 
-      - run: bun run src/index.ts &
-      - name: Health check
-        run: sleep 3 && curl -s http://localhost:8150/api/health | grep -q '"status":"ok"'
+      - run: bun test
+
+      # Background process dibunuh saat step selesai → start & health check dalam satu step.
+      - name: Start server & health check
+        run: |
+          bun run src/index.ts &
+          sleep 3
+          curl -s http://localhost:8150/api/health | grep -q '"status":"ok"'
 
   android:
     name: Android Build
@@ -63,7 +71,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           # #62: Gradle 8.11.1 butuh Java 21 (17 gagal di setup ini).
