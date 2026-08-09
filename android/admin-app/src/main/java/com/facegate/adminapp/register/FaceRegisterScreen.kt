@@ -13,11 +13,13 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -54,13 +56,13 @@ import java.util.concurrent.Executors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FaceRegisterScreen(
-    studentId: String,
+    studentId: String?,
     navController: NavController,
     viewModel: FaceRegisterViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
-    val previewBitmap by viewModel.previewBitmap.collectAsState()
+    val captureMode = studentId == null
 
     val cameraPermissionGranted = remember {
         mutableStateOf(
@@ -76,6 +78,7 @@ fun FaceRegisterScreen(
     }
 
     LaunchedEffect(Unit) {
+        if (captureMode) viewModel.setCaptureMode(true)
         if (!cameraPermissionGranted.value) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
@@ -84,15 +87,25 @@ fun FaceRegisterScreen(
     LaunchedEffect(state.isSuccess) {
         if (state.isSuccess) {
             kotlinx.coroutines.delay(2000)
-            navController.previousBackStackEntry?.savedStateHandle?.set("faceRegistered", true)
-            navController.popBackStack()
+            if (captureMode) {
+                navController.previousBackStackEntry?.savedStateHandle?.set(
+                    "capturedFaceVectors",
+                    viewModel.capturedVectors.value
+                )
+                navController.popBackStack()
+            } else {
+                navController.previousBackStackEntry?.savedStateHandle?.set("faceRegistered", true)
+                navController.popBackStack()
+            }
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Registrasi Wajah") },
+                title = {
+                    Text(if (captureMode) "Rekam Muka" else "Registrasi Wajah")
+                },
                 navigationIcon = {
                     IconButton(onClick = {
                         viewModel.reset()
@@ -113,7 +126,6 @@ fun FaceRegisterScreen(
                 .padding(padding)
         ) {
             if (!cameraPermissionGranted.value) {
-                // Permission denied state
                 Column(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -135,68 +147,73 @@ fun FaceRegisterScreen(
                     }
                 }
             } else {
-                // Camera preview
+                // Camera preview — aktif saat DETECTING / RECORDING
                 CameraPreview(
                     modifier = Modifier.fillMaxSize(),
                     enabled = state.step == FaceRegisterStep.DETECTING ||
-                            state.step == FaceRegisterStep.POSITIONING ||
-                            state.step == FaceRegisterStep.CAPTURING,
+                            state.step == FaceRegisterStep.RECORDING,
                     onFrameCaptured = { imageProxy ->
                         viewModel.onFrameCaptured(imageProxy, studentId)
                     }
                 )
 
-                // Face oval overlay with guide / pose indicators
-                PoseAwareOverlay(state = state, viewModel = viewModel)
+                // Overlay oval + panduan + progress countdown
+                RecordingOverlay(state = state)
 
-                // Step indicator at top
+                // Step indicator
                 StepIndicator(
                     currentStep = state.step,
-                    currentPose = state.currentPose,
-                    capturedPoses = state.capturedPoses,
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
                 )
             }
 
-            // Confirm pose overlay — preview + next button
+            // Preview grid — frame terpilih utk konfirmasi
             AnimatedVisibility(
-                visible = state.step == FaceRegisterStep.CONFIRM,
+                visible = state.step == FaceRegisterStep.PREVIEW,
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xCC000000)),
-                    contentAlignment = Alignment.Center
+                        .background(Color(0xEE000000))
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
-                            "Pose ${state.currentPose.displayName} selesai!",
-                            color = Color(0xFF4CAF50),
-                            fontSize = 20.sp,
+                            "Frame patokan muka (${state.selectedFrames.size})",
+                            color = Color.White,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        previewBitmap?.let { bmp ->
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(200.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(2.dp, Color(0xFF4CAF50), RoundedCornerShape(16.dp))
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "${state.capturedPoses.size} / 5 pose",
+                            "Semua frame diambil dari wajah depan (video 10 detik)",
                             color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 14.sp
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(320.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(state.selectedFrames) { frame ->
+                                FaceThumbnail(frame.bitmap, frame.faceRect)
+                            }
+                        }
                         Spacer(modifier = Modifier.height(20.dp))
                         Button(
-                            onClick = { viewModel.confirmPose() },
+                            onClick = { viewModel.confirmRecording() },
                             modifier = Modifier
                                 .width(220.dp)
                                 .height(48.dp),
@@ -206,14 +223,14 @@ fun FaceRegisterScreen(
                             )
                         ) {
                             Text(
-                                "Lanjut ke pose berikutnya",
+                                "Simpan Muka",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         OutlinedButton(
-                            onClick = { viewModel.retryPose() },
+                            onClick = { viewModel.retryRecording() },
                             modifier = Modifier
                                 .width(220.dp)
                                 .height(44.dp),
@@ -221,12 +238,12 @@ fun FaceRegisterScreen(
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = Color.White
                             ),
-                            border = BorderStroke(
+                            border = androidx.compose.foundation.BorderStroke(
                                 1.dp, Color.White.copy(alpha = 0.6f)
                             )
                         ) {
                             Text(
-                                "Ulangi pose ini",
+                                "Rekam Ulang",
                                 fontSize = 14.sp
                             )
                         }
@@ -258,7 +275,8 @@ fun FaceRegisterScreen(
                             state.message,
                             color = Color.White,
                             fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -304,27 +322,48 @@ fun FaceRegisterScreen(
     }
 }
 
+/** Thumbnail crop wajah dari frame terpilih. */
+@Composable
+private fun FaceThumbnail(bitmap: Bitmap, faceRect: android.graphics.Rect) {
+    val bmp = remember(bitmap, faceRect) {
+        try {
+            val x = faceRect.left.coerceAtLeast(0)
+            val y = faceRect.top.coerceAtLeast(0)
+            val w = faceRect.width().coerceAtMost(bitmap.width - x)
+            val h = faceRect.height().coerceAtMost(bitmap.height - y)
+            Bitmap.createBitmap(bitmap, x, y, w, h)
+        } catch (e: Exception) { null }
+    }
+    if (bmp != null && !bmp.isRecycled) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(10.dp))
+                .border(1.dp, Color(0xFF4CAF50), RoundedCornerShape(10.dp))
+        )
+    }
+}
+
 // ──────────────────────────────────────────────
-// Step / Pose Progress Indicator
+// Step Indicator (fase: Deteksi → Rekam → Proses → Upload)
 // ──────────────────────────────────────────────
 @Composable
 private fun StepIndicator(
     currentStep: FaceRegisterStep,
-    currentPose: CapturePose,
-    capturedPoses: Set<CapturePose>,
     modifier: Modifier = Modifier
 ) {
-    val steps = listOf("Deteksi", "Pose", "Proses", "Upload")
+    val steps = listOf("Deteksi", "Rekam", "Proses", "Upload")
     val currentIndex = when (currentStep) {
         FaceRegisterStep.DETECTING -> 0
-        FaceRegisterStep.POSITIONING, FaceRegisterStep.CAPTURING, FaceRegisterStep.CONFIRM -> 1
-        FaceRegisterStep.EMBEDDING -> 2
+        FaceRegisterStep.RECORDING -> 1
+        FaceRegisterStep.SELECTING, FaceRegisterStep.EMBEDDING -> 2
         FaceRegisterStep.UPLOADING -> 3
         else -> -1
     }
 
     Column(modifier = modifier.padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        // Main progress row
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(
@@ -358,71 +397,27 @@ private fun StepIndicator(
                 }
             }
         }
-
-        // Pose progress dots (only during POSITIONING/CAPTURING/CONFIRM)
-        if (currentStep == FaceRegisterStep.POSITIONING ||
-            currentStep == FaceRegisterStep.CAPTURING ||
-            currentStep == FaceRegisterStep.CONFIRM
-        ) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                CapturePose.entries.forEach { pose ->
-                    val isDone = pose in capturedPoses
-                    val isCurrent = pose == currentPose
-                    val color = when {
-                        isDone -> Color(0xFF4CAF50)
-                        isCurrent -> Color(0xFFFFC107)
-                        else -> Color.White.copy(alpha = 0.3f)
-                    }
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.width(44.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(color)
-                        )
-                        Text(
-                            pose.displayName,
-                            fontSize = 9.sp,
-                            color = color,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
 // ──────────────────────────────────────────────
-// Pose-Aware Overlay with Live Guidance
+// Recording overlay — oval + countdown ring + panduan
 // ──────────────────────────────────────────────
 @Composable
-private fun PoseAwareOverlay(
-    state: FaceRegisterState,
-    viewModel: FaceRegisterViewModel
-) {
+private fun RecordingOverlay(state: FaceRegisterState) {
     val strokeColor = when (state.step) {
         FaceRegisterStep.DETECTING -> Color.White
-        FaceRegisterStep.POSITIONING -> Color(0xFFFFC107)
-        FaceRegisterStep.CAPTURING -> Color(0xFF4CAF50)
-        FaceRegisterStep.CONFIRM -> Color(0xFF4CAF50)
+        FaceRegisterStep.RECORDING -> Color(0xFF4CAF50)
+        FaceRegisterStep.SELECTING -> Color(0xFF2196F3)
+        FaceRegisterStep.PREVIEW -> Color(0xFF4CAF50)
         FaceRegisterStep.EMBEDDING -> Color(0xFF2196F3)
         FaceRegisterStep.UPLOADING -> Color(0xFF2196F3)
         FaceRegisterStep.SUCCESS -> Color(0xFF4CAF50)
         FaceRegisterStep.ERROR -> Color(0xFFE53935)
     }
 
-    val guideText = state.message
-
     Box(modifier = Modifier.fillMaxSize()) {
-        // Oval overlay with clip
+        // Oval overlay
         Canvas(modifier = Modifier.fillMaxSize()) {
             val canvasSize = size
             val ovalWidth = canvasSize.width * 0.75f
@@ -430,7 +425,6 @@ private fun PoseAwareOverlay(
             val ovalTop = (canvasSize.height - ovalHeight) / 2
             val ovalLeft = (canvasSize.width - ovalWidth) / 2
 
-            // Darken outside oval
             val path = Path().apply {
                 addRect(Rect(0f, 0f, canvasSize.width, canvasSize.height))
                 addOval(Rect(ovalLeft, ovalTop, ovalLeft + ovalWidth, ovalTop + ovalHeight))
@@ -438,19 +432,41 @@ private fun PoseAwareOverlay(
             clipPath(path, clipOp = ClipOp.Difference) {
                 drawRect(Color.Black.copy(alpha = 0.5f))
             }
-
-            // Oval stroke
             drawOval(
                 color = strokeColor,
                 topLeft = Offset(ovalLeft, ovalTop),
                 size = Size(ovalWidth, ovalHeight),
                 style = Stroke(width = 3.dp.toPx())
             )
+
+            // Countdown progress ring (RECORDING)
+            if (state.step == FaceRegisterStep.RECORDING) {
+                val ringRadius = (ovalWidth * 0.28f).coerceAtMost(60.dp.toPx())
+                val center = Offset(ovalLeft + ovalWidth / 2 - ringRadius, ovalTop + ovalHeight + ovalHeight * 0.12f)
+                drawArc(
+                    color = Color.White.copy(alpha = 0.25f),
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = center,
+                    size = Size(ringRadius * 2, ringRadius * 2),
+                    style = Stroke(width = 6.dp.toPx())
+                )
+                drawArc(
+                    color = Color(0xFF4CAF50),
+                    startAngle = -90f,
+                    sweepAngle = 360f * state.recordingProgress,
+                    useCenter = false,
+                    topLeft = center,
+                    size = Size(ringRadius * 2, ringRadius * 2),
+                    style = Stroke(width = 6.dp.toPx())
+                )
+            }
         }
 
-        // Live yaw/pitch indicator (small bubble at top)
-        if (state.step == FaceRegisterStep.POSITIONING ||
-            state.step == FaceRegisterStep.CAPTURING
+        // Live yaw/pitch indicator
+        if (state.step == FaceRegisterStep.DETECTING ||
+            state.step == FaceRegisterStep.RECORDING
         ) {
             Card(
                 modifier = Modifier
@@ -466,12 +482,14 @@ private fun PoseAwareOverlay(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        "Yaw: ${"%.0f".format(state.currentYaw)}°",
+                        "Yaw: ${
+                            "%.0f".format(state.currentYaw)}°",
                         fontSize = 11.sp,
                         color = Color.White
                     )
                     Text(
-                        "Pitch: ${"%.0f".format(state.currentPitch)}°",
+                        "Pitch: ${
+                            "%.0f".format(state.currentPitch)}°",
                         fontSize = 11.sp,
                         color = Color.White
                     )
@@ -479,27 +497,7 @@ private fun PoseAwareOverlay(
             }
         }
 
-        // Skip button (right side)
-        if (state.step == FaceRegisterStep.POSITIONING) {
-            IconButton(
-                onClick = { viewModel.skipPose() },
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 8.dp)
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f))
-            ) {
-                Text(
-                    ">",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        // Guide text + progress bar at bottom
+        // Guide text + progress
         Card(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -515,22 +513,21 @@ private fun PoseAwareOverlay(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = guideText,
+                    text = state.message,
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center
                 )
 
-                // Progress bar for total frames collected
-                if (state.step == FaceRegisterStep.POSITIONING ||
-                    state.step == FaceRegisterStep.CAPTURING
+                if (state.step == FaceRegisterStep.DETECTING ||
+                    state.step == FaceRegisterStep.RECORDING
                 ) {
                     Spacer(modifier = Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = {
-                            state.totalFramesCollected.toFloat() /
-                                    (state.framesRequired * 2f).coerceAtLeast(1f)
+                            if (state.step == FaceRegisterStep.RECORDING) state.recordingProgress
+                            else 0f
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -539,12 +536,14 @@ private fun PoseAwareOverlay(
                         color = Color(0xFF4CAF50),
                         trackColor = Color.White.copy(alpha = 0.2f)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "${state.capturedPoses.size}/5 pose | ${state.totalFramesCollected} frame",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
+                    if (state.step == FaceRegisterStep.RECORDING) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Rekam ${state.recordingSeconds} detik — wajah depan",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
         }
@@ -552,7 +551,7 @@ private fun PoseAwareOverlay(
 }
 
 // ──────────────────────────────────────────────
-// Camera Preview (unchanged)
+// Camera Preview
 // ──────────────────────────────────────────────
 @Composable
 fun CameraPreview(

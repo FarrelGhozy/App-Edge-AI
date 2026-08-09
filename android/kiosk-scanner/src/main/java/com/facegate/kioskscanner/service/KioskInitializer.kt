@@ -7,8 +7,8 @@ import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.LoginRequest
-import com.facegate.core.face.FaceDetectorWrapper
-import com.facegate.core.face.FaceEmbedder
+import com.facegate.core.face.FaceDetectorProvider
+import com.facegate.core.face.FaceEmbedderProvider
 import com.facegate.core.face.FaceMatcher
 import com.facegate.core.sync.SyncManager
 import com.facegate.kioskscanner.BuildConfig
@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Singleton
@@ -29,9 +30,9 @@ class KioskInitializer @Inject constructor(
     private val apiService: ApiService,
     private val faceVectorDao: FaceVectorDao,
     private val campusRuleDao: CampusRuleDao,
-    private val faceMatcher: FaceMatcher,
-    private val faceDetector: FaceDetectorWrapper,
-    private val faceEmbedder: FaceEmbedder,
+    @Named("video") private val faceMatcher: FaceMatcher,
+    private val faceDetectorProvider: FaceDetectorProvider,
+    private val faceEmbedderProvider: FaceEmbedderProvider,
     private val voiceFeedback: VoiceFeedback,
     private val syncManager: SyncManager
 ) {
@@ -68,13 +69,13 @@ class KioskInitializer @Inject constructor(
     }
 
     private fun initFaceDetector() {
-        faceDetector.init()
-        Log.d(TAG, "FaceDetector initialized")
+        val ok = faceDetectorProvider.init()
+        Log.d(TAG, "FaceDetector initialized: $ok")
     }
 
     private fun initFaceEmbedder() {
-        faceEmbedder.init()
-        Log.d(TAG, "FaceEmbedder initialized")
+        val ok = faceEmbedderProvider.init()
+        Log.d(TAG, "FaceEmbedder initialized: $ok")
     }
 
     private fun initVoiceFeedback() {
@@ -84,10 +85,20 @@ class KioskInitializer @Inject constructor(
 
     private suspend fun loginDevice() {
         try {
+            // #61: credential dari enrollment lokal (DataStore) — unik per device.
+            // BuildConfig.DEVICE_* HANYA fallback dev (debug), release kosong.
+            val username = devicePreferences.getDeviceUsername()
+                ?: BuildConfig.DEVICE_USERNAME.ifBlank { null }
+            val password = devicePreferences.getDevicePassword()
+                ?: BuildConfig.DEVICE_PASSWORD.ifBlank { null }
+            if (username == null || password == null) {
+                Log.w(TAG, "Device belum di-enroll (username/password kosong) — tunggu enrollment")
+                return
+            }
             val response = apiService.deviceLogin(
                 LoginRequest(
-                    username = BuildConfig.DEVICE_USERNAME,
-                    password = BuildConfig.DEVICE_PASSWORD
+                    username = username,
+                    password = password
                 )
             )
             if (response.isSuccessful && response.body() != null) {

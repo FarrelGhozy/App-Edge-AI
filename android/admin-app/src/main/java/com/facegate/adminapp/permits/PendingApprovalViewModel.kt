@@ -33,7 +33,9 @@ class PendingApprovalViewModel @Inject constructor(
                     val items = response.body()!!.data.map { dto ->
                         PermitItem(
                             id = dto.id,
-                            studentName = dto.student?.name ?: dto.studentId,
+                            studentName = dto.student?.name
+                                ?: if (dto.type == "izin_kelompok") "Kelompok (${dto.members.size} orang)"
+                                else dto.studentId,
                             type = dto.type,
                             status = dto.status,
                             startDate = dto.startDate.take(10),

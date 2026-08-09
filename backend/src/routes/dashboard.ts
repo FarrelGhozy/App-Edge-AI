@@ -4,7 +4,7 @@ import { dashboardSummary } from "../services/dashboard";
 import { authGuard } from "../guards/auth";
 
 export const dashboardRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard("admin", "superadmin"))
   .get("/api/dashboard/summary", async () => {
     return await dashboardSummary();
   })

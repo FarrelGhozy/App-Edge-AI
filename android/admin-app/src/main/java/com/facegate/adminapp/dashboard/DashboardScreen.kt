@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,6 +23,7 @@ import androidx.navigation.NavController
 import com.facegate.adminapp.navigation.Screen
 import com.facegate.adminapp.ui.components.*
 import com.facegate.adminapp.ui.theme.*
+import com.facegate.core.util.formatWib
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,7 +33,10 @@ fun DashboardScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val pullRefreshState = rememberPullToRefreshState()
-    var showLogoutConfirm by remember { mutableStateOf(false) }
+    var showLogoutConfirm by rememberSaveable { mutableStateOf(false) }
+    // #95: dashboard punya data valid → error refresh tampil sebagai banner,
+    // bukan menutup seluruh layar.
+    val hasData = state.totalStudents > 0 || state.recentScans.isNotEmpty()
 
     LaunchedEffect(Unit) {
         viewModel.loadSummary()
@@ -94,7 +99,7 @@ fun DashboardScreen(
     ) { padding ->
         when {
             state.isLoading -> LoadingState(modifier = Modifier.padding(padding))
-            state.error != null -> ErrorState(
+            state.error != null && !hasData -> ErrorState(
                 message = state.error,
                 onRetry = { viewModel.refresh() },
                 modifier = Modifier.padding(padding)
@@ -148,8 +153,11 @@ fun DashboardScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             StatCard(
-                                title = "Terdaftar",
-                                value = formatNumber(state.totalStudents),
+                                // #126: kartu ini harus menampilkan jumlah WAJAH
+                                // terdaftar (enrollment coverage), bukan totalStudents
+                                // lagi (dulu duplikat kartu "Total Santri").
+                                title = "Wajah Terdaftar",
+                                value = formatNumber(state.registeredFaces),
                                 icon = Icons.Default.Face,
                                 containerColor = SuccessGreen,
                                 iconTint = SuccessGreen,
@@ -186,7 +194,7 @@ fun DashboardScreen(
                                 title = "Absensi",
                                 subtitle = "Riwayat scan wajah",
                                 icon = Icons.Default.Fingerprint,
-                                accentColor = Teal40,
+                                accentColor = Sky40,
                                 onClick = { navController.navigate(Screen.Attendance.route) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -202,7 +210,7 @@ fun DashboardScreen(
                                 title = "Izin",
                                 subtitle = "Kelola izin keluar",
                                 icon = Icons.Default.Description,
-                                accentColor = Amber40,
+                                accentColor = Deep40,
                                 onClick = { navController.navigate(Screen.Permits.route) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -236,6 +244,31 @@ fun DashboardScreen(
                                 icon = Icons.Default.Settings,
                                 accentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 onClick = { navController.navigate(Screen.Settings.route) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // ── Aturan & Libur ──
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            MenuCard(
+                                title = "Aturan Jam",
+                                subtitle = "Jam terlarang keluar",
+                                icon = Icons.Default.Schedule,
+                                accentColor = Sky40,
+                                onClick = { navController.navigate(Screen.Rules.route) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            MenuCard(
+                                title = "Hari Libur",
+                                subtitle = "Kelola hari libur",
+                                icon = Icons.Default.CalendarToday,
+                                accentColor = WarningOrange,
+                                onClick = { navController.navigate(Screen.Holidays.route) },
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -314,7 +347,7 @@ private fun RecentScanCard(log: com.facegate.core.data.remote.dto.AttendanceLogD
                 )
             }
             Text(
-                log.timestamp.take(16).replace("T", " "),
+                formatWib(log.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -3,6 +3,7 @@ package com.facegate.adminapp.rules
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -13,9 +14,11 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -30,6 +33,9 @@ fun RuleFormScreen(
     val state by viewModel.uiState.collectAsState()
 
     LaunchedEffect(ruleId) { if (ruleId != null) viewModel.load(ruleId) }
+
+    var showStartTimePicker by rememberSaveable { mutableStateOf(false) }
+    var showEndTimePicker by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -130,7 +136,15 @@ fun RuleFormScreen(
                         onValueChange = { viewModel.setStartTime(it) },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("HH:mm") },
-                        leadingIcon = { Icon(Icons.Default.AccessTime, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        leadingIcon = {
+                            IconButton(onClick = { showStartTimePicker = true }) {
+                                Icon(
+                                    Icons.Default.AccessTime, "Pilih jam",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp)
                     )
@@ -149,7 +163,15 @@ fun RuleFormScreen(
                         onValueChange = { viewModel.setEndTime(it) },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("HH:mm") },
-                        leadingIcon = { Icon(Icons.Default.AccessTime, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        leadingIcon = {
+                            IconButton(onClick = { showEndTimePicker = true }) {
+                                Icon(
+                                    Icons.Default.AccessTime, "Pilih jam",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp)
                     )
@@ -315,5 +337,58 @@ fun RuleFormScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    // ── Time Pickers ──
+    if (showStartTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = state.startTime.takeIf { it.isNotBlank() }
+                ?.let { it.substringBefore(":").toIntOrNull() } ?: 0,
+            initialMinute = state.startTime.takeIf { it.isNotBlank() }
+                ?.let { it.substringAfter(":").toIntOrNull() } ?: 0,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showStartTimePicker = false },
+            title = { Text("Pilih Jam Mulai") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setStartTime(
+                        "${timePickerState.hour.toString().padStart(2, '0')}:${timePickerState.minute.toString().padStart(2, '0')}"
+                    )
+                    showStartTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartTimePicker = false }) { Text("Batal") }
+            }
+        )
+    }
+
+    if (showEndTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = state.endTime.takeIf { it.isNotBlank() }
+                ?.let { it.substringBefore(":").toIntOrNull() } ?: 0,
+            initialMinute = state.endTime.takeIf { it.isNotBlank() }
+                ?.let { it.substringAfter(":").toIntOrNull() } ?: 0,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showEndTimePicker = false },
+            title = { Text("Pilih Jam Selesai") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setEndTime(
+                        "${timePickerState.hour.toString().padStart(2, '0')}:${timePickerState.minute.toString().padStart(2, '0')}"
+                    )
+                    showEndTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndTimePicker = false }) { Text("Batal") }
+            }
+        )
     }
 }

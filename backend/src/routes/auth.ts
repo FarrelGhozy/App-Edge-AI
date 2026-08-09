@@ -1,9 +1,12 @@
 import { Elysia } from "elysia";
+import { jwtPlugin } from "../plugins/jwt";
 import { loginSchema, loginUser, loginDevice } from "../services/auth";
 import prisma from "../services/prisma";
 import bcrypt from "bcryptjs";
+import { audit } from "../services/audit";
 
 export const authRoutes = new Elysia()
+  .use(jwtPlugin)
   .post("/api/auth/login", async ({ body, jwt }) => {
     const { username, password } = body;
     const admin = await loginUser(username, password);
@@ -18,6 +21,14 @@ export const authRoutes = new Elysia()
       id: admin.id,
       username: admin.username,
       role: admin.role
+    });
+
+    // #63: catat login admin ke AuditLog
+    await audit({ id: admin.id, username: admin.username, role: admin.role }, {
+      action: "LOGIN",
+      entityType: "USERS",
+      entityId: admin.id,
+      details: `admin login username=${admin.username}`
     });
 
     return {
@@ -90,6 +101,13 @@ export const authRoutes = new Elysia()
         passwordHash: hash,
         name: deviceUsername,
       }
+    });
+    // #63: catat pendaftaran device oleh admin
+    await audit({ id: admin.id, username: admin.username, role: admin.role }, {
+      action: "CREATE",
+      entityType: "DEVICES",
+      entityId: deviceUsername,
+      details: `device register username=${deviceUsername}`
     });
     return { success: true, message: "Device account created", username: deviceUsername };
   })

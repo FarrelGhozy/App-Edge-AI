@@ -11,6 +11,17 @@ interface StudentDao {
     @Query("SELECT * FROM students WHERE isActive = 1 ORDER BY name ASC")
     suspend fun getAllActive(): List<StudentEntity>
 
+    // #135: pencarian utk form izin kiosk — cocokkan nama/NIM (case-insensitive).
+    @Query(
+        """
+        SELECT * FROM students
+        WHERE isActive = 1 AND (name LIKE '%' || :query || '%' OR nim LIKE '%' || :query || '%')
+        ORDER BY name ASC
+        LIMIT 30
+        """
+    )
+    suspend fun search(query: String): List<StudentEntity>
+
     @Query("SELECT * FROM students WHERE id = :id")
     suspend fun getById(id: String): StudentEntity?
 

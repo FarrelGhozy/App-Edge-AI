@@ -161,6 +161,9 @@ fun AppNavigator(
             val studentId = backStackEntry.arguments?.getString("studentId") ?: return@composable
             FaceRegisterScreen(studentId = studentId, navController = navController)
         }
+        composable(Screen.StudentFaceCapture.route) {
+            FaceRegisterScreen(studentId = null, navController = navController)
+        }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)
         }

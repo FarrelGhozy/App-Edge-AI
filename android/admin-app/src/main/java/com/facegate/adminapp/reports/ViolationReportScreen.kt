@@ -18,6 +18,7 @@ import com.facegate.adminapp.ui.components.EmptyState
 import com.facegate.adminapp.ui.components.ErrorState
 import com.facegate.adminapp.ui.components.LoadingState
 import com.facegate.adminapp.ui.components.StatusBadge
+import com.facegate.core.util.formatWibDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,7 +132,7 @@ fun ViolationReportScreen(
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        v.timestamp.take(10),
+                                        formatWibDate(v.timestamp),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

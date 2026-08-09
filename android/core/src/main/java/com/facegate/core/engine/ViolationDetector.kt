@@ -17,11 +17,19 @@ class ViolationDetector @Inject constructor(
     private val campusRuleDao: CampusRuleDao
 ) {
     suspend fun check(action: ToggleAction, student: StudentInfo): ViolationCheckResult {
+        return check(action, student, java.time.ZonedDateTime.now(ZoneId.of("Asia/Jakarta")))
+    }
+
+    /** Overload testable — waktu di-inject untuk unit test (#64). */
+    internal suspend fun check(
+        action: ToggleAction,
+        student: StudentInfo,
+        now: java.time.ZonedDateTime
+    ): ViolationCheckResult {
         if (action != ToggleAction.KELUAR) {
             return ViolationCheckResult(false)
         }
 
-        val now = java.time.ZonedDateTime.now(ZoneId.of("Asia/Jakarta"))
         val dayOfWeek = now.dayOfWeek.value % 7
         val currentTime = now.toLocalTime()
 
@@ -38,7 +46,18 @@ class ViolationDetector @Inject constructor(
             val ruleStart = LocalTime.parse(rule.startTime)
             val ruleEnd = LocalTime.parse(rule.endTime)
 
-            if (!currentTime.isBefore(ruleStart) && currentTime.isBefore(ruleEnd)) {
+            // #64: rule bisa overnight (22:00–05:00). Kondisi
+            // `start <= t < end` mustahil true untuk rentang lintas-midnight:
+            // rule normal aktif jika start <= t < end; rule overnight aktif
+            // jika t >= start ATAU t < end.
+            val overnight = ruleEnd.isBefore(ruleStart)
+            val isInRestrictedWindow = if (overnight) {
+                !currentTime.isBefore(ruleStart) || currentTime.isBefore(ruleEnd)
+            } else {
+                !currentTime.isBefore(ruleStart) && currentTime.isBefore(ruleEnd)
+            }
+
+            if (isInRestrictedWindow) {
                 return ViolationCheckResult(
                     isViolation = true,
                     violationType = "restricted_hours",

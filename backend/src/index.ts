@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
-import { jwt } from "@elysiajs/jwt";
+import { jwtPlugin } from "./plugins/jwt";
 import { authRoutes } from "./routes/auth";
 import { studentRoutes } from "./routes/students";
 import { attendanceRoutes } from "./routes/attendance";
@@ -9,6 +9,7 @@ import { syncRoutes } from "./routes/sync";
 import { ruleRoutes } from "./routes/rules";
 import { deviceRoutes } from "./routes/devices";
 import { permitRoutes } from "./routes/permits";
+import { kioskRoutes } from "./routes/kiosk";
 import { violationRoutes } from "./routes/violations";
 import { notificationRoutes } from "./routes/notifications";
 import { eventsRoutes } from "./routes/events";
@@ -20,7 +21,15 @@ import { scheduleRoutes } from "./routes/schedules";
 import { auditRoutes } from "./routes/audit";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8150;
-const JWT_SECRET = process.env.JWT_SECRET || "facegate-jwt-secret";
+
+// #71: JANGAN pernah fallback ke secret hardcoded — kalau env tidak diset,
+// server menolak start (fail-fast) supaya token tidak bisa di-forge.
+// Set JWT_SECRET di backend/.env (lihat docs/server-config.md).
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 16) {
+  console.error("[FATAL] JWT_SECRET tidak diset atau terlalu pendek (<16 chars). Set di backend/.env");
+  process.exit(1);
+}
 
 const app = new Elysia()
   .use(swagger({
@@ -34,13 +43,7 @@ const app = new Elysia()
     }
   }))
   .use(cors())
-  .use(
-    jwt({
-      name: "jwt",
-      secret: JWT_SECRET,
-      exp: "24h"
-    })
-  )
+  .use(jwtPlugin)
   .get("/api/health", () => ({
     status: "ok",
     timestamp: new Date().toISOString(),
@@ -53,6 +56,7 @@ const app = new Elysia()
   .use(ruleRoutes)
   .use(deviceRoutes)
   .use(permitRoutes)
+  .use(kioskRoutes)
   .use(violationRoutes)
   .use(notificationRoutes)
   .use(eventsRoutes)

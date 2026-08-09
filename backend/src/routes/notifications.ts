@@ -4,21 +4,34 @@ import { listNotifications, markRead, markAllRead } from "../services/notificati
 import { authGuard } from "../guards/auth";
 
 export const notificationRoutes = new Elysia()
-  .use(authGuard)
-  .get("/api/notifications", async ({ query }) => {
+  .use(authGuard("admin", "superadmin"))
+  .get("/api/notifications", async ({ query, admin }) => {
     const page = query.page ? parseInt(query.page as string) : 1;
     const pageSize = query.pageSize ? parseInt(query.pageSize as string) : 20;
-    return await listNotifications(page, pageSize);
+    // #122: scope per admin (admin.id); null untuk notifikasi global device.
+    return await listNotifications(admin?.role === "device" ? null : admin?.id ?? null, page, pageSize);
   })
-  .put("/api/notifications/:id/read", async ({ params: { id } }) => {
-    await markRead(id);
+  .put("/api/notifications/:id/read", async ({ params: { id }, admin }) => {
+    await markRead(id, admin?.role === "device" ? null : admin?.id ?? null);
     return { success: true };
   })
-  .put("/api/notifications/read-all", async () => {
-    await markAllRead();
+  .put("/api/notifications/read-all", async ({ admin }) => {
+    await markAllRead(admin?.role === "device" ? null : admin?.id ?? null);
     return { success: true };
   })
-  .delete("/api/notifications/:id", async ({ params: { id } }) => {
-    await prisma.notification.delete({ where: { id } });
+  .delete("/api/notifications/:id", async ({ params: { id }, admin }) => {
+    const result = await prisma.notification.deleteMany({
+      where: {
+        id,
+        ...(admin?.role === "device" ? {} : admin ? { adminId: admin.id } : {})
+      }
+    });
+    // #123: id tidak ditemukan (atau bukan milik admin ini) → 404, bukan 500.
+    if (result.count === 0) {
+      return new Response(JSON.stringify({ success: false, error: "Notification tidak ditemukan" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
     return { success: true };
   });

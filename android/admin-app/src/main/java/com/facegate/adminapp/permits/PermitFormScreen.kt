@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -33,10 +34,10 @@ fun PermitFormScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
 
-    var showStartDatePicker by remember { mutableStateOf(false) }
-    var showEndDatePicker by remember { mutableStateOf(false) }
-    var showStartTimePicker by remember { mutableStateOf(false) }
-    var showEndTimePicker by remember { mutableStateOf(false) }
+    var showStartDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showEndDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showStartTimePicker by rememberSaveable { mutableStateOf(false) }
+    var showEndTimePicker by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.loadStudents() }
 

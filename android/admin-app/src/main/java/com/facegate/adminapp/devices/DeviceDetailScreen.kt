@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.ui.components.*
+import com.facegate.core.util.formatWib
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -127,7 +128,7 @@ fun DeviceDetailScreen(
                                 )
                                 InfoRow(
                                     "Last Ping",
-                                    d.lastPingAt?.take(19)?.replace("T", " ") ?: "-"
+                                    formatWib(d.lastPingAt, withSeconds = true)
                                 )
                             }
                         }

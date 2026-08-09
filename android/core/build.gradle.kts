@@ -12,6 +12,12 @@ android {
 
     defaultConfig {
         minSdk = 31
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // #89: BuildConfig.DEBUG dipakai untuk logging HTTP (BODY hanya debug)
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
@@ -30,9 +36,9 @@ android {
         jvmTarget = "17"
     }
 
-    // Don't compress TFLite models in APK (they're already compressed)
+    // Don't compress TFLite & ONNX models in APK
     androidResources {
-        noCompress += listOf("tflite")
+        noCompress += listOf("tflite", "onnx")
     }
 
     testOptions {
@@ -59,6 +65,7 @@ dependencies {
 
     api(libs.tensorflow.lite)
     api(libs.mlkit.facedetection)
+    api(libs.onnxruntime.android)
 
     api(libs.workmanager)
     api(libs.datastore.preferences)
@@ -66,4 +73,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
     testImplementation(libs.coroutines.test)
+
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.junit)
 }

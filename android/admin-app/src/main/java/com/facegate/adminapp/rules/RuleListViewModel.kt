@@ -48,4 +48,22 @@ class RuleListViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isRefreshing = true)
         loadRules()
     }
+
+    fun deleteRule(rule: CampusRuleDto) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.deleteRule(rule.id)
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(
+                        rules = _uiState.value.rules.filterNot { it.id == rule.id },
+                        error = null
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(error = "Gagal menghapus aturan")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = "Gagal terhubung ke server")
+            }
+        }
+    }
 }

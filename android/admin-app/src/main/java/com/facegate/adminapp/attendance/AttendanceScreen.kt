@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -19,6 +20,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.ui.components.*
 import com.facegate.adminapp.ui.theme.*
+import com.facegate.core.util.formatWib
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -58,6 +60,10 @@ fun AttendanceScreen(
         ) {
             when {
                 state.isLoading && state.logs.isEmpty() -> LoadingState()
+                state.error != null && state.logs.isEmpty() -> ErrorState(
+                    message = state.error,
+                    onRetry = { viewModel.loadLogs(page = 1) }
+                )
                 state.logs.isEmpty() -> EmptyState(
                     icon = Icons.Default.Fingerprint,
                     title = "Belum ada data absensi",
@@ -69,7 +75,7 @@ fun AttendanceScreen(
                 ) {
                     // Date filter
                     item {
-                        var showDatePicker by remember { mutableStateOf(false) }
+                        var showDatePicker by rememberSaveable { mutableStateOf(false) }
                         val datePickerState = rememberDatePickerState(
                             initialSelectedDateMillis = if (state.filterDate.isNotBlank()) {
                                 try {
@@ -190,7 +196,7 @@ private fun AttendanceLogCard(log: com.facegate.core.data.remote.dto.AttendanceL
                 StatusBadge(text = actionText, color = actionColor)
             }
             Text(
-                log.timestamp.take(16).replace("T", " "),
+                formatWib(log.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -7,6 +7,17 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// #67: override API_BASE_URL per environment via local.properties
+// (gitignored). Contoh: faceGateApiBaseUrl=http://192.168.1.10:8150
+import java.util.Properties
+
+fun apiBaseUrlOverride(): String? {
+    val f = rootProject.file("local.properties")
+    if (!f.exists()) return null
+    val props = Properties().apply { f.inputStream().use { load(it) } }
+    return props.getProperty("faceGateApiBaseUrl")?.takeIf { it.isNotBlank() }
+}
+
 android {
     namespace = "com.facegate.kioskscanner"
     compileSdk = 35
@@ -18,14 +29,19 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
-        buildConfigField("String", "DEVICE_USERNAME", "\"kiosk-gate1\"")
-        buildConfigField("String", "DEVICE_PASSWORD", "\"facegate-kiosk-2024\"")
+        buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlOverride() ?: "https://facegate.utc.web.id"}\"")
+        // #61: TIDAK ada DEVICE_USERNAME/PASSWORD di defaultConfig — credential
+        // device unik per-perangkat disimpan lokal via enrollment (DataStore).
+        // BuildConfig.DEVICE_* hanya untuk fallback dev (debug) saja.
+        buildConfigField("String", "DEVICE_USERNAME", "\"\"")
+        buildConfigField("String", "DEVICE_PASSWORD", "\"\"")
     }
 
     buildTypes {
         debug {
-            buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
+            // Default: server produksi (Cloudflare Tunnel). Untuk dev lokal,
+            // override via local.properties (faceGateApiBaseUrl=http://10.0.2.2:8150).
+            buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlOverride() ?: "https://facegate.utc.web.id"}\"")
             buildConfigField("String", "DEVICE_USERNAME", "\"kiosk-gate1\"")
             buildConfigField("String", "DEVICE_PASSWORD", "\"facegate-kiosk-2024\"")
         }
@@ -33,8 +49,9 @@ android {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
-            buildConfigField("String", "DEVICE_USERNAME", "\"kiosk-gate1\"")
-            buildConfigField("String", "DEVICE_PASSWORD", "\"facegate-kiosk-2024\"")
+            // #61: release APK TANPA kredensial — dipasok saat enrollment per device.
+            buildConfigField("String", "DEVICE_USERNAME", "\"\"")
+            buildConfigField("String", "DEVICE_PASSWORD", "\"\"")
         }
     }
 
@@ -57,6 +74,8 @@ dependencies {
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // Required for @HiltWorker codegen (HiltWorkerFactory + AssistedFactory per worker).
+    ksp(libs.hilt.work.compiler)
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

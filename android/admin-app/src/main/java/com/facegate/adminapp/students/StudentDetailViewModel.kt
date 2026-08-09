@@ -66,8 +66,19 @@ class StudentDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(showDeleteConfirm = false)
             try {
-                apiService.deleteStudent(id)
-                _uiState.value = _uiState.value.copy(isDeleted = true)
+                val response = apiService.deleteStudent(id)
+                // #100: 404/500/401 BUKAN sukses — jangan tampilkan "terhapus".
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(isDeleted = true)
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        error = when (response.code()) {
+                            404 -> "Mahasiswa tidak ditemukan"
+                            401 -> "Sesi berakhir, silakan login ulang"
+                            else -> "Gagal menghapus (HTTP ${response.code()})"
+                        }
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(error = "Gagal menghapus")
             }
@@ -90,12 +101,25 @@ class StudentDetailViewModel @Inject constructor(
                 faceDeleteError = null
             )
             try {
-                apiService.deleteFace(id)
-                _uiState.value = _uiState.value.copy(
-                    isDeletingFace = false,
-                    faceRegistered = false,
-                    faceUpdatedAt = null
-                )
+                val response = apiService.deleteFace(id)
+                // #100: 404/500/401 BUKAN sukses — jangan tanda "wajah terhapus".
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(
+                        isDeletingFace = false,
+                        faceRegistered = false,
+                        faceUpdatedAt = null,
+                        faceDeleteError = null
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isDeletingFace = false,
+                        faceDeleteError = when (response.code()) {
+                            404 -> "Wajah tidak ditemukan"
+                            401 -> "Sesi berakhir, silakan login ulang"
+                            else -> "Gagal menghapus wajah (HTTP ${response.code()})"
+                        }
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isDeletingFace = false,

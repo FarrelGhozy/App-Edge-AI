@@ -18,6 +18,7 @@ import com.facegate.adminapp.ui.components.EmptyState
 import com.facegate.adminapp.ui.components.ErrorState
 import com.facegate.adminapp.ui.components.LoadingState
 import com.facegate.adminapp.ui.components.StatusBadge
+import com.facegate.core.util.formatWib
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -128,7 +129,7 @@ fun OutsideHoursReportScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            p.keluarTime.take(19).replace("T", " "),
+                                            formatWib(p.keluarTime, withSeconds = true),
                                             style = MaterialTheme.typography.bodySmall
                                         )
                                     }
@@ -140,7 +141,7 @@ fun OutsideHoursReportScreen(
                                         )
                                         p.kembaliTime?.let { kembali ->
                                             Text(
-                                                kembali.take(19).replace("T", " "),
+                                                formatWib(kembali, withSeconds = true),
                                                 style = MaterialTheme.typography.bodySmall
                                             )
                                         }

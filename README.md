@@ -6,7 +6,7 @@
 
 ## Stack
 
-- **Android** — Kotlin, Jetpack Compose, Hilt, Room, CameraX, TFLite, MediaPipe
+- **Android** — Kotlin, Jetpack Compose, Hilt, Room, CameraX, ONNX Runtime (InsightFace)
 - **Backend** — Bun, Elysia, Prisma, PostgreSQL + pgvector
 - **Infra** — Docker, Cloudflare Tunnel
 
@@ -14,7 +14,7 @@
 
 | Module | Deskripsi |
 |--------|-----------|
-| `:core` | Shared library: Room DB, TFLite pipeline, Retrofit, Session |
+| `:core` | Shared library: Room DB, InsightFace ONNX pipeline, Retrofit, Session |
 | `:kiosk-scanner` | Aplikasi scanner di gate (fullscreen camera) |
 | `:admin-app` | Admin panel: manage students, permits, rules, reports |
 

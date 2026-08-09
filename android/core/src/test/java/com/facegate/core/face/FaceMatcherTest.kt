@@ -1,5 +1,6 @@
 package com.facegate.core.face
 
+import android.graphics.Bitmap
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -8,13 +9,22 @@ class FaceMatcherTest {
 
     private lateinit var matcher: FaceMatcher
     private val threshold = 0.70f
+    private val dim = 512
 
     private fun makeVector(vararg values: Float): FloatArray {
-        val arr = FloatArray(192)
+        val arr = FloatArray(dim)
         for (i in arr.indices) {
             arr[i] = if (i < values.size) values[i] else 0.01f * (i % 10)
         }
         arr[0] = values[0]
+        return arr
+    }
+
+    /** Zero-filled vector (no shared noise pattern) — for similarity tests where
+     *  unrelated dimensions must NOT contribute cosine similarity. */
+    private fun cleanVector(vararg values: Float): FloatArray {
+        val arr = FloatArray(dim)
+        for (i in values.indices) arr[i] = values[i]
         return arr
     }
 
@@ -30,7 +40,7 @@ class FaceMatcherTest {
 
     @Before
     fun setup() {
-        matcher = FaceMatcher(threshold = threshold)
+        matcher = FaceMatcher(baseThreshold = threshold)
     }
 
     @Test
@@ -175,5 +185,105 @@ class FaceMatcherTest {
             entry("s2", normalize(makeVector(0.5f, 0.5f)))
         ))
         assertEquals(3, matcher.size())
+    }
+
+    @Test
+    fun `multi-pose same student should not collapse gap - no false reject`() {
+        // Issue #77: best & second-best must be from DIFFERENT students.
+        // Student A has 5 near-identical pose vectors; student B is far away.
+        // Runner-up must be B (not another pose of A), keeping the gap large
+        // so the adaptive threshold stays low and A is accepted.
+        val poseA = (0 until 5).map { normalize(cleanVector(0.95f - it * 0.01f, 0.1f, 0f)) }
+        val poseB = normalize(cleanVector(0.2f, 0.9f, 0f))
+        val index = poseA.map { entry("studentA", it) } + entry("studentB", poseB)
+        matcher.buildIndex(index)
+
+        // Match against A's pose 1
+        val result = matcher.match(normalize(cleanVector(0.97f, 0.1f, 0f)))
+        assertTrue("studentA must match (false reject due to same-student runner-up)", result.isMatch)
+        assertEquals("studentA", result.studentId)
+        assertNotEquals("second-best must be a different student", "studentA", result.secondBestId)
+        assertTrue("gap must stay large", result.gapScore > 0.3f)
+    }
+
+    @Test
+    fun `stress - concurrent buildIndex and match should never crash`() {
+        // Issue #75: index must be consistent under concurrent rebuild (sync
+        // worker) and reads (VideoMatchEngine, Dispatchers.Default). With a
+        // clear()+add() COW list, two racing builds could interleave and leave
+        // the index doubled (5+5=10) or half-built — the volatile snapshot swap
+        // guarantees every reader sees a complete, correct list.
+        val vectors = (1..5).map { entry("s$it", normalize(makeVector(it.toFloat() / 5f, 0.2f))) }
+        matcher.buildIndex(vectors)
+        val query = normalize(makeVector(0.8f, 0.1f))
+
+        val threads = (1..8).map { t ->
+            Thread {
+                repeat(400) { i ->
+                    if (i % 5 == 0) {
+                        // Simulate sync rebuild: rebuild from a shuffled copy
+                        matcher.buildIndex(vectors.shuffled())
+                    } else {
+                        // Simulate live match
+                        try {
+                            matcher.match(query)
+                        } catch (e: java.util.ConcurrentModificationException) {
+                            throw AssertionError("ConcurrentModificationException during concurrent match/buildIndex", e)
+                        }
+                    }
+                }
+            }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+
+        // Index must remain EXACTLY consistent afterwards (never doubled/interleaved)
+        assertEquals("concurrent rebuild must not double entries", 5, matcher.size())
+        // Each original vector still present and matchable
+        val res = matcher.match(query)
+        assertNotNull(res.studentId)
+    }
+
+    @Test
+    fun `thin gap no longer false-rejects genuine match (issue 66)`() {
+        // Issue #66: AMBIGUITY_RATIO 0.15 penalized genuine matches with a thin
+        // (but real) gap. With 0.08, best=0.75 vs second=0.65 (gap 0.10) must
+        // MATCH. Under the old ratio (0.15): adjusted = 0.75-(0.15-0.10)*0.5 =
+        // 0.725 < adaptive 0.73 (video) → false reject. Now: gap ≥ 0.08 → no
+        // ambiguity penalty → adjusted = 0.75 ≥ 0.73 → match.
+        val q = normalize(cleanVector(1f, 0f, 0f))
+        val vBest = normalize(cleanVector(0.75f, kotlin.math.sqrt(1f - 0.75f * 0.75f), 0f))
+        val vSecond = normalize(cleanVector(0.65f, 0f, kotlin.math.sqrt(1f - 0.65f * 0.65f)))
+        matcher.buildIndex(listOf(
+            entry("genuine", vBest),
+            entry("other", vSecond)
+        ))
+        val result = matcher.match(q)
+        assertTrue("genuine match with gap 0.10 must not be false-rejected", result.isMatch)
+        assertEquals("genuine", result.studentId)
+    }
+
+    @Test
+    fun `averageEmbeddings produces L2-normalized centroid`() {
+        // Issue #66: enrollment must store a robust averaged template per pose.
+        // The shared FaceEmbedderProvider default must output an L2-normalized
+        // vector so downstream dot-product matching stays valid.
+        val provider = object : FaceEmbedderProvider {
+            override fun init() = true
+            override fun embed(faceCrop: Bitmap) = FloatArray(embeddingDim)
+            override val embeddingDim = 512
+            override val inputSize = 112
+            override fun release() {}
+            override fun isReady() = true
+        }
+        val a = FloatArray(512).also { it[0] = 1f }  // unit e0
+        val b = FloatArray(512).also { it[1] = 1f }  // unit e1
+        val avg = provider.averageEmbeddings(arrayOf(a, b))
+        // Centroid (0.5, 0.5) → L2 → (0.7071, 0.7071)
+        assertEquals(0.7071f, avg[0], 1e-3f)
+        assertEquals(0.7071f, avg[1], 1e-3f)
+        var norm = 0.0
+        for (x in avg) norm += x * x
+        assertEquals("averaged template must be L2-normalized", 1.0, kotlin.math.sqrt(norm), 1e-4)
     }
 }

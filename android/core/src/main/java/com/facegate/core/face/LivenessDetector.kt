@@ -25,8 +25,10 @@ class LivenessDetector(
     companion object {
         private const val TAG = "LivenessDetector"
 
-        // Anti-spoof thresholds
-        private const val SPOOF_CONFIDENCE_THRESHOLD = 0.5f
+        // Anti-spoof thresholds — konsisten dengan VideoMatchEngine.SPOOF_CONFIDENCE_MIN (0.3f).
+        // Improvement #2: threshold tunggal 0.3 (sebelumnya 0.5 di sini vs 0.3 di MatchEngine —
+        // inkonsistensi bikin real face confidence 0.3-0.5 ditolak di satu jalur, lolos di jalur lain).
+        private const val SPOOF_CONFIDENCE_THRESHOLD = 0.3f
 
         // EAR blink detection
         private const val BLINK_RATIO = 0.60f

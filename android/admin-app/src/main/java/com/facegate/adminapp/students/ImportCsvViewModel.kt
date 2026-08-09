@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.CreateStudentRequest
+import com.facegate.core.data.remote.dto.ImportStudentRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,20 +48,30 @@ class ImportCsvViewModel @Inject constructor(
                     return@launch
                 }
 
-                var success = 0
-                var failed = 0
-                for (student in students) {
-                    try {
-                        val response = apiService.createStudent(student)
-                        if (response.isSuccessful) success++ else failed++
-                    } catch (_: Exception) {
-                        failed++
-                    }
-                }
-
-                _uiState.value = ImportCsvState(
-                    result = "Berhasil: $success, Gagal: $failed dari ${students.size} data"
+                // #99: SATU request batch untuk ratusan baris (sebelumnya
+                // 1 HTTP request/baris + tiap baris memicu sync trigger backend).
+                val response = apiService.importStudents(
+                    ImportStudentRequest(
+                        filename = uri.lastPathSegment ?: "csv",
+                        students = students
+                    )
                 )
+                if (response.isSuccessful && response.body() != null) {
+                    val res = response.body()!!
+                    val detail = if (res.errors.isNotEmpty()) {
+                        val contoh = res.errors.take(3).joinToString("; ") { "baris ${it.row}: ${it.error}" }
+                        " | contoh error: $contoh"
+                    } else ""
+                    _uiState.value = ImportCsvState(
+                        result = "Berhasil: ${res.successRows}, Gagal: ${res.failedRows} dari ${res.total} data$detail",
+                        isError = res.failedRows > 0 && res.successRows == 0
+                    )
+                } else {
+                    _uiState.value = ImportCsvState(
+                        result = "Gagal mengimpor data (HTTP ${response.code()})",
+                        isError = true
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.value = ImportCsvState(
                     result = "Gagal membaca file: ${e.message}",
@@ -70,27 +81,69 @@ class ImportCsvViewModel @Inject constructor(
         }
     }
 
+    /**
+     * #99: parser CSV proper (RFC 4180) — handle kutip ganda `"a,b",c`
+     * dan baris ber-enter di dalam kolom, bukan split(",") naif.
+     */
     private fun parseCsv(context: Context, uri: Uri): List<CreateStudentRequest> {
         val result = mutableListOf<CreateStudentRequest>()
         val reader = BufferedReader(InputStreamReader(context.contentResolver.openInputStream(uri)))
         reader.use { r ->
-            r.readLine() // skip header
-            r.forEachLine { line ->
-                val parts = line.split(",")
-                if (parts.size >= 4) {
+            var header = true
+            for (fields in readCsvRecords(r)) {
+                if (header) { header = false; continue } // skip header
+                if (fields.size >= 4) {
                     result.add(
                         CreateStudentRequest(
-                            nim = parts[0].trim(),
-                            name = parts[1].trim(),
-                            studyProgram = parts[2].trim(),
-                            academicYear = parts[3].trim(),
-                            phone = parts.getOrNull(4)?.trim() ?: "",
-                            email = parts.getOrNull(5)?.trim() ?: ""
+                            nim = fields[0].trim(),
+                            name = fields[1].trim(),
+                            studyProgram = fields[2].trim(),
+                            academicYear = fields[3].trim(),
+                            phone = fields.getOrNull(4)?.trim() ?: "",
+                            email = fields.getOrNull(5)?.trim() ?: ""
                         )
                     )
                 }
             }
         }
         return result
+    }
+
+    /** Baca record CSV dengan dukungan quoted field (RFC 4180). */
+    private fun readCsvRecords(reader: BufferedReader): Sequence<List<String>> = sequence {
+        var current = StringBuilder()
+        val fields = mutableListOf<String>()
+        var inQuotes = false
+
+        for (line in reader.lineSequence()) {
+            var i = 0
+            while (i < line.length) {
+                val ch = line[i]
+                when {
+                    inQuotes -> {
+                        if (ch == '"') {
+                            if (i + 1 < line.length && line[i + 1] == '"') {
+                                current.append('"'); i += 2; continue
+                            }
+                            inQuotes = false
+                        } else {
+                            current.append(ch)
+                        }
+                    }
+                    ch == '"' -> inQuotes = true
+                    ch == ',' -> { fields.add(current.toString()); current = StringBuilder() }
+                    else -> current.append(ch)
+                }
+                i++
+            }
+            if (inQuotes) {
+                current.append('\n') // baris lanjutan di dalam kolom ber-quote
+            } else {
+                fields.add(current.toString())
+                yield(fields.toList())
+                current = StringBuilder()
+                fields.clear()
+            }
+        }
     }
 }

@@ -18,12 +18,54 @@ data class ScanRequest(
     val deviceId: String? = null,
     @SerialName("photoCapture")
     val photoCapture: String? = null,
+    @SerialName("clientId")
+    val clientId: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
 @Serializable
 data class AttendanceBatchRequest(
     val logs: List<ScanRequest>
+)
+
+/** #114: response batch sync. Bila ada log yang di-skip server (mis. student
+ *  tidak ditemukan), client HARUS tidak menandainya synced → antrean offline
+ *  tidak hilang tanpa jejak (data loss). */
+@Serializable
+data class SyncBatchResponse(
+    val success: Boolean,
+    val data: SyncBatchData? = null
+)
+
+@Serializable
+data class SyncBatchData(
+    val synced: Int = 0,
+    val skipped: Int = 0,
+    @SerialName("skippedLogs")
+    val skippedLogs: List<SkippedLog> = emptyList(),
+    // #135-fix: daftar log yang benar-benar diterima server (batch verifikasi
+    // izin). Dipakai client untuk menandai synced HANYA yang sukses.
+    @SerialName("syncedLogs")
+    val syncedLogs: List<SyncedLog> = emptyList()
+)
+
+/** #135-fix: satu log yang sukses di-upload (verifikasi izin). */
+@Serializable
+data class SyncedLog(
+    @SerialName("permitId") val permitId: String? = null,
+    @SerialName("studentId") val studentId: String,
+    val action: String? = null,
+    val idempotent: Boolean = false
+)
+
+@Serializable
+data class SkippedLog(
+    @SerialName("studentId")
+    val studentId: String,
+    val reason: String? = null,
+    // #135: dipakai response sync permitt-verifications (skip per izin+anggota).
+    @SerialName("permitId")
+    val permitId: String? = null
 )
 
 @Serializable

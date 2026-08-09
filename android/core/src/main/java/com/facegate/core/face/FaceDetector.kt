@@ -13,10 +13,9 @@ import com.google.mlkit.vision.face.FaceDetectorOptions
 /**
  * Wrapper around ML Kit Face Detection with quality assessment.
  *
- * Detects faces + extracts all landmarks and quality metrics
- * needed for registration and matching pipeline.
+ * Implements FaceDetectorProvider as fallback when ONNX Runtime is unavailable.
  */
-class FaceDetectorWrapper {
+class FaceDetectorWrapper : FaceDetectorProvider {
     private val detector by lazy {
         val options = FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -30,9 +29,10 @@ class FaceDetectorWrapper {
     private var isInitialized = false
     private var lastError: String? = null
 
-    fun init() {
+    override fun init(): Boolean {
         isInitialized = true
         lastError = null
+        return true
     }
 
     /** Detect from raw android.media.Image (no Bitmap conversion needed). */
@@ -55,6 +55,18 @@ class FaceDetectorWrapper {
             Log.e("FaceDetect", "detect error: ${e.message}", e)
             null
         }
+    }
+
+    /** Detect from Bitmap (fallback) — implements FaceDetectorProvider. */
+    override fun detect(bitmap: Bitmap): List<FaceBox> {
+        val result = detectSync(bitmap) ?: return emptyList()
+        return listOf(
+            FaceBox(
+                boundingBox = result.boundingBox,
+                confidence = 1.0f,
+                landmarks = emptyList()
+            )
+        )
     }
 
     /** Detect from Bitmap (fallback). */
@@ -104,7 +116,13 @@ class FaceDetectorWrapper {
         return contour.points.map { PointF(it.x, it.y) }
     }
 
-    fun release() {
+    override fun isReady(): Boolean = isInitialized
+    override fun release() {
+        isInitialized = false
+        detector.close()
+    }
+
+    fun releaseOld() {
         isInitialized = false
         detector.close()
     }

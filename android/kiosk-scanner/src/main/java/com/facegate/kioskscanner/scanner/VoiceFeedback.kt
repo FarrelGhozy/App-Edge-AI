@@ -24,6 +24,11 @@ class VoiceFeedback @Inject constructor(
     }
 
     fun speak(text: String) {
+        if (!isInitialized) {
+            // TTS may have been shutdown elsewhere (e.g. a stale release() call).
+            // Self-heal on demand so the kiosk never goes silently mute (issue #79).
+            init()
+        }
         if (!isInitialized) return
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
     }

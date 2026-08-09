@@ -162,10 +162,10 @@ Berdasarkan latar belakang di atas, rumusan masalah dalam proyek ini adalah:
   \item \textbf{Scan Wajah Otomatis} -- CameraX mendeteksi wajah secara real-time, tanpa tombol. Begitu wajah dikenali, proses matching dan toggle berjalan otomatis.
   \item \textbf{Face Recognition Pipeline} --
     \begin{itemize}[nolistsep]
-      \item MediaPipe Face Detection untuk mendeteksi wajah dalam frame kamera
-      \item MediaPipe Face Landmarks (468 titik) untuk ekstraksi landmark mata
+      \item RetinaFace-500MF ONNX (\texttt{det\_500m.onnx}) untuk deteksi wajah dalam frame kamera
+      \item Face Landmarks untuk ekstraksi landmark mata (EAR)
       \item Liveness Detection via Eye Aspect Ratio (EAR) -- mendeteksi kedipan alami sebagai anti-spoofing
-      \item MobileFaceNet TFLite untuk ekstraksi embedding 192-dimensi
+      \item InsightFace ONNX (\texttt{w600k\_mbf.onnx}) untuk ekstraksi embedding 512-dimensi
       \item Brute-force cosine similarity matching di RAM ($\sim$3ms untuk 10.000 vektor)
     \end{itemize}
   \item \textbf{Toggle Keluar/Kembali} -- Logika toggle otomatis: scan pertama hari ini = keluar, scan berikutnya = kembali, bergantian.
@@ -282,8 +282,8 @@ Proyek Android dibagi menjadi tiga modul Gradle:
     Bahasa & Kotlin 2.0.x & Bahasa pemrograman utama \\
     UI & Jetpack Compose + Material 3 & UI deklaratif modern \\
     Kamera & CameraX 1.4.x & Capture frame kamera real-time \\
-    Face Detection & MediaPipe FaceDetector & Deteksi wajah dalam frame \\
-    Face Embedding & TensorFlow Lite (MobileFaceNet) & Ekstraksi vektor wajah 192-d \\
+    Face Detection & RetinaFace-500MF ONNX & Deteksi wajah dalam frame \\
+    Face Embedding & InsightFace ONNX (MobileFaceNet) & Ekstraksi vektor wajah 512-d \\
     Database Lokal & Room 2.6.x & Penyimpanan offline \\
     Background Sync & WorkManager 2.9.x & Sinkronisasi terjadwal \\
     Networking & Retrofit + OkHttp + Kotlinx Serialization & Komunikasi REST API \\
@@ -330,10 +330,10 @@ Pipeline pengenalan wajah dirancang untuk efisiensi maksimal pada perangkat Andr
 
     \matrix[row sep=0.4cm, column sep=0.4cm] {
       \node[pipe] (camera) {CameraX\\Frame Capture}; &
-      \node[pipe] (detect) {MediaPipe\\Face Detection}; &
-      \node[pipe] (landmark) {MediaPipe\\Face Landmarks}; &
+      \node[pipe] (detect) {RetinaFace\\ONNX Detection}; &
+      \node[pipe] (landmark) {Face\\Landmarks}; &
       \node[pipe] (liveness) {Liveness EAR\\Blink Detection}; \\
-      \node[pipe] (embed) {MobileFaceNet\\TFLite Embedding}; &
+      \node[pipe] (embed) {InsightFace MBF\\ONNX Embedding}; &
       \node[pipe] (match) {Cosine Similarity\\Match $\ge$ 0.6}; &
       \node[pipe] (result) {Toggle\\Keluar/Kembali}; &
         \node[minimum width=2.2cm, minimum height=0.7cm] {}; \\
@@ -356,13 +356,13 @@ Pipeline pengenalan wajah dirancang untuk efisiensi maksimal pada perangkat Andr
     \toprule
     \textbf{Tahap} & \textbf{Teknologi} & \textbf{Ukuran} & \textbf{Latensi} \\
     \midrule
-    Deteksi Wajah & MediaPipe FaceDetector & $\sim$350 KB & $<$ 5ms \\
-    Landmark Wajah & MediaPipe Face Landmarks & Bundle & $<$ 2ms \\
+    Deteksi Wajah & RetinaFace-500MF ONNX & $\sim$2.4 MB & $<$ 5ms \\
+    Landmark Wajah & Face Landmarks & Bundle & $<$ 2ms \\
     Liveness & Eye Aspect Ratio (rule-based) & 0 KB & $<$ 2ms \\
-    Embedding & MobileFaceNet .tflite & $\sim$4--5 MB & $\sim$15ms \\
-    Matching & Brute-force cosine similarity & $\sim$7.7 MB (10k faces) & $\sim$3ms \\
+    Embedding & InsightFace .onnx (w600k\_mbf) & $\sim$13.6 MB & $\sim$15ms \\
+    Matching & Brute-force cosine similarity & $\sim$20 MB (10k faces, 512-d) & $\sim$3ms \\
     \midrule
-    \textbf{Total} & & \textbf{$\sim$9--10 MB} & \textbf{$\sim$25ms} \\
+    \textbf{Total} & & \textbf{$\sim$16--17 MB} & \textbf{$\sim$25ms} \\
     \bottomrule
   \end{tabularx}
 \end{table}

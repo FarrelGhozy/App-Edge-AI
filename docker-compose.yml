@@ -26,10 +26,11 @@ services:
     ports:
       - "8150:8150"
     environment:
-      DATABASE_URL: "postgresql://facegate:facegate_pass@postgres:5432/facegate?schema=public"
-      JWT_SECRET: "facegate-jwt-secret-change-in-production"
+      DATABASE_URL: "postgresql://facegate:${POSTGRES_PASSWORD:-facegate_pass}@postgres:5432/facegate?schema=public"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET wajib di-set di .env}"
       PORT: "8150"
       NODE_ENV: "production"
+      TZ: "Asia/Jakarta"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8150/api/health"]
       interval: 10s

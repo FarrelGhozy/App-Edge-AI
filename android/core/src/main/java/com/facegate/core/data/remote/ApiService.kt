@@ -29,6 +29,10 @@ interface ApiService {
     @POST("api/students")
     suspend fun createStudent(@Body request: CreateStudentRequest): Response<StudentDto>
 
+    // #99: import batch satu request (hindari 1 HTTP/baris)
+    @POST("api/students/import")
+    suspend fun importStudents(@Body request: ImportStudentRequest): Response<ImportResultResponse>
+
     @PUT("api/students/{id}")
     suspend fun updateStudent(
         @Path("id") id: String,
@@ -66,7 +70,7 @@ interface ApiService {
     ): Response<AttendanceListResponse>
 
     @POST("api/sync/attendance")
-    suspend fun syncAttendance(@Body request: AttendanceBatchRequest): Response<StatusResponse>
+    suspend fun syncAttendance(@Body request: AttendanceBatchRequest): Response<SyncBatchResponse>
 
     @GET("api/sync/faces")
     suspend fun syncFaces(@Query("since") since: String? = null): Response<FaceSyncResponse>
@@ -86,13 +90,16 @@ interface ApiService {
     suspend fun getRules(): Response<List<CampusRuleDto>>
 
     @POST("api/rules")
-    suspend fun createRule(@Body body: Map<String, Any>): Response<Map<String, Any>>
+    suspend fun createRule(@Body body: RuleRequest): Response<ApiResponse<CampusRuleDto>>
 
     @PUT("api/rules/{id}")
     suspend fun updateRule(
         @Path("id") id: String,
-        @Body body: Map<String, Any>
-    ): Response<Map<String, Any>>
+        @Body body: RuleRequest
+    ): Response<ApiResponse<CampusRuleDto>>
+
+    @DELETE("api/rules/{id}")
+    suspend fun deleteRule(@Path("id") id: String): Response<ApiResponse<Unit>>
 
     @GET("api/settings")
     suspend fun getSettings(): Response<Map<String, String>>
@@ -130,20 +137,57 @@ interface ApiService {
         @Query("studentId") studentId: String
     ): Response<ApiResponse<PermitQuotaResponse>>
 
+    // =========== KIOSK PERMITS (#135: izin mandiri & kelompok) ===========
+    @POST("api/kiosk/permits")
+    suspend fun createKioskPermit(@Body request: CreateKioskPermitRequest): Response<ApiResponse<PermitDto>>
+
+    @GET("api/kiosk/permits")
+    suspend fun getKioskPermits(
+        @Query("page") page: Int = 1,
+        @Query("pageSize") pageSize: Int = 50
+    ): Response<KioskPermitListResponse>
+
+    @POST("api/kiosk/permits/{permitId}/verify")
+    suspend fun verifyPermitScan(
+        @Path("permitId") permitId: String,
+        @Body request: VerifyPermitScanRequest
+    ): Response<ApiResponse<PermitVerifiedData>>
+
+    @POST("api/sync/permits-verifications")
+    suspend fun syncPermitVerifications(
+        @Body request: PermitVerificationBatchRequest
+    ): Response<SyncBatchResponse>
+
+    @GET("api/sync/permits")
+    suspend fun syncPermits(): Response<SyncPermitsResponse>
+
     // =========== VIOLATIONS ===========
     @GET("api/violations")
     suspend fun getViolations(
         @Query("page") page: Int = 1,
         @Query("pageSize") pageSize: Int = 20,
         @Query("type") type: String? = null,
-        @Query("studentId") studentId: String? = null
+        @Query("studentId") studentId: String? = null,
+        @Query("search") search: String? = null,
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null
     ): Response<ViolationListResponse>
+
+    // #125: endpoint detail violation by id — ViolationDetailViewModel harus
+    // fetch violation yang TEPAT, bukan mencari di daftar studentId (salah).
+    @GET("api/violations/{id}")
+    suspend fun getViolationById(
+        @Path("id") id: String
+    ): Response<ApiResponse<ViolationDto>>
 
     @PUT("api/violations/{id}/resolve")
     suspend fun resolveViolation(
         @Path("id") id: String,
         @Body request: ResolveViolationRequest
     ): Response<ApiResponse<ViolationDto>>
+
+    @DELETE("api/violations/{id}")
+    suspend fun deleteViolation(@Path("id") id: String): Response<StatusResponse>
 
     // =========== NOTIFICATIONS ===========
     @GET("api/notifications")
@@ -161,6 +205,12 @@ interface ApiService {
     // =========== DEVICES ===========
     @GET("api/devices")
     suspend fun getDevices(): Response<List<DeviceDto>>
+
+    // #97: ambil detail 1 device langsung dari server (hindari fetch semua)
+    @GET("api/devices/{deviceId}")
+    suspend fun getDevice(
+        @Path("deviceId") deviceId: String
+    ): Response<DeviceDto>
 
     @PUT("api/devices/{deviceId}/ping")
     suspend fun pingDeviceWithBattery(

@@ -1,5 +1,8 @@
 package com.facegate.adminapp.sse
 
+import com.facegate.core.data.local.SessionManager
+import com.facegate.core.data.remote.ApiService
+import com.facegate.core.data.remote.dto.RefreshRequest
 import com.facegate.core.di.ApiBaseUrl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,12 +27,23 @@ data class SseEvent(
 @Singleton
 class SseClient @Inject constructor(
     private val okHttpClient: OkHttpClient,
+    private val apiService: ApiService,
+    private val sessionManager: SessionManager,
     @ApiBaseUrl private val baseUrl: String
 ) {
     private val _events = MutableSharedFlow<SseEvent>(replay = 0, extraBufferCapacity = 64)
     val events: SharedFlow<SseEvent> = _events.asSharedFlow()
 
+    // #127: 401 = token kedaluwarsa; refresh gagal → beri tahu UI (logout otomatis)
+    // supaya admin tidak tersesat di dashboard "mati" tanpa sadar.
+    private val _sessionExpired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val sessionExpired: SharedFlow<Unit> = _sessionExpired.asSharedFlow()
+
     private var job: Job? = null
+
+    // #96: backoff eksponensial 1s → 30s; reset setelah stream bertahan lama.
+    private var retryDelayMs = 1_000L
+    private var lastStableConnectAt = 0L
 
     fun connect(scope: CoroutineScope) {
         disconnect()
@@ -42,6 +56,25 @@ class SseClient @Inject constructor(
                         .build()
 
                     val response = okHttpClient.newCall(request).execute()
+                    // #127: 401 = token kedaluwarsa → coba refresh token sekali.
+                    // Sukses → simpan token baru & LANJUTKAN stream (reconnect);
+                    // gagal → emit sessionExpired agar UI mengarahkan ke login
+                    // (sebelumnya: break diam → dashboard mati tanpa admin sadar).
+                    if (response.code == 401) {
+                        response.close()
+                        if (tryRefreshToken()) {
+                            retryDelayMs = 1_000L
+                            continue
+                        }
+                        _sessionExpired.tryEmit(Unit)
+                        break
+                    }
+                    if (!response.isSuccessful) {
+                        response.close()
+                        delay(retryDelayMs)
+                        retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
+                        continue
+                    }
                     val body = response.body ?: continue
                     val source = body.source()
 
@@ -52,7 +85,11 @@ class SseClient @Inject constructor(
                         val line = source.readUtf8Line() ?: break
                         when {
                             line.startsWith("event:") -> eventType = line.removePrefix("event:").trim()
-                            line.startsWith("data:") -> eventData.append(line.removePrefix("data:").trim())
+                            line.startsWith("data:") -> {
+                                // #96: data multi-baris digabung dengan newline (SSE spec)
+                                if (eventData.isNotEmpty()) eventData.append('\n')
+                                eventData.append(line.removePrefix("data:").trim())
+                            }
                             line.isEmpty() -> {
                                 if (eventData.isNotEmpty()) {
                                     _events.tryEmit(SseEvent(eventType.ifEmpty { "message" }, eventData.toString()))
@@ -63,10 +100,19 @@ class SseClient @Inject constructor(
                         }
                     }
                     source.close()
+
+                    // Koneksi stabil ≥30 detik → reset backoff.
+                    val now = System.currentTimeMillis()
+                    if (lastStableConnectAt != 0L && now - lastStableConnectAt >= 30_000L) {
+                        retryDelayMs = 1_000L
+                    }
+                    lastStableConnectAt = now
                 } catch (_: kotlinx.coroutines.CancellationException) {
                     break
                 } catch (_: Exception) {
-                    delay(5000)
+                    // #96: exponential backoff, cap 30s.
+                    delay(retryDelayMs)
+                    retryDelayMs = (retryDelayMs * 2).coerceAtMost(30_000L)
                 }
             }
         }
@@ -75,5 +121,26 @@ class SseClient @Inject constructor(
     fun disconnect() {
         job?.cancel()
         job = null
+    }
+
+    // #127: refresh access token via endpoint /api/auth/refresh. Token lama
+    // (yang expired) dikirim ulang — server memverifikasi & menerbitkan token
+    // baru bila payload masih absah, lalu kita simpan utk request berikutnya.
+    // Return true jika berhasil (stream layak dilanjutkan).
+    private suspend fun tryRefreshToken(): Boolean {
+        return try {
+            val current = sessionManager.getToken()
+            if (current == null) return false
+            val response = apiService.refreshToken(RefreshRequest(token = current))
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true && body.data?.token != null) {
+                sessionManager.saveToken(body.data.token)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 }

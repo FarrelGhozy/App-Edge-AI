@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -39,7 +40,7 @@ fun NotificationListScreen(
                     }
                 },
                 actions = {
-                    var showConfirm by remember { mutableStateOf(false) }
+                    var showConfirm by rememberSaveable { mutableStateOf(false) }
                     TextButton(onClick = { showConfirm = true }) {
                         Text("Baca Semua")
                     }

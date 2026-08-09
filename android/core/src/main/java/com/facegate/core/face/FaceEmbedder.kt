@@ -119,22 +119,14 @@ class FaceEmbedder(private val context: Context) {
     }
 
     /**
-     * Batch embed multiple face crops into a single matrix.
-     * Each row = 1 embedding vector.
-     */
-    fun embedBatch(bitmaps: List<Bitmap>): Array<FloatArray> {
-        if (interpreter == null) {
-            val ok = init()
-            if (!ok || interpreter == null)
-                throw IllegalStateException(initError ?: "FaceEmbedder belum diinisialisasi")
-        }
-        return bitmaps.map { embed(it) }.toTypedArray()
-    }
-
-    /**
      * Average multiple embeddings into one template.
-     * Useful for multi-frame registration: embed 5 frames → centroid → store.
+     *
+     * @deprecated Enrollment kini memakai desain #132: video 10 detik → 5-10 frame terpilih
+     * → vektor `FRONT_1..FRONT_N` (satu embedding per frame, bukan centroid per pose).
+     * Fungsi ini tidak dipakai di produksi — dipertahankan hanya karena test unit
+     * (FaceEmbedderTest / FaceMatcherTest) masih mereferensikannya.
      */
+    @Deprecated("Enrollment memakai FRONT_1..N multi-frame (#132) — averaging per pose tidak dipakai")
     fun averageEmbeddings(embeddings: Array<FloatArray>): FloatArray {
         if (embeddings.isEmpty()) return FloatArray(embeddingDim)
         val result = FloatArray(embeddingDim)
@@ -152,6 +144,9 @@ class FaceEmbedder(private val context: Context) {
      */
     private fun preprocess(bitmap: Bitmap): ByteBuffer {
         val resized = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
+        // Guard: createScaledBitmap may return the SAME bitmap when input already
+        // has the target size — never recycle a bitmap owned by the caller (#76).
+        val shouldRecycle = resized !== bitmap
         val pixels = IntArray(inputSize * inputSize)
         resized.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
 
@@ -162,7 +157,7 @@ class FaceEmbedder(private val context: Context) {
                 buffer.put(((pixel shr 8) and 0xFF).toByte())  // G
                 buffer.put((pixel and 0xFF).toByte())           // B
             }
-            resized.recycle()
+            if (shouldRecycle) resized.recycle()
             return buffer
         } else {
             val buffer = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4)
@@ -177,7 +172,7 @@ class FaceEmbedder(private val context: Context) {
                 buffer.putFloat(g)
                 buffer.putFloat(b)
             }
-            resized.recycle()
+            if (shouldRecycle) resized.recycle()
             return buffer
         }
     }

@@ -21,7 +21,7 @@ export const updateStudentSchema = t.Object({
 });
 
 export const uploadFaceSchema = t.Object({
-  pose: t.String(),       // CENTER, LEFT, RIGHT, UP, DOWN
+  pose: t.String(),       // FRONT_1 .. FRONT_N (registrasi video 10 detik, #132)
   vector: t.Array(t.Number())
 });
 
@@ -34,8 +34,18 @@ export const batchUploadFacesSchema = t.Object({
   )
 });
 
-// Valid pose names
-const VALID_POSES = new Set(["CENTER", "LEFT", "RIGHT", "UP", "DOWN"]);
+// Pose/frame labels untuk registrasi video 10 detik (#132):
+// FRONT_1 .. FRONT_MAX_FRAMES (frame berkualitas terbaik dari video).
+// Menggantikan VALID_POSES (CENTER/LEFT/RIGHT/UP/DOWN) — wajah depan only.
+const MAX_FRAMES = 10;
+const FRONT_POSE_RE = /^FRONT_(\d+)$/;
+
+export function isValidPose(pose: string): boolean {
+  const m = FRONT_POSE_RE.exec(pose);
+  if (!m) return false;
+  const n = parseInt(m[1], 10);
+  return n >= 1 && n <= MAX_FRAMES;
+}
 
 export async function listStudents(params: {
   page?: number;
@@ -87,7 +97,7 @@ export async function getStudent(id: string) {
     vector: string;
     updated_at: Date;
   }>>(
-    `SELECT student_id, pose, vector::text, updated_at FROM face_vectors WHERE student_id = $1 ORDER BY pose`,
+    `SELECT student_id, pose, vector::text, updated_at FROM face_vectors WHERE student_id = $1 ORDER BY id`,
     id
   );
   const enrichedVectors = faceVectors.map(fv => {
@@ -108,22 +118,6 @@ export async function getStudent(id: string) {
   };
 }
 
-async function triggerSyncForAllDevices() {
-  try {
-    const activeDevices = await prisma.device.findMany({
-      where: { isActive: true },
-      select: { deviceId: true }
-    });
-    for (const device of activeDevices) {
-      await prisma.syncRequest.create({
-        data: { deviceId: device.deviceId }
-      });
-    }
-  } catch (_) {
-    // Silently fail
-  }
-}
-
 export async function createStudent(data: {
   nim: string;
   name: string;
@@ -133,28 +127,27 @@ export async function createStudent(data: {
   email?: string;
 }) {
   const student = await prisma.student.create({ data });
-  await triggerSyncForAllDevices();
   return student;
 }
 
 export async function updateStudent(id: string, data: Record<string, unknown>) {
   const student = await prisma.student.update({ where: { id }, data });
-  await triggerSyncForAllDevices();
   return student;
 }
 
 export async function deleteStudent(id: string) {
-  await prisma.attendanceLog.deleteMany({ where: { studentId: id } });
-  await prisma.permit.deleteMany({ where: { studentId: id } });
-  await prisma.faceVector.deleteMany({ where: { studentId: id } });
-  const student = await prisma.student.delete({ where: { id } });
-  await triggerSyncForAllDevices();
-  return student;
+  // #72: bungkus DELETE bertahap dalam $transaction — kalau salah satu gagal,
+  // seluruh operasi rollback (tidak ada state parsial).
+  return prisma.$transaction(async (tx) => {
+    await tx.attendanceLog.deleteMany({ where: { studentId: id } });
+    await tx.permit.deleteMany({ where: { studentId: id } });
+    await tx.faceVector.deleteMany({ where: { studentId: id } });
+    return tx.student.delete({ where: { id } });
+  });
 }
 
 export async function deleteFace(studentId: string) {
   const result = await prisma.faceVector.deleteMany({ where: { studentId } });
-  await triggerSyncForAllDevices();
   return { deleted: result.count > 0 };
 }
 
@@ -165,27 +158,33 @@ export async function uploadFace(studentId: string, pose: string, vector: number
     throw new Error("STUDENT_NOT_FOUND");
   }
 
-  // Validate pose
-  if (!VALID_POSES.has(pose)) {
-    throw new Error(`INVALID_POSE: expected one of ${[...VALID_POSES].join(", ")}, got ${pose}`);
+  // Validate pose (FRONT_1 .. FRONT_N, #132)
+  if (!isValidPose(pose)) {
+    throw new Error(`INVALID_POSE: expected FRONT_1..FRONT_${MAX_FRAMES}, got ${pose}`);
   }
 
-  // Validate vector dimension (MobileFaceNet = 192-d)
-  if (vector.length !== 192) {
-    throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192 (MobileFaceNet), got ${vector.length}`);
+  // Validate vector dimension (InsightFace w600k_mbf = 512-d)
+  if (vector.length !== 512) {
+    throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 512 (InsightFace), got ${vector.length}`);
   }
 
   const vectorStr = `[${vector.join(",")}]`;
   try {
-    const result = await prisma.$executeRawUnsafe(
-      `INSERT INTO face_vectors (student_id, pose, vector, updated_at) VALUES ($1, $2, $3::vector, NOW())
-       ON CONFLICT (student_id, pose) DO UPDATE SET vector = $3::vector, updated_at = NOW()`,
-      studentId,
-      pose,
-      vectorStr
-    );
-    await triggerSyncForAllDevices();
-    return result;
+    // PK baru = id auto (#133): tidak bisa ON CONFLICT (student_id, pose).
+    // Delete-then-insert dalam transaksi agar pose lama tidak menumpuk.
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `DELETE FROM face_vectors WHERE student_id = $1 AND pose = $2`,
+        studentId,
+        pose
+      );
+      return tx.$executeRawUnsafe(
+        `INSERT INTO face_vectors (student_id, pose, vector, updated_at) VALUES ($1, $2, $3::vector, NOW())`,
+        studentId,
+        pose,
+        vectorStr
+      );
+    });
   } catch (error: any) {
     if (error.message?.includes("vector")) {
       throw new Error(`PGVECTOR_ERROR: ${error.message}`);
@@ -202,34 +201,38 @@ export async function batchUploadFaces(studentId: string, vectors: { pose: strin
   }
 
   if (vectors.length === 0) {
-    throw new Error("EMPTY_VECTORS: at least one pose vector is required");
+    throw new Error("EMPTY_VECTORS: at least one face vector is required");
   }
 
   // Validate all poses and vectors
   for (const v of vectors) {
-    if (!VALID_POSES.has(v.pose)) {
-      throw new Error(`INVALID_POSE: expected one of ${[...VALID_POSES].join(", ")}, got ${v.pose}`);
+    if (!isValidPose(v.pose)) {
+      throw new Error(`INVALID_POSE: expected FRONT_1..FRONT_${MAX_FRAMES}, got ${v.pose}`);
     }
-    if (v.vector.length !== 192) {
-      throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 192 (MobileFaceNet), got ${v.vector.length} for pose ${v.pose}`);
+    if (v.vector.length !== 512) {
+      throw new Error(`VECTOR_DIMENSION_MISMATCH: expected 512 (InsightFace), got ${v.vector.length} for pose ${v.pose}`);
     }
   }
 
   try {
-    // Use a transaction for atomicity
-    await prisma.$transaction(
-      vectors.map(v => {
+    // PK baru = id auto (#133): replace set vektor per santri dalam transaksi —
+    // delete semua vektor lama santri, lalu insert set baru (registrasi ulang
+    // tidak menumpuk vektor lama).
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `DELETE FROM face_vectors WHERE student_id = $1`,
+        studentId
+      );
+      for (const v of vectors) {
         const vectorStr = `[${v.vector.join(",")}]`;
-        return prisma.$executeRawUnsafe(
-          `INSERT INTO face_vectors (student_id, pose, vector, updated_at) VALUES ($1, $2, $3::vector, NOW())
-           ON CONFLICT (student_id, pose) DO UPDATE SET vector = $3::vector, updated_at = NOW()`,
+        await tx.$executeRawUnsafe(
+          `INSERT INTO face_vectors (student_id, pose, vector, updated_at) VALUES ($1, $2, $3::vector, NOW())`,
           studentId,
           v.pose,
           vectorStr
         );
-      })
-    );
-    await triggerSyncForAllDevices();
+      }
+    });
     return { uploaded: vectors.length };
   } catch (error: any) {
     if (error.message?.includes("vector")) {

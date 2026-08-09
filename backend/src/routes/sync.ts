@@ -3,9 +3,11 @@ import { batchSyncSchema, recordScan } from "../services/attendance";
 import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
+import { computeFacesWatermark } from "../services/syncWatermark";
+import { verifyPermitScan, studentBriefSelect } from "../services/permit";
 
 export const syncRoutes = new Elysia()
-  .use(authGuard)
+  .use(authGuard())
   .get("/api/sync/faces", async ({ query }) => {
     const since = query.since as string | undefined;
 
@@ -30,7 +32,8 @@ export const syncRoutes = new Elysia()
         s.academic_year
       FROM face_vectors fv
       JOIN students s ON s.id = fv.student_id
-      WHERE $1::timestamptz IS NULL OR fv.updated_at >= $1::timestamptz`,
+      WHERE $1::timestamptz IS NULL OR fv.updated_at > $1::timestamptz
+      ORDER BY fv.id`,
       since ? new Date(since) : null
     );
 
@@ -50,32 +53,101 @@ export const syncRoutes = new Elysia()
       };
     });
 
-    return { data, since: since || null };
+    // Watermark = server-side max(updated_at) of returned rows, NOT an echo of
+    // the client's `since`. Clients persist this as their next `since` so the
+    // following sync only fetches the delta (issue #78).
+    const watermark = computeFacesWatermark(rows, since);
+
+    return { data, since: watermark };
   })
-  .post("/api/sync/attendance", async ({ body }) => {
+  .post("/api/sync/attendance", async ({ body, admin }) => {
     const created = [];
+    const skipped = [];
+    // #84: batch fetch semua student sekali (hilangkan N+1 loop findUnique)
+    const ids = (body.logs as { studentId: string }[]).map(l => l.studentId);
+    const students = await prisma.student.findMany({ where: { id: { in: ids } } });
+    const studentMap = new Map(students.map(s => [s.id, s]));
+
     for (const log of body.logs) {
-      const student = await prisma.student.findUnique({ where: { id: log.studentId } });
-      if (student) {
-        const record = await recordScan({
-          studentId: log.studentId,
-          studentName: student.name,
-          action: log.action,
-          confidenceScore: log.confidenceScore,
-          isViolation: log.isViolation,
-          violationType: log.violationType,
-          deviceId: log.deviceId,
-          photoCapture: log.photoCapture,
-          timestamp: log.timestamp
-        });
-        created.push(record);
+      const student = studentMap.get(log.studentId);
+      if (!student) {
+        // #84: JANGAN silent skip — laporkan supaya kiosk tahu & antrean tidak
+        // hilang tanpa jejak (data loss offline).
+        skipped.push({ studentId: log.studentId, reason: "student_not_found" });
+        continue;
       }
+      const record = await recordScan({
+        studentId: log.studentId,
+        studentName: student.name,
+        action: log.action,
+        confidenceScore: log.confidenceScore,
+        isViolation: log.isViolation,
+        violationType: log.violationType,
+        deviceId: log.deviceId,
+        photoCapture: log.photoCapture,
+        clientId: log.clientId, // #119: idempotency key (uuid per log offline)
+        timestamp: log.timestamp
+      });
+      created.push(record);
     }
-    return { success: true, data: { synced: created.length } };
+    return {
+      success: true,
+      data: {
+        synced: created.length,
+        skipped: skipped.length,
+        skippedLogs: skipped // #84: eksplisit, tidak silent
+      }
+    };
   }, { body: batchSyncSchema })
   .get("/api/sync/rules", async () => {
     const rules = await prisma.campusRule.findMany();
     return rules;
+  })
+  .get("/api/sync/permits", async () => {
+    // #135: full-replace — kiosk men-download semua izin mandiri/kelompok
+    // (pending/approved/rejected, 7 hari terakhir) + anggota + student info.
+    const permits = await prisma.permit.findMany({
+      where: {
+        type: { in: ["izin_mandiri", "izin_kelompok"] },
+        status: { in: ["pending", "approved", "rejected"] },
+        endDate: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        members: { include: { student: { select: studentBriefSelect } } }
+      }
+    });
+    return { data: permits };
+  })
+  .post("/api/sync/permits-verifications", async ({ body }) => {
+    // #135: batch upload verifikasi izin offline (sama pola dgn sync attendance).
+    const logs = (body as { logs: Array<{
+      permitId: string;
+      studentId: string;
+      confidenceScore?: number;
+      deviceId?: string;
+      timestamp?: number;
+      clientId?: string;
+    }> }).logs;
+    const created = [];
+    const skipped = [];
+    for (const log of logs) {
+      try {
+        const result = await verifyPermitScan(log);
+        created.push({ studentId: log.studentId, permitId: log.permitId, action: result.log.action, idempotent: !!result.idempotent });
+      } catch (e) {
+        skipped.push({
+          permitId: log.permitId,
+          studentId: log.studentId,
+          reason: e instanceof Error ? e.message : "UNKNOWN"
+        });
+      }
+    }
+    return {
+      success: true,
+      data: { synced: created.length, skipped: skipped.length, skippedLogs: skipped, syncedLogs: created }
+    };
   })
   .get("/api/sync/requested", async ({ query }) => {
     const deviceId = query.deviceId as string | undefined;
@@ -112,8 +184,12 @@ export const syncRoutes = new Elysia()
       orderBy: { createdAt: "desc" }
     });
 
-    const unprocessedLogs = await prisma.syncLog.count({
-      where: { deviceId, status: "pending" }
+    // #131: unprocessedLogs sebelumnya dihitung dari sync_log status="pending"
+    // yang TIDAK PERNAH ada (sync_log hanya success/failed) → selalu 0 dan
+    // menyesatkan. Makna sebenarnya: berapa log offline device yang BELUM
+    // ter-upload ke server. Sumber kebenaran = attendance_logs isSynced=false.
+    const unprocessedLogs = await prisma.attendanceLog.count({
+      where: { deviceId, isSynced: false }
     });
 
     return {
@@ -145,11 +221,21 @@ export const syncRoutes = new Elysia()
     await notifyDevicesChange(requestedBy);
     return { success: true, data: { triggeredDevices: true } };
   })
-  .post("/api/sync/complete", async ({ body }) => {
-    const data = body as { deviceId: string; syncType?: string; status?: string; logsCount?: number };
+  .post("/api/sync/complete", async ({ body, admin }) => {
+    // #86: deviceId WAJIB dari identitas JWT (admin.id = deviceId dari
+    // loginDevice), BUKAN dari body. Token device lain tidak bisa menandai
+    // SyncRequest / menulis SyncLog milik device lain.
+    const deviceId = admin?.id;
+    if (!deviceId) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized: device identity required" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const data = body as { syncType?: string; status?: string; logsCount?: number };
     await prisma.syncLog.create({
       data: {
-        deviceId: data.deviceId,
+        deviceId,
         syncType: data.syncType || "manual",
         status: data.status || "success",
         logsCount: data.logsCount || 0
@@ -157,9 +243,15 @@ export const syncRoutes = new Elysia()
     });
 
     await prisma.syncRequest.updateMany({
-      where: { deviceId: data.deviceId, isProcessed: false },
+      where: { deviceId, isProcessed: false },
       data: { isProcessed: true, processedAt: new Date() }
     });
 
-    return { success: true };
+    // #81: SyncRequest lama yang sudah processed dihapus (tabel tak tumbuh tanpa batas)
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.syncRequest.deleteMany({
+      where: { isProcessed: true, processedAt: { lte: cutoff } }
+    });
+
+    return { success: true, deviceId };
   });

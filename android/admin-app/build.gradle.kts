@@ -7,6 +7,17 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// #67: override API_BASE_URL per environment via local.properties
+// (gitignored). Contoh: faceGateApiBaseUrl=http://192.168.1.10:8150
+import java.util.Properties
+
+fun apiBaseUrlOverride(): String? {
+    val f = rootProject.file("local.properties")
+    if (!f.exists()) return null
+    val props = Properties().apply { f.inputStream().use { load(it) } }
+    return props.getProperty("faceGateApiBaseUrl")?.takeIf { it.isNotBlank() }
+}
+
 android {
     namespace = "com.facegate.adminapp"
     compileSdk = 35
@@ -18,12 +29,14 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
+        buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlOverride() ?: "https://facegate.utc.web.id"}\"")
     }
 
     buildTypes {
         debug {
-            buildConfigField("String", "API_BASE_URL", "\"https://facegate.utc.web.id\"")
+            // Default: server produksi (Cloudflare Tunnel). Untuk dev lokal,
+            // override via local.properties (faceGateApiBaseUrl=http://10.0.2.2:8150).
+            buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrlOverride() ?: "https://facegate.utc.web.id"}\"")
         }
         release {
             isMinifyEnabled = true

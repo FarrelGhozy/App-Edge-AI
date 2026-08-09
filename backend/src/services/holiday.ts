@@ -1,4 +1,5 @@
 import prisma from "./prisma";
+import { wibDayStart, wibDayEndExclusive } from "./wib";
 
 export async function listHolidays(year?: number) {
   const where: Record<string, unknown> = {};
@@ -39,12 +40,12 @@ export async function deleteHoliday(id: string) {
 }
 
 export async function isTodayHoliday() {
+  // #110: batas hari menurut WIB, bukan setHours() timezone proses.
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dayStart = wibDayStart(today);
+  const dayEnd = wibDayEndExclusive(today);
   const holiday = await prisma.holiday.findFirst({
-    where: { date: { gte: today, lt: tomorrow } }
+    where: { date: { gte: dayStart, lt: dayEnd } }
   });
   return { isHoliday: !!holiday, holiday: holiday || null };
 }

@@ -18,7 +18,10 @@ data class ViolationDetailState(
     val error: String? = null,
     val isProcessing: Boolean = false,
     val resolveNote: String = "",
-    val actionMessage: String? = null
+    val actionMessage: String? = null,
+    val showDeleteConfirm: Boolean = false,
+    val isDeleted: Boolean = false,
+    val deleteError: String? = null
 )
 
 @HiltViewModel
@@ -33,10 +36,12 @@ class ViolationDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = ViolationDetailState(isLoading = true)
             try {
-                val response = apiService.getViolations(studentId = violationId)
-                if (response.isSuccessful && response.body() != null) {
-                    val v = response.body()!!.data.find { it.id == violationId }
-                    _uiState.value = ViolationDetailState(violation = v)
+                // #125: fetch violation by id langsung (endpoint /api/violations/:id).
+                // Dulu: getViolations(studentId = violationId) — mengirim ID violation
+                // sebagai studentId → daftar tak relevan, find selalu gagal.
+                val response = apiService.getViolationById(violationId)
+                if (response.isSuccessful && response.body()?.data != null) {
+                    _uiState.value = ViolationDetailState(violation = response.body()!!.data)
                 } else {
                     _uiState.value = ViolationDetailState(error = "Pelanggaran tidak ditemukan")
                 }
@@ -75,6 +80,30 @@ class ViolationDetailViewModel @Inject constructor(
                     isProcessing = false,
                     error = "Gagal terhubung"
                 )
+            }
+        }
+    }
+
+    fun showDeleteConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteConfirm = true)
+    }
+
+    fun hideDeleteConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteConfirm = false)
+    }
+
+    fun deleteViolation(violationId: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(showDeleteConfirm = false, deleteError = null)
+            try {
+                val response = apiService.deleteViolation(violationId)
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(isDeleted = true)
+                } else {
+                    _uiState.value = _uiState.value.copy(deleteError = "Gagal menghapus pelanggaran")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(deleteError = "Gagal terhubung ke server")
             }
         }
     }

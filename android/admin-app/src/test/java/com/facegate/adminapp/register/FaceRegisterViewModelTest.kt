@@ -1,11 +1,9 @@
 package com.facegate.adminapp.register
 
 import com.facegate.core.data.remote.ApiService
-import com.facegate.core.face.FaceDetectionResult
 import com.facegate.core.face.FaceDetectorWrapper
-import com.facegate.core.face.FaceEmbedder
+import com.facegate.core.face.FaceEmbedderProvider
 import com.facegate.core.face.LivenessDetector
-import com.facegate.core.data.remote.dto.UploadFaceRequest
 import android.util.Log
 import io.mockk.*
 import io.mockk.impl.annotations.MockK
@@ -16,7 +14,6 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
-import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FaceRegisterViewModelTest {
@@ -25,7 +22,7 @@ class FaceRegisterViewModelTest {
     private lateinit var faceDetector: FaceDetectorWrapper
 
     @MockK
-    private lateinit var faceEmbedder: FaceEmbedder
+    private lateinit var faceEmbedder: FaceEmbedderProvider
 
     @MockK
     private lateinit var livenessDetector: LivenessDetector
@@ -45,7 +42,7 @@ class FaceRegisterViewModelTest {
         every { Log.e(any(), any()) } returns 0
         every { Log.e(any(), any(), any()) } returns 0
 
-        every { faceDetector.init() } returns Unit
+        every { faceDetector.init() } returns true
         every { faceEmbedder.init() } returns true
         every { livenessDetector.reset() } returns Unit
 
@@ -66,12 +63,14 @@ class FaceRegisterViewModelTest {
     }
 
     @Test
-    fun `initial state should be DETECTING`() {
+    fun `initial state should be DETECTING with new video capture defaults`() {
         val state = viewModel.state.value
         assertEquals(FaceRegisterStep.DETECTING, state.step)
         assertFalse(state.isSuccess)
-        assertEquals(0, state.totalFramesCollected)
-        assertEquals(5, state.framesRequired) // 5 poses: CENTER, LEFT, RIGHT, UP, DOWN
+        // #132: 5–10 frame FRONT (bukan 5 pose)
+        assertEquals(5, state.framesRequired)
+        assertEquals(10, state.framesMax)
+        assertEquals(0f, state.recordingProgress)
     }
 
     @Test
@@ -85,9 +84,10 @@ class FaceRegisterViewModelTest {
         viewModel.reset()
         val state = viewModel.state.value
         assertEquals(FaceRegisterStep.DETECTING, state.step)
-        assertEquals(0, state.totalFramesCollected)
         assertNull(state.error)
         assertFalse(state.isSuccess)
+        assertEquals(0f, state.recordingProgress)
+        assertTrue(state.selectedFrames.isEmpty())
     }
 
     @Test
@@ -99,64 +99,61 @@ class FaceRegisterViewModelTest {
         assertFalse(state.isUploading)
         assertFalse(state.isSuccess)
         assertNull(state.detection)
-        assertEquals(0, state.totalFramesCollected)
         assertEquals(5, state.framesRequired)
+        assertEquals(10, state.framesMax)
         assertEquals(0f, state.currentQualityScore)
         assertTrue(state.qualityMessages.isEmpty())
-        assertEquals(CapturePose.CENTER, state.currentPose)
-        assertTrue(state.capturedPoses.isEmpty())
         assertEquals(0f, state.currentYaw)
         assertEquals(0f, state.currentPitch)
+        assertEquals(10, state.recordingSeconds)
     }
 
     @Test
-    fun `skipPose should move to next pose`() {
-        // After reset, current pose is CENTER
+    fun `retryRecording should return to DETECTING and clear selection`() {
         viewModel.setStudentId("test-123")
-        viewModel.skipPose()
+        viewModel.retryRecording()
         val state = viewModel.state.value
-        assertEquals(CapturePose.LEFT, state.currentPose)
-        assertEquals(FaceRegisterStep.POSITIONING, state.step)
+        assertEquals(FaceRegisterStep.DETECTING, state.step)
+        assertTrue(state.selectedFrames.isEmpty())
+        assertEquals(0f, state.recordingProgress)
     }
 
     @Test
-    fun `skipPose through all 5 poses should start embedding`() {
+    fun `confirmRecording with empty selection should not crash`() {
         viewModel.setStudentId("test-123")
-        // Skip CENTER -> LEFT -> RIGHT -> UP -> DOWN -> (should proceed to embedding but fail with empty queues)
-        viewModel.skipPose() // skip CENTER
-        viewModel.skipPose() // skip LEFT
-        viewModel.skipPose() // skip RIGHT
-        viewModel.skipPose() // skip UP
-        viewModel.skipPose() // skip DOWN — should trigger proceedToEmbedding
-        testDispatcher.scheduler.advanceUntilIdle()
-        // Since all queues are empty, state should be ERROR
+        viewModel.confirmRecording()
         val state = viewModel.state.value
-        assertEquals(FaceRegisterStep.ERROR, state.step)
-        assertNotNull(state.error)
+        // Tidak ada frame terpilih → tetap di step yang sama (tidak crash)
+        assertTrue(state.step != FaceRegisterStep.UPLOADING)
     }
 
     @Test
     fun `reset should clear after partial capture`() {
         viewModel.setStudentId("test-123")
-        viewModel.skipPose() // move to LEFT
+        viewModel.retryRecording()
         viewModel.reset()
         val state = viewModel.state.value
         assertEquals(FaceRegisterStep.DETECTING, state.step)
-        assertEquals(CapturePose.CENTER, state.currentPose)
-        assertTrue(state.capturedPoses.isEmpty())
-        assertEquals(0, state.totalFramesCollected)
+        assertTrue(state.selectedFrames.isEmpty())
+        assertEquals(0f, state.recordingProgress)
     }
 
     @Test
-    fun `poseOrder should contain all 5 poses`() {
+    fun `capture mode set resets studentId and clears captured vectors on reset`() {
         viewModel.setStudentId("test-123")
-        viewModel.skipPose()
-        assertEquals(CapturePose.LEFT, viewModel.state.value.currentPose)
-        viewModel.skipPose()
-        assertEquals(CapturePose.RIGHT, viewModel.state.value.currentPose)
-        viewModel.skipPose()
-        assertEquals(CapturePose.UP, viewModel.state.value.currentPose)
-        viewModel.skipPose()
-        assertEquals(CapturePose.DOWN, viewModel.state.value.currentPose)
+        viewModel.setCaptureMode(true)
+        // reset() dalam capture mode harus membersihkan capturedVectors
+        viewModel.reset()
+        val state = viewModel.state.value
+        assertEquals(FaceRegisterStep.DETECTING, state.step)
+        assertNull(viewModel.capturedVectors.value)
+    }
+
+    @Test
+    fun `capture mode should never call uploadFaces api`() {
+        viewModel.setCaptureMode(true)
+        viewModel.reset()
+        coVerify(exactly = 0) { apiService.uploadFaces(any(), any()) }
+        coVerify(exactly = 0) { apiService.uploadFace(any(), any()) }
     }
 }

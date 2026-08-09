@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -15,6 +16,21 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FaceGate"
         android:usesCleartextTraffic="true">
+
+        <!-- Remove WorkManager's default initializer so on-demand initialization
+             picks up KioskScannerApp.getWorkManagerConfiguration() → HiltWorkerFactory.
+             Without this, WorkManager initializes itself first and @HiltWorker
+             classes cannot be instantiated (NoSuchMethodException). -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                tools:node="remove" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
