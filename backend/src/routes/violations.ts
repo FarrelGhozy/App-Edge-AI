@@ -29,7 +29,10 @@ export const violationRoutes = new Elysia()
       page: query.page ? parseInt(query.page as string) : 1,
       pageSize: query.pageSize ? parseInt(query.pageSize as string) : 20,
       type: query.type as string | undefined,
-      studentId: query.studentId as string | undefined
+      studentId: query.studentId as string | undefined,
+      search: query.search as string | undefined,
+      from: query.from as string | undefined,
+      to: query.to as string | undefined
     };
     return await listViolations(params);
   })

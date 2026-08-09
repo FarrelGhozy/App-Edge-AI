@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.remote.ApiService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,7 +27,10 @@ data class ViolationListState(
     val hasMore: Boolean = false,
     val isLoadingMore: Boolean = false,
     val page: Int = 1,
-    val error: String? = null
+    val error: String? = null,
+    val searchQuery: String = "",
+    val fromDate: String? = null,
+    val toDate: String? = null
 )
 
 @HiltViewModel
@@ -36,11 +41,19 @@ class ViolationListViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ViolationListState())
     val uiState: StateFlow<ViolationListState> = _uiState.asStateFlow()
 
+    private var searchJob: Job? = null
+
     fun load(page: Int = 1) {
         viewModelScope.launch {
             if (page == 1) _uiState.value = _uiState.value.copy(error = null)
+            val s = _uiState.value
             try {
-                val response = apiService.getViolations(page = page)
+                val response = apiService.getViolations(
+                    page = page,
+                    search = s.searchQuery.ifBlank { null },
+                    from = s.fromDate,
+                    to = s.toDate
+                )
                 if (response.isSuccessful && response.body() != null) {
                     val body = response.body()!!
                     val items = body.data.map { dto ->
@@ -85,5 +98,30 @@ class ViolationListViewModel @Inject constructor(
         val nextPage = _uiState.value.page + 1
         _uiState.value = _uiState.value.copy(isLoadingMore = true)
         load(page = nextPage)
+    }
+
+    fun onSearch(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(300)
+            _uiState.value = _uiState.value.copy(page = 1, isLoading = true, error = null)
+            load(page = 1)
+        }
+    }
+
+    fun setDateRange(from: String?, to: String?) {
+        _uiState.value = _uiState.value.copy(
+            fromDate = from,
+            toDate = to,
+            page = 1,
+            isLoading = true,
+            error = null
+        )
+        load(page = 1)
+    }
+
+    fun clearDateRange() {
+        setDateRange(null, null)
     }
 }

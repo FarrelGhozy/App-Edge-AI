@@ -143,7 +143,10 @@ interface ApiService {
         @Query("page") page: Int = 1,
         @Query("pageSize") pageSize: Int = 20,
         @Query("type") type: String? = null,
-        @Query("studentId") studentId: String? = null
+        @Query("studentId") studentId: String? = null,
+        @Query("search") search: String? = null,
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null
     ): Response<ViolationListResponse>
 
     // #125: endpoint detail violation by id — ViolationDetailViewModel harus
