@@ -18,7 +18,10 @@ data class ViolationDetailState(
     val error: String? = null,
     val isProcessing: Boolean = false,
     val resolveNote: String = "",
-    val actionMessage: String? = null
+    val actionMessage: String? = null,
+    val showDeleteConfirm: Boolean = false,
+    val isDeleted: Boolean = false,
+    val deleteError: String? = null
 )
 
 @HiltViewModel
@@ -77,6 +80,30 @@ class ViolationDetailViewModel @Inject constructor(
                     isProcessing = false,
                     error = "Gagal terhubung"
                 )
+            }
+        }
+    }
+
+    fun showDeleteConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteConfirm = true)
+    }
+
+    fun hideDeleteConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteConfirm = false)
+    }
+
+    fun deleteViolation(violationId: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(showDeleteConfirm = false, deleteError = null)
+            try {
+                val response = apiService.deleteViolation(violationId)
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(isDeleted = true)
+                } else {
+                    _uiState.value = _uiState.value.copy(deleteError = "Gagal menghapus pelanggaran")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(deleteError = "Gagal terhubung ke server")
             }
         }
     }

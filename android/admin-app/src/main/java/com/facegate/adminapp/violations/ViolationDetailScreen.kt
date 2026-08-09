@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,6 +31,32 @@ fun ViolationDetailScreen(
 
     LaunchedEffect(violationId) { viewModel.load(violationId) }
 
+    LaunchedEffect(state.isDeleted) {
+        if (state.isDeleted) navController.popBackStack()
+    }
+
+    if (state.showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { viewModel.hideDeleteConfirm() },
+            icon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Hapus pelanggaran?") },
+            text = {
+                Text(
+                    "Data pelanggaran ${state.violation?.studentName ?: ""} " +
+                        "(${state.violation?.type ?: ""}) akan dihapus permanen."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.deleteViolation(violationId) }
+                ) { Text("Hapus", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.hideDeleteConfirm() }) { Text("Batal") }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -37,6 +64,15 @@ fun ViolationDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { viewModel.showDeleteConfirm() }) {
+                        Icon(
+                            Icons.Default.Delete,
+                            "Hapus pelanggaran",
+                            tint = MaterialTheme.colorScheme.error
+                        )
                     }
                 }
             )
@@ -159,6 +195,24 @@ fun ViolationDetailScreen(
                                     modifier = Modifier.padding(12.dp),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        if (state.deleteError != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                                )
+                            ) {
+                                Text(
+                                    state.deleteError!!,
+                                    modifier = Modifier.padding(12.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error
                                 )
                             }
                         }

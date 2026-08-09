@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { listViolations } from "../services/violation";
 import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
+import { audit } from "../services/audit";
 
 // #123: Zod schema — body divalidasi, bukan di-cast mentah.
 const createViolationSchema = t.Object({
@@ -79,6 +80,16 @@ export const violationRoutes = new Elysia()
         data: { isResolved: true, resolvedAt: new Date(), resolvedNote: resolvedNote || null }
       });
       return { success: true, data: violation };
+    } catch (e) {
+      if (isP2025(e)) return notFound("Violation tidak ditemukan");
+      throw e;
+    }
+  })
+  .delete("/api/violations/:id", async ({ params: { id }, admin }) => {
+    try {
+      await prisma.violation.delete({ where: { id } });
+      await audit(admin, { action: "DELETE", entityType: "VIOLATIONS", entityId: id });
+      return { success: true };
     } catch (e) {
       if (isP2025(e)) return notFound("Violation tidak ditemukan");
       throw e;

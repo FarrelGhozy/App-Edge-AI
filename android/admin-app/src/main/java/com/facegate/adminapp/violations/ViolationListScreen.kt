@@ -36,9 +36,17 @@ fun ViolationListScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val pullRefreshState = rememberPullToRefreshState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
+    var violationToDelete by remember { mutableStateOf<ViolationItem?>(null) }
     var showFromPicker by rememberSaveable { mutableStateOf(false) }
     var showToPicker by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(state.deleteMessage, state.deleteError) {
+        val message = state.deleteMessage ?: state.deleteError ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.clearFeedback()
+    }
 
     val fromPickerState = rememberDatePickerState(
         initialSelectedDateMillis = state.fromDate?.let { dateToMillis(it) }
@@ -61,7 +69,8 @@ fun ViolationListScreen(
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = state.isRefreshing,
@@ -258,6 +267,14 @@ fun ViolationListScreen(
                                                 color = Color(0xFFFFA726)
                                             )
                                         }
+                                        IconButton(onClick = { violationToDelete = v }) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                "Hapus pelanggaran",
+                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -331,6 +348,31 @@ fun ViolationListScreen(
         ) {
             DatePicker(state = toPickerState)
         }
+    }
+
+    violationToDelete?.let { v ->
+        AlertDialog(
+            onDismissRequest = { violationToDelete = null },
+            icon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Hapus pelanggaran?") },
+            text = {
+                Text(
+                    "${v.studentName} — ${v.type}\n" +
+                        if (v.timestamp.isNotBlank()) formatViolationDate(v.timestamp) else ""
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteViolation(v.id)
+                        violationToDelete = null
+                    }
+                ) { Text("Hapus", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { violationToDelete = null }) { Text("Batal") }
+            }
+        )
     }
 }
 

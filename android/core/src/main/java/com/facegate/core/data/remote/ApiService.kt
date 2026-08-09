@@ -162,6 +162,9 @@ interface ApiService {
         @Body request: ResolveViolationRequest
     ): Response<ApiResponse<ViolationDto>>
 
+    @DELETE("api/violations/{id}")
+    suspend fun deleteViolation(@Path("id") id: String): Response<StatusResponse>
+
     // =========== NOTIFICATIONS ===========
     @GET("api/notifications")
     suspend fun getNotifications(

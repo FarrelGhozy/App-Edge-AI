@@ -30,7 +30,9 @@ data class ViolationListState(
     val error: String? = null,
     val searchQuery: String = "",
     val fromDate: String? = null,
-    val toDate: String? = null
+    val toDate: String? = null,
+    val deleteMessage: String? = null,
+    val deleteError: String? = null
 )
 
 @HiltViewModel
@@ -123,5 +125,27 @@ class ViolationListViewModel @Inject constructor(
 
     fun clearDateRange() {
         setDateRange(null, null)
+    }
+
+    fun clearFeedback() {
+        _uiState.value = _uiState.value.copy(deleteMessage = null, deleteError = null)
+    }
+
+    fun deleteViolation(id: String) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.deleteViolation(id)
+                if (response.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(
+                        violations = _uiState.value.violations.filterNot { it.id == id },
+                        deleteMessage = "Pelanggaran dihapus"
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(deleteError = "Gagal menghapus pelanggaran")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(deleteError = "Gagal terhubung ke server")
+            }
+        }
     }
 }
