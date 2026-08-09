@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.ui.components.*
+import com.facegate.core.util.formatWibDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,8 +147,8 @@ fun PermitDetailScreen(
                             // Info rows
                             InfoRow("Status", p.status.uppercase())
                             InfoRow("Jenis", if (p.type == "izin_harian") "Izin Harian" else "Pengajuan Izin")
-                            InfoRow("Tanggal Mulai", p.startDate.take(10))
-                            InfoRow("Tanggal Selesai", p.endDate.take(10))
+                            InfoRow("Tanggal Mulai", formatWibDate(p.startDate))
+                            InfoRow("Tanggal Selesai", formatWibDate(p.endDate))
 
                             val startTime = p.startTime
                             if (startTime != null) {

@@ -64,19 +64,19 @@ class RetinaFaceDetector(private val context: Context) : FaceDetectorProvider {
             if (session == null) return false
 
             // Map outputs by shape: [N,1]=scores, [N,4]=boxes, [N,10]=landmarks,
-                        // ordered by row count desc (12800 → stride 8, 3200 → stride 16, 800 → stride 32)
-                        val outputInfo = session!!.getOutputInfo()
-                        fun rowsOf(entry: Map.Entry<String, ai.onnxruntime.NodeInfo>): Long =
-                            (entry.value.info as? ai.onnxruntime.TensorInfo)?.shape?.getOrElse(0) { -1L } ?: -1L
-                        fun colsOf(entry: Map.Entry<String, ai.onnxruntime.NodeInfo>): Long =
-                            (entry.value.info as? ai.onnxruntime.TensorInfo)?.shape?.getOrElse(1) { -1L } ?: -1L
+            // ordered by row count desc (12800 → stride 8, 3200 → stride 16, 800 → stride 32)
+            val outputInfo = session!!.getOutputInfo()
+            fun rowsOf(entry: Map.Entry<String, ai.onnxruntime.NodeInfo>): Long =
+                (entry.value.info as? ai.onnxruntime.TensorInfo)?.shape?.getOrElse(0) { -1L } ?: -1L
+            fun colsOf(entry: Map.Entry<String, ai.onnxruntime.NodeInfo>): Long =
+                (entry.value.info as? ai.onnxruntime.TensorInfo)?.shape?.getOrElse(1) { -1L } ?: -1L
 
-                        scoreNames = outputInfo.entries.filter { colsOf(it) == 1L }
-                            .sortedByDescending { rowsOf(it) }.map { it.key }
-                        boxNames = outputInfo.entries.filter { colsOf(it) == 4L }
-                            .sortedByDescending { rowsOf(it) }.map { it.key }
-                        kpsNames = outputInfo.entries.filter { colsOf(it) == 10L }
-                            .sortedByDescending { rowsOf(it) }.map { it.key }
+            scoreNames = outputInfo.entries.filter { colsOf(it) == 1L }
+                .sortedByDescending { rowsOf(it) }.map { it.key }
+            boxNames = outputInfo.entries.filter { colsOf(it) == 4L }
+                .sortedByDescending { rowsOf(it) }.map { it.key }
+            kpsNames = outputInfo.entries.filter { colsOf(it) == 10L }
+                .sortedByDescending { rowsOf(it) }.map { it.key }
 
             if (scoreNames.size != 3 || boxNames.size != 3 || kpsNames.size != 3) {
                 Log.e(TAG, "Unexpected output layout: scores=${scoreNames.size} boxes=${boxNames.size} kps=${kpsNames.size}")

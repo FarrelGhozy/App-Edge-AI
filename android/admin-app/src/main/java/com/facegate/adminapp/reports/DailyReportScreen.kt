@@ -20,6 +20,7 @@ import com.facegate.adminapp.ui.components.EmptyState
 import com.facegate.adminapp.ui.components.ErrorState
 import com.facegate.adminapp.ui.components.LoadingState
 import com.facegate.adminapp.ui.components.StatusBadge
+import com.facegate.core.util.formatWib
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -191,7 +192,7 @@ fun DailyReportScreen(
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
-                                                log.timestamp.take(19).replace("T", " "),
+                                                formatWib(log.timestamp, withSeconds = true),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )

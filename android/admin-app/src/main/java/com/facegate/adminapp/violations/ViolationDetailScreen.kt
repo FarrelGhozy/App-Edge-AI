@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.ui.components.*
+import com.facegate.core.util.formatWib
 import androidx.compose.ui.graphics.Color
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,7 +76,7 @@ fun ViolationDetailScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 InfoRow("Tipe", typeLabel(v.type))
-                                InfoRow("Waktu", v.timestamp.take(19).replace("T", " "))
+                                InfoRow("Waktu", formatWib(v.timestamp, withSeconds = true))
                                 if (v.description != null) {
                                     InfoRow("Keterangan", v.description!!)
                                 }
@@ -86,7 +87,7 @@ fun ViolationDetailScreen(
                                 if (v.resolvedAt != null) {
                                     InfoRow(
                                         "Diselesaikan",
-                                        v.resolvedAt!!.take(19).replace("T", " ")
+                                        formatWib(v.resolvedAt, withSeconds = true)
                                     )
                                 }
                             }

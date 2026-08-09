@@ -20,6 +20,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.ui.components.*
 import com.facegate.adminapp.ui.theme.*
+import com.facegate.core.util.formatWib
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -195,7 +196,7 @@ private fun AttendanceLogCard(log: com.facegate.core.data.remote.dto.AttendanceL
                 StatusBadge(text = actionText, color = actionColor)
             }
             Text(
-                log.timestamp.take(16).replace("T", " "),
+                formatWib(log.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

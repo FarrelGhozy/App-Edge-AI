@@ -17,6 +17,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.ui.components.*
 import com.facegate.adminapp.ui.theme.*
+import com.facegate.core.util.formatWib
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -151,7 +152,7 @@ private fun OutsideStudentCard(student: com.facegate.core.data.remote.dto.Outsid
                 )
                 if (student.keluarSince != null) {
                     Text(
-                        "Keluar sejak: ${student.keluarSince}",
+                        "Keluar sejak: ${formatWib(student.keluarSince, withSeconds = true)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )

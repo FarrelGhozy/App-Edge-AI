@@ -19,6 +19,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -110,10 +112,9 @@ fun ScannerScreen(
     var canvasWidth by remember { mutableFloatStateOf(0f) }
     var canvasHeight by remember { mutableFloatStateOf(0f) }
 
-    // Is front camera? Affects coordinate mirroring
-    val isFrontCamera by remember {
-        mutableStateOf(CameraSelector.DEFAULT_FRONT_CAMERA.lensFacing == CameraSelector.LENS_FACING_FRONT)
-    }
+    // Is front camera? Affects coordinate mirroring.
+    // Kiosk selalu pakai DEFAULT_FRONT_CAMERA (lihat bindCamera), jadi selalu front.
+    val isFrontCamera = true
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (!cameraPermissionGranted.value) {
@@ -411,24 +412,74 @@ fun ScannerScreen(
                 else -> {}
             }
 
-            // ─── Reset button (top-right corner) ───
+            // ─── Wipe & Sync buttons (top-right corner) ───
             if (state is ScannerViewModel.UIState.Error || state is ScannerViewModel.UIState.Success) {
                 // Handled above
             } else {
-                IconButton(
-                    onClick = { viewModel.syncNow() },
+                // #141: wipe confirmation dialog — hapus semua data kiosk lalu
+                // pull ulang penuh dari server. Tombol trash di kiri tombol sync.
+                var showWipeConfirm by remember { mutableStateOf(false) }
+
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 48.dp, end = 8.dp)
-                        .size(40.dp)
-                        .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
-                    // #130: aksesibilitas — deskripsi utk pembaca layar.
-                    enabled = syncStatus == null
+                        .padding(top = 48.dp, end = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("↻", color = Color.White, fontSize = 20.sp,
-                        modifier = Modifier.semantics {
-                            contentDescription = "Sinkronkan data"
-                        })
+                    IconButton(
+                        onClick = { showWipeConfirm = true },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                        enabled = syncStatus == null
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = "Hapus semua data & muat ulang",
+                            tint = Color.White
+                        )
+                    }
+                    IconButton(
+                        onClick = { viewModel.syncNow() },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                        // #130: aksesibilitas — deskripsi utk pembaca layar.
+                        enabled = syncStatus == null
+                    ) {
+                        Text("↻", color = Color.White, fontSize = 20.sp,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Sinkronkan data"
+                            })
+                    }
+                }
+
+                if (showWipeConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showWipeConfirm = false },
+                        title = { Text("Hapus semua data?") },
+                        text = {
+                            Text(
+                                "Semua data di kiosk ini (santri, wajah, aturan, log) " +
+                                "akan dihapus, lalu dimuat ulang penuh dari server."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showWipeConfirm = false
+                                    viewModel.wipeAndResync()
+                                }
+                            ) {
+                                Text("Ya, Hapus & Muat Ulang", color = Color(0xFFEF5350))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showWipeConfirm = false }) {
+                                Text("Batal")
+                            }
+                        }
+                    )
                 }
             }
         }

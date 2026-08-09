@@ -23,4 +23,11 @@ class SyncMetadata(private val context: Context) {
             prefs[LAST_FACE_SYNC_KEY] = timestamp
         }
     }
+
+    /** Hapus watermark sync — sync berikutnya jadi full pull (server kirim semua data). */
+    suspend fun clear() {
+        context.syncStore.edit { prefs ->
+            prefs.remove(LAST_FACE_SYNC_KEY)
+        }
+    }
 }

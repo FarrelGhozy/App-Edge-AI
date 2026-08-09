@@ -3,6 +3,8 @@ package com.facegate.kioskscanner.scanner
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.util.Log
+import androidx.annotation.OptIn
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageProxy
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
@@ -118,6 +120,7 @@ class ScannerViewModel @Inject constructor(
         ) : UIState()
     }
 
+    @OptIn(ExperimentalGetImage::class)
     fun onFrameCaptured(imageProxy: ImageProxy) {
             // #129: imageProxy (image buffer kamera) HARUS selalu di-close pada SEMUA
             // path (success, error, throttle-skip, dsb.). Kalau tidak, buffer kamera
@@ -457,6 +460,30 @@ class ScannerViewModel @Inject constructor(
                     // bingung melihat 0 saat vektor sudah pernah di-download.
                     val total = faceVectorDao.count()
                     _syncStatus.value = "OK: ${result.facesDownloaded} wajah baru, ${total} tersimpan, ${result.rulesDownloaded} aturan"
+                } else {
+                    _syncStatus.value = "Gagal: ${result.error ?: "unknown"}"
+                }
+            } catch (e: Exception) {
+                _syncStatus.value = "Gagal: ${e.message}"
+            }
+            kotlinx.coroutines.delay(3000)
+            _syncStatus.value = null
+        }
+    }
+
+    /**
+     * Hapus total data lokal kiosk (santri, wajah, aturan, log) lalu pull ulang
+     * semua dari server. Log offline di-upload dulu supaya tidak hilang.
+     */
+    fun wipeAndResync() {
+        viewModelScope.launch {
+            _syncStatus.value = "Menghapus data lokal..."
+            try {
+                val deviceId = devicePreferences.getDeviceId() ?: "unknown"
+                val result = syncManager.wipeAndResync(deviceId)
+                if (result.success) {
+                    val total = faceVectorDao.count()
+                    _syncStatus.value = "OK: ${result.facesDownloaded} wajah dimuat ulang, ${total} tersimpan, ${result.rulesDownloaded} aturan"
                 } else {
                     _syncStatus.value = "Gagal: ${result.error ?: "unknown"}"
                 }

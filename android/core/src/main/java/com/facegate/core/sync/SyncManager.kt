@@ -62,6 +62,30 @@ class SyncManager @Inject constructor(
         }
     }
 
+    /**
+     * Wipe total data lokal kiosk (factory reset data sync) lalu pull ulang
+     * semuanya dari server:
+     * 1. Upload dulu log yang belum ter-sync agar tidak hilang dari server.
+     * 2. Hapus semua face vectors, students, rules, dan log lokal.
+     * 3. Reset watermark sync → request berikutnya tanpa `since` → server
+     *    mengembalikan SEMUA data (full pull).
+     * 4. Kosongkan index in-memory (jangan ada match pakai vektor lama).
+     */
+    suspend fun wipeAndResync(deviceId: String): SyncResult = withContext(Dispatchers.IO) {
+        try {
+            uploadUnsyncedLogs()
+            attendanceLogDao.deleteAll()
+            faceVectorDao.deleteAll()
+            studentDao.deleteAll()
+            campusRuleDao.deleteAll()
+            syncMetadata.clear()
+            faceMatcher.clear()
+            syncAll(deviceId)
+        } catch (e: Exception) {
+            SyncResult(success = false, error = e.message ?: "Wipe & resync failed")
+        }
+    }
+
     private suspend fun uploadUnsyncedLogs(): Int {
         val unsynced = attendanceLogDao.getUnsynced()
         if (unsynced.isEmpty()) return 0

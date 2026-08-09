@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.util.Log
+import androidx.annotation.OptIn
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageProxy
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -136,6 +138,7 @@ class FaceRegisterViewModel @Inject constructor(
         }
     }
 
+    @OptIn(ExperimentalGetImage::class)
     private fun onFrameCapturedInternal(imageProxy: ImageProxy, studentIdParam: String?) {
         this.studentId = studentIdParam ?: this.studentId
 

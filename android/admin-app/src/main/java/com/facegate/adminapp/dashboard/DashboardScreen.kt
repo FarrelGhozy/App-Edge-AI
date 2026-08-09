@@ -23,6 +23,7 @@ import androidx.navigation.NavController
 import com.facegate.adminapp.navigation.Screen
 import com.facegate.adminapp.ui.components.*
 import com.facegate.adminapp.ui.theme.*
+import com.facegate.core.util.formatWib
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -346,7 +347,7 @@ private fun RecentScanCard(log: com.facegate.core.data.remote.dto.AttendanceLogD
                 )
             }
             Text(
-                log.timestamp.take(16).replace("T", " "),
+                formatWib(log.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
