@@ -108,6 +108,64 @@ describe("attendance service", () => {
       expect(violationCreate).not.toHaveBeenCalled();
     });
 
+    it("#141: rule kedua di hari sama tetap mencatat violation (OR, bukan topRule)", async () => {
+      // Reproduksi bug produksi: Minggu punya 2 rule, semua priority 0 —
+      // seed 22:00-05:00 dan rule baru 11:00-12:00. Scan keluar 11:38 WIB
+      // cocok dgn rule ke-2; server lama hanya evaluasi topRule (22:00-05:00)
+      // sehingga pelanggaran dibatalkan. Sekarang harus tercatat.
+      const violationCreate = mockPrisma.violation.create.mockResolvedValue({ id: "v141" });
+      mockPrisma.student.findUnique.mockResolvedValue({
+        id: "s1", name: "Test", nim: "123",
+      });
+      mockPrisma.campusRule.findMany.mockResolvedValue([
+        { dayOfWeek: 0, startTime: "22:00", endTime: "05:00", isRestricted: true,
+          appliesToAll: true, priority: 0 },
+        { dayOfWeek: 0, startTime: "11:00", endTime: "12:00", isRestricted: true,
+          appliesToAll: true, priority: 0 },
+      ]);
+      mockPrisma.permit.findMany.mockResolvedValue([]);
+      mockPrisma.holiday.findFirst.mockResolvedValue(null);
+      mockPrisma.attendanceLog.create.mockImplementation(async (args: any) => args.data);
+
+      const ts = new Date("2026-08-09T04:38:00Z"); // Minggu 11:38 WIB
+      const result = await recordScan({
+        ...scanInput, isViolation: true, violationType: "restricted_hours",
+        timestamp: ts.getTime(),
+      });
+
+      expect(result.isViolation).toBe(true);
+      expect(violationCreate).toHaveBeenCalled();
+      const called = violationCreate.mock.calls[0][0].data;
+      expect(called.type).toBe("restricted_hours");
+    });
+
+    it("#141: scan di luar jendela semua rule → pelanggaran dibatalkan server", async () => {
+      const violationCreate = mockPrisma.violation.create;
+      violationCreate.mockClear();
+      mockPrisma.student.findUnique.mockResolvedValue({
+        id: "s1", name: "Test", nim: "123",
+      });
+      mockPrisma.campusRule.findMany.mockResolvedValue([
+        { dayOfWeek: 0, startTime: "22:00", endTime: "05:00", isRestricted: true,
+          appliesToAll: true, priority: 0 },
+        { dayOfWeek: 0, startTime: "11:00", endTime: "12:00", isRestricted: true,
+          appliesToAll: true, priority: 0 },
+      ]);
+      mockPrisma.permit.findMany.mockResolvedValue([]);
+      mockPrisma.holiday.findFirst.mockResolvedValue(null);
+      mockPrisma.attendanceLog.create.mockImplementation(async (args: any) => args.data);
+
+      const ts = new Date("2026-08-09T08:00:00Z"); // Minggu 15:00 WIB — tidak dilindungi rule
+      const result = await recordScan({
+        ...scanInput, isViolation: true, violationType: "restricted_hours",
+        timestamp: ts.getTime(),
+      });
+
+      expect(result.isViolation).toBe(false);
+      expect(result.violationType).toBeNull();
+      expect(violationCreate).not.toHaveBeenCalled();
+    });
+
     it("#116: permit tanpa cakupan jam tidak membatalkan violation", async () => {
       mockPrisma.student.findUnique.mockResolvedValue({
         id: "s1", name: "Test", nim: "123",

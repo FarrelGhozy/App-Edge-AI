@@ -72,27 +72,32 @@ export async function recordScan(data: {
       dayOfWeek = wibDayOfWeek(ts);
       time = wibTimeHMM(ts);
 
-      // #118: rule harus relevan dgn santri — scope studyProgram/academicYear/
-      // appliesToAll + prioritas rule. Ambil SEMUA rule hari itu, lalu pilih yang
-      // paling relevan & berprioritas tertinggi untuk santri ini.
+      // #141: evaluasi SEMUA rule hari itu (OR), konsisten dengan kiosk
+      // (ViolationDetector.kt iterasi semua rule, bukan hanya satu). Sebelumnya
+      // hanya topRule (priority tertinggi) yang dievaluasi — dengan beberapa
+      // rule di hari sama (mis. 22:00-05:00 seed + 11:00-12:00 baru, semua
+      // priority 0), rule baru tidak pernah menang → pelanggaran dibatalkan
+      // server padahal kiosk sudah mendeteksinya → tabel violations kosong.
       const allRules = await prisma.campusRule.findMany({ where: { dayOfWeek } });
 
+      // Rule relevan utk santri ini: appliesToAll, atau semua scope non-null-nya
+      // cocok (semantik sama dgn kiosk — bukan "salah satu scope cocok").
       const applicable = allRules.filter((r) =>
         r.appliesToAll ||
-        (r.studyProgram && r.studyProgram === student.studyProgram) ||
-        (r.academicYear && r.academicYear === student.academicYear)
+        ((!r.studyProgram || r.studyProgram === student.studyProgram) &&
+         (!r.academicYear || r.academicYear === student.academicYear))
       );
 
-      // Rule berprioritas tertinggi yang relevan menentukan status restricted.
-      const topRule = applicable
-        .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0];
+      // Window waktu sama dgn kiosk: end EXCLUSIVE (t < end), rule overnight
+      // (endTime < startTime) aktif jika t >= start ATAU t < end.
+      const inWindow = (start: string, end: string, t: string) => {
+        const overnight = end < start;
+        return overnight ? t >= start || t < end : t >= start && t < end;
+      };
 
-      const restricted = (() => {
-        if (!topRule || !topRule.isRestricted) return false;
-        const overnight = topRule.endTime < topRule.startTime;
-        if (overnight) return time >= topRule.startTime || time <= topRule.endTime;
-        return time >= topRule.startTime && time <= topRule.endTime;
-      })();
+      const restricted = applicable.some(
+        (r) => r.isRestricted && inWindow(r.startTime, r.endTime, time)
+      );
 
       if (!restricted) {
         isViolation = false;
