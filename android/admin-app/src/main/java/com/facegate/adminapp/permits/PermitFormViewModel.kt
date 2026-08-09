@@ -139,7 +139,7 @@ class PermitFormViewModel @Inject constructor(
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isSubmitting = false,
-                        error = "Gagal menyimpan izin"
+                        error = response.body()?.error ?: "Gagal menyimpan izin"
                     )
                 }
             } catch (e: Exception) {

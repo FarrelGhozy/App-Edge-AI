@@ -68,15 +68,35 @@ export const permitRoutes = new Elysia()
         ? data.memberIds
         : [data.studentId];
       // gunakan layanan yang sama dgn kiosk supaya konsisten (auto-type)
-      const permit = await createGroupPermit({
-        memberIds,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        reason: data.reason
-      });
-      return { success: true, data: permit };
+      try {
+        const permit = await createGroupPermit({
+          memberIds,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          reason: data.reason
+        });
+        return { success: true, data: permit };
+      } catch (e) {
+        if (e instanceof Error && e.message === "STUDENT_NOT_FOUND") {
+          return new Response(JSON.stringify({ success: false, error: "Salah satu mahasiswa tidak ditemukan / tidak aktif" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (e instanceof Error && e.message === "NO_MEMBERS") {
+          return new Response(JSON.stringify({ success: false, error: "Minimal 1 anggota" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        console.error("[permits] create group permit gagal:", e);
+        return new Response(JSON.stringify({ success: false, error: "Internal server error" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
     }
 
     if (data.type === "izin_harian") {
