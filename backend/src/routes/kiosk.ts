@@ -9,22 +9,26 @@ import { authGuard } from "../guards/auth";
  * - GET    /api/kiosk/permits         : list izin mandiri/kelompok + anggota
  * - POST   /api/kiosk/permits/:id/verify : verifikasi scan keluar/kembali per anggota
  */
+// #135-fix: t.Optional(t.String()) menolak null (422) sedangkan client Android
+// (kotlinx-serialization explicitNulls=true) selalu mengirim null utk field
+// kosong. Terima string | null | undefined.
+const nullableStr = () => t.Optional(t.Union([t.String(), t.Null()]));
 const kioskCreatePermitSchema = t.Object({
   memberIds: t.Array(t.String(), { minItems: 1 }),
   startDate: t.String(),
   endDate: t.String(),
-  startTime: t.Optional(t.String()),
-  endTime: t.Optional(t.String()),
-  reason: t.Optional(t.String()),
-  clientId: t.Optional(t.String())
+  startTime: nullableStr(),
+  endTime: nullableStr(),
+  reason: nullableStr(),
+  clientId: nullableStr()
 });
 
 const verifySchema = t.Object({
   studentId: t.String(),
-  confidenceScore: t.Optional(t.Number()),
-  deviceId: t.Optional(t.String()),
-  timestamp: t.Optional(t.Number()),
-  clientId: t.Optional(t.String())
+  confidenceScore: t.Optional(t.Union([t.Number(), t.Null()])),
+  deviceId: nullableStr(),
+  timestamp: t.Optional(t.Union([t.Number(), t.Null()])),
+  clientId: nullableStr()
 });
 
 export const kioskRoutes = new Elysia()

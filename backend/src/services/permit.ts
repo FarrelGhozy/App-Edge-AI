@@ -2,6 +2,17 @@ import prisma from "./prisma";
 import { emitToAdmins } from "./events";
 import { wibDayStart, wibDayEndExclusive, wibTimeHMM } from "./wib";
 
+// #135-fix: StudentDto di client Android mewajibkan studyProgram & academicYear.
+// Semua select student parsial harus menyertakan keduanya, kalau tidak seluruh
+// response gagal di-deserialize (MissingFieldException).
+export const studentBriefSelect = {
+  id: true,
+  name: true,
+  nim: true,
+  studyProgram: true,
+  academicYear: true
+} as const;
+
 export async function createPermit(data: {
   studentId: string;
   reason: string;
@@ -26,8 +37,8 @@ export async function getPermit(id: string) {
   return prisma.permit.findUnique({
     where: { id },
     include: {
-      student: { select: { id: true, name: true, nim: true } },
-      members: { include: { student: { select: { id: true, name: true, nim: true } } } }
+      student: { select: studentBriefSelect },
+      members: { include: { student: { select: studentBriefSelect } } }
     }
   });
 }
@@ -81,7 +92,7 @@ export async function listPermits(params: {
       skip,
       take: pageSize,
       orderBy: { createdAt: "desc" },
-      include: { members: { include: { student: { select: { id: true, name: true, nim: true } } } } }
+      include: { members: { include: { student: { select: studentBriefSelect } } } }
     }),
     prisma.permit.count({ where })
   ]);
@@ -138,7 +149,7 @@ export async function createGroupPermit(data: {
     const existing = await prisma.permit.findUnique({
       where: { kioskClientId: data.clientId },
       include: {
-        members: { include: { student: { select: { name: true, nim: true } } } }
+        members: { include: { student: { select: studentBriefSelect } } }
       }
     });
     if (existing) return existing;
@@ -170,7 +181,7 @@ export async function createGroupPermit(data: {
     },
     include: {
       members: {
-        include: { student: { select: { name: true, nim: true } } }
+        include: { student: { select: studentBriefSelect } }
       }
     }
   });
@@ -210,7 +221,7 @@ export async function listKioskPermits(params: { page?: number; pageSize?: numbe
       skip,
       take: pageSize,
       orderBy: { createdAt: "desc" },
-      include: { members: { include: { student: { select: { id: true, name: true, nim: true } } } } }
+      include: { members: { include: { student: { select: studentBriefSelect } } } }
     }),
     prisma.permit.count({ where })
   ]);

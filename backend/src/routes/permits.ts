@@ -1,20 +1,23 @@
 import { Elysia, t } from "elysia";
-import { listPermits, approvePermit, rejectPermit, createGroupPermit } from "../services/permit";import prisma from "../services/prisma";
+import { listPermits, approvePermit, rejectPermit, createGroupPermit, studentBriefSelect } from "../services/permit";import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 import { audit } from "../services/audit";
 
 // #85: Zod schema — body divalidasi, bukan di-cast mentah.
 // #135: memberIds opsional — bila diisi, type otomatis mandiri (1) / kelompok (>1).
+// #135-fix: field opsional terima null (client Android selalu kirim null utk
+// field kosong) — t.Optional(t.String()) menolak null dgn 422.
+const nullableStr = () => t.Optional(t.Union([t.String(), t.Null()]));
 const createPermitSchema = t.Object({
   studentId: t.String(),
   type: t.Union([t.Literal("izin_harian"), t.Literal("pengajuan_izin"), t.Literal("izin_mandiri"), t.Literal("izin_kelompok")]),
   startDate: t.String(),
   endDate: t.String(),
-  startTime: t.Optional(t.String()),
-  endTime: t.Optional(t.String()),
-  reason: t.Optional(t.String()),
-  memberIds: t.Optional(t.Array(t.String()))
+  startTime: nullableStr(),
+  endTime: nullableStr(),
+  reason: nullableStr(),
+  memberIds: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
 });
 
 export const permitRoutes = new Elysia()
@@ -32,7 +35,7 @@ export const permitRoutes = new Elysia()
   .get("/api/permits/:id", async ({ params: { id } }) => {
     const permit = await prisma.permit.findUnique({
       where: { id },
-      include: { members: { include: { student: { select: { id: true, name: true, nim: true } } } } }
+      include: { members: { include: { student: { select: studentBriefSelect } } } }
     });
     if (!permit) {
       return new Response(JSON.stringify({ success: false, error: "Permit not found" }), {

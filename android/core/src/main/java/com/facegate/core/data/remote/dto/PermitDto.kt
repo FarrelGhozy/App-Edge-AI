@@ -70,6 +70,7 @@ data class UpdatePermitStatusRequest(
 
 @Serializable
 data class VerifyPermitScanRequest(
+    @SerialName("permitId") val permitId: String? = null,
     @SerialName("studentId") val studentId: String,
     @SerialName("confidenceScore") val confidenceScore: Float = 0f,
     @SerialName("deviceId") val deviceId: String? = null,

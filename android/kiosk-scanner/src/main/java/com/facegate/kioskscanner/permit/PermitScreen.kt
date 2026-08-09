@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,6 +29,10 @@ import com.facegate.core.data.local.entity.PermitMemberEntity
 import com.facegate.core.data.local.entity.StudentEntity
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -303,6 +311,10 @@ private fun PermitFormTab(viewModel: PermitViewModel) {
     var dateTo by remember { mutableStateOf("") }
     var timeFrom by remember { mutableStateOf("") }
     var timeTo by remember { mutableStateOf("") }
+    var showDateFromPicker by remember { mutableStateOf(false) }
+    var showDateToPicker by remember { mutableStateOf(false) }
+    var showTimeFromPicker by remember { mutableStateOf(false) }
+    var showTimeToPicker by remember { mutableStateOf(false) }
 
     // Reset banner hasil submit yang sudah tampil lama
     LaunchedEffect(submitState) {
@@ -403,25 +415,37 @@ private fun PermitFormTab(viewModel: PermitViewModel) {
         item {
             // ─── Tanggal & jam ───
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = dateFrom, onValueChange = { dateFrom = it }, modifier = Modifier.weight(1f),
-                    label = { Text("Tanggal mulai (YYYY-MM-DD)") }, colors = darkColors()
+                KioskDateField(
+                    value = dateFrom,
+                    label = "Tanggal mulai (DD-MM-YYYY)",
+                    modifier = Modifier.weight(1f),
+                    onValueChange = { dateFrom = it },
+                    onPick = { showDateFromPicker = true }
                 )
-                OutlinedTextField(
-                    value = dateTo, onValueChange = { dateTo = it }, modifier = Modifier.weight(1f),
-                    label = { Text("Sampai (YYYY-MM-DD)") }, colors = darkColors()
+                KioskDateField(
+                    value = dateTo,
+                    label = "Sampai (DD-MM-YYYY)",
+                    modifier = Modifier.weight(1f),
+                    onValueChange = { dateTo = it },
+                    onPick = { showDateToPicker = true }
                 )
             }
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = timeFrom, onValueChange = { timeFrom = it }, modifier = Modifier.weight(1f),
-                    label = { Text("Jam mulai (HH:MM, opsional)") }, colors = darkColors()
+                KioskTimeField(
+                    value = timeFrom,
+                    label = "Jam mulai (HH:MM, opsional)",
+                    modifier = Modifier.weight(1f),
+                    onValueChange = { timeFrom = it },
+                    onPick = { showTimeFromPicker = true }
                 )
-                OutlinedTextField(
-                    value = timeTo, onValueChange = { timeTo = it }, modifier = Modifier.weight(1f),
-                    label = { Text("Jam selesai (HH:MM, opsional)") }, colors = darkColors()
+                KioskTimeField(
+                    value = timeTo,
+                    label = "Jam selesai (HH:MM, opsional)",
+                    modifier = Modifier.weight(1f),
+                    onValueChange = { timeTo = it },
+                    onPick = { showTimeToPicker = true }
                 )
             }
         }
@@ -445,17 +469,18 @@ private fun PermitFormTab(viewModel: PermitViewModel) {
             Button(
                 onClick = {
                     if (selected.isEmpty()) return@Button
-                    if (dateFrom.isBlank() || dateTo.isBlank()) return@Button
+                    val startIso = ddmmyyyyToIso(dateFrom) ?: return@Button
+                    val endIso = ddmmyyyyToIso(dateTo) ?: return@Button
                     viewModel.submitPermit(
                         memberIds = selected.map { it.id },
-                        startDate = dateFrom,
-                        endDate = dateTo,
+                        startDate = startIso,
+                        endDate = endIso,
                         startTime = timeFrom.ifBlank { null },
                         endTime = timeTo.ifBlank { null },
                         reason = reason.ifBlank { null }
                     )
                 },
-                enabled = selected.isNotEmpty() && dateFrom.isNotBlank() && dateTo.isNotBlank() &&
+                enabled = selected.isNotEmpty() && ddmmyyyyToIso(dateFrom) != null && ddmmyyyyToIso(dateTo) != null &&
                           if (submitState is PermitSubmitState.Sending) false else true,
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) {
@@ -468,9 +493,208 @@ private fun PermitFormTab(viewModel: PermitViewModel) {
         }
         item { Spacer(Modifier.height(20.dp)) }
     }
+
+    // ── Date Pickers (ikon kalender) ──
+    if (showDateFromPicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = ddmmyyyyToMillis(dateFrom)
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDateFromPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { dateFrom = millisToDdmmyyyy(it) }
+                    showDateFromPicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDateFromPicker = false }) { Text("Batal") }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+
+    if (showDateToPicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = ddmmyyyyToMillis(dateTo)
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDateToPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { dateTo = millisToDdmmyyyy(it) }
+                    showDateToPicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDateToPicker = false }) { Text("Batal") }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+
+    // ── Time pickers (ikon jam) ──
+    if (showTimeFromPicker) {
+        val (h, m) = splitHm(timeFrom)
+        val pickerState = rememberTimePickerState(initialHour = h, initialMinute = m, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { showTimeFromPicker = false },
+            title = { Text("Pilih Jam Mulai") },
+            text = { TimePicker(state = pickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    timeFrom = formatHm(pickerState.hour, pickerState.minute)
+                    showTimeFromPicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimeFromPicker = false }) { Text("Batal") }
+            }
+        )
+    }
+
+    if (showTimeToPicker) {
+        val (h, m) = splitHm(timeTo)
+        val pickerState = rememberTimePickerState(initialHour = h, initialMinute = m, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { showTimeToPicker = false },
+            title = { Text("Pilih Jam Selesai") },
+            text = { TimePicker(state = pickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    timeTo = formatHm(pickerState.hour, pickerState.minute)
+                    showTimeToPicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimeToPicker = false }) { Text("Batal") }
+            }
+        )
+    }
 }
 
 // ═════════════════════════════  HELPERS  ═════════════════════════════
+
+/**
+ * Field tanggal kiosk: ketik manual dgn mask otomatis (DD-MM-YYYY),
+ * atau tekan ikon kalender utk memilih via DatePickerDialog.
+ */
+@Composable
+private fun KioskDateField(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    onValueChange: (String) -> Unit,
+    onPick: () -> Unit
+) {
+    val invalid = value.isNotBlank() && ddmmyyyyToMillis(value) == null
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onValueChange(maskDdMmYyyy(it)) },
+        modifier = modifier,
+        label = { Text(label) },
+        trailingIcon = {
+            IconButton(onClick = onPick) {
+                Icon(
+                    imageVector = Icons.Filled.DateRange,
+                    contentDescription = "Pilih tanggal",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        supportingText = if (invalid) {
+            { Text("Tanggal tidak valid", color = MaterialTheme.colorScheme.error, fontSize = 11.sp) }
+        } else null,
+        isError = invalid,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        singleLine = true,
+        colors = darkColors()
+    )
+}
+
+/**
+ * Field jam kiosk: ketik "1430" → otomatis "14:30" (tanpa mengetik ":"),
+ * atau tekan ikon jam utk memilih TimePicker.
+ */
+@Composable
+private fun KioskTimeField(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    onValueChange: (String) -> Unit,
+    onPick: () -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onValueChange(maskHhMm(it)) },
+        modifier = modifier,
+        label = { Text(label) },
+        trailingIcon = {
+            IconButton(onClick = onPick) {
+                Icon(
+                    imageVector = Icons.Filled.Schedule,
+                    contentDescription = "Pilih jam",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        singleLine = true,
+        colors = darkColors()
+    )
+}
+
+/** Auto-mask input ketik → DD-MM-YYYY: 08072026 → 08-07-2026. */
+private fun maskDdMmYyyy(raw: String): String {
+    val digits = raw.filter(Char::isDigit).take(8)
+    return buildString {
+        digits.forEachIndexed { i, c ->
+            if (i == 2 || i == 4) append('-')
+            append(c)
+        }
+    }
+}
+
+/** Auto-mask jam → HH:MM: 1430 → 14:30 (tanpa mengetik ':'). */
+private fun maskHhMm(raw: String): String {
+    val digits = raw.filter(Char::isDigit).take(4)
+    return buildString {
+        digits.forEachIndexed { i, c ->
+            if (i == 2) append(':')
+            append(c)
+        }
+    }
+}
+
+/** "DD-MM-YYYY" → epoch millis (UTC tengah malam, konsisten dgn DatePicker). */
+private fun ddmmyyyyToMillis(s: String): Long? = try {
+    LocalDate.parse(s, DDMYY_FORMAT).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+} catch (_: Exception) {
+    null
+}
+
+/** "DD-MM-YYYY" → "YYYY-MM-DD" (format yang diterima server). */
+private fun ddmmyyyyToIso(s: String): String? = try {
+    LocalDate.parse(s, DDMYY_FORMAT).toString()
+} catch (_: Exception) {
+    null
+}
+
+private fun millisToDdmmyyyy(millis: Long): String =
+    Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().format(DDMYY_FORMAT)
+
+/** "HH:MM" (atau parsial) → (jam, menit). */
+private fun splitHm(s: String): Pair<Int, Int> {
+    val parts = s.split(':')
+    return (parts.getOrNull(0)?.toIntOrNull() ?: 0) to (parts.getOrNull(1)?.toIntOrNull() ?: 0)
+}
+
+private fun formatHm(hour: Int, minute: Int): String =
+    "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"
+
+private val DDMYY_FORMAT = DateTimeFormatter.ofPattern("dd-MM-yyyy")
 
 fun memberPhase(member: PermitMemberEntity): PermitMemberPhase {
     return when {

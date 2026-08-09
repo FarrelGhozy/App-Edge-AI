@@ -487,6 +487,7 @@ class SyncWorker @AssistedInject constructor(
         val batch = PermitVerificationBatchRequest(
             logs = pending.map { v ->
                 VerifyPermitScanRequest(
+                    permitId = v.permitId,
                     studentId = v.studentId,
                     confidenceScore = v.confidenceScore,
                     deviceId = v.deviceId,
@@ -499,15 +500,18 @@ class SyncWorker @AssistedInject constructor(
             val response = apiService.syncPermitVerifications(batch)
             if (response.isSuccessful && response.body() != null) {
                 val skipped = response.body()!!.data?.skippedLogs.orEmpty()
-                val doneIds = skipped
-                    .filter { it.reason == "ALREADY_VERIFIED" }
-                    .map { Pair(it.permitId, it.studentId) }
-                    .toSet()
+                val syncedLogs = response.body()!!.data?.syncedLogs.orEmpty()
+                // #135-fix: mark synced HANYA yang benar-benar diterima server
+                // (syncedLogs atau ALREADY_VERIFIED). Sisanya tetap di-antre —
+                // jangan hapus diam-diam (anti data-loss #114).
+                val accepted = buildSet {
+                    syncedLogs.forEach { add(Pair(it.permitId, it.studentId)) }
+                    skipped
+                        .filter { it.reason == "ALREADY_VERIFIED" }
+                        .forEach { add(Pair(it.permitId, it.studentId)) }
+                }
                 val syncedIds = pending
-                    .filter { v ->
-                        Pair(v.permitId, v.studentId) in doneIds ||
-                            skipped.none { it.permitId == v.permitId && it.studentId == v.studentId }
-                    }
+                    .filter { v -> Pair(v.permitId, v.studentId) in accepted }
                     .map { it.id }
                 if (syncedIds.isNotEmpty()) {
                     permitDao.markVerificationsSynced(syncedIds)

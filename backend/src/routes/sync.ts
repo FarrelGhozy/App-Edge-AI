@@ -4,7 +4,7 @@ import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 import { computeFacesWatermark } from "../services/syncWatermark";
-import { verifyPermitScan } from "../services/permit";
+import { verifyPermitScan, studentBriefSelect } from "../services/permit";
 
 export const syncRoutes = new Elysia()
   .use(authGuard())
@@ -115,7 +115,7 @@ export const syncRoutes = new Elysia()
       orderBy: { createdAt: "desc" },
       take: 200,
       include: {
-        members: { include: { student: { select: { id: true, name: true, nim: true } } } }
+        members: { include: { student: { select: studentBriefSelect } } }
       }
     });
     return { data: permits };
@@ -146,7 +146,7 @@ export const syncRoutes = new Elysia()
     }
     return {
       success: true,
-      data: { synced: created.length, skipped: skipped.length, skippedLogs: skipped }
+      data: { synced: created.length, skipped: skipped.length, skippedLogs: skipped, syncedLogs: created }
     };
   })
   .get("/api/sync/requested", async ({ query }) => {

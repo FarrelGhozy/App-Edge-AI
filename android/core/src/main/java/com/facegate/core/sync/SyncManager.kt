@@ -344,6 +344,7 @@ class SyncManager @Inject constructor(
         val batch = PermitVerificationBatchRequest(
             logs = pending.map { v ->
                 VerifyPermitScanRequest(
+                    permitId = v.permitId,
                     studentId = v.studentId,
                     confidenceScore = v.confidenceScore,
                     deviceId = v.deviceId,
@@ -357,18 +358,20 @@ class SyncManager @Inject constructor(
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
                 val skipped = body.data?.skippedLogs.orEmpty()
-                // ALREADY_VERIFIED = server sudah punya verifikasi lengkap utk
-                // anggota ini — antrean selesai (data tak akan pernah berubah
-                // lagi), tandai synced agar tidak retry selamanya.
-                val doneIds = skipped
-                    .filter { it.reason == "ALREADY_VERIFIED" }
-                    .map { Pair(it.permitId, it.studentId) }
-                    .toSet()
+                val syncedLogs = body.data?.syncedLogs.orEmpty()
+                // #135-fix: mark synced HANYA yang benar-benar diterima server:
+                //  - masuk daftar syncedLogs (created/idempotent)
+                //  - di-skip dgn ALREADY_VERIFIED (data final, tak akan berubah)
+                // Sisa yang di-skip dgn alasan lain (mis. PERMIT_EXPIRED) TETAP
+                // di-antre — jangan dihapus diam-diam (anti data-loss #114).
+                val accepted = buildSet {
+                    syncedLogs.forEach { add(Pair(it.permitId, it.studentId)) }
+                    skipped
+                        .filter { it.reason == "ALREADY_VERIFIED" }
+                        .forEach { add(Pair(it.permitId, it.studentId)) }
+                }
                 val syncedIds = pending
-                    .filter { v ->
-                        Pair(v.permitId, v.studentId) in doneIds ||
-                            skipped.none { it.permitId == v.permitId && it.studentId == v.studentId }
-                    }
+                    .filter { v -> Pair(v.permitId, v.studentId) in accepted }
                     .map { it.id }
                 if (syncedIds.isNotEmpty()) {
                     permitDao.markVerificationsSynced(syncedIds)

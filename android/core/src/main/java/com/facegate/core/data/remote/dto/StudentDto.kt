@@ -9,9 +9,9 @@ data class StudentDto(
     val nim: String,
     val name: String,
     @SerialName("studyProgram")
-    val studyProgram: String,
+    val studyProgram: String = "",
     @SerialName("academicYear")
-    val academicYear: String,
+    val academicYear: String = "",
     val phone: String? = null,
     val email: String? = null,
     @SerialName("isActive")

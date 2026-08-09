@@ -42,7 +42,20 @@ data class SyncBatchData(
     val synced: Int = 0,
     val skipped: Int = 0,
     @SerialName("skippedLogs")
-    val skippedLogs: List<SkippedLog> = emptyList()
+    val skippedLogs: List<SkippedLog> = emptyList(),
+    // #135-fix: daftar log yang benar-benar diterima server (batch verifikasi
+    // izin). Dipakai client untuk menandai synced HANYA yang sukses.
+    @SerialName("syncedLogs")
+    val syncedLogs: List<SyncedLog> = emptyList()
+)
+
+/** #135-fix: satu log yang sukses di-upload (verifikasi izin). */
+@Serializable
+data class SyncedLog(
+    @SerialName("permitId") val permitId: String? = null,
+    @SerialName("studentId") val studentId: String,
+    val action: String? = null,
+    val idempotent: Boolean = false
 )
 
 @Serializable
