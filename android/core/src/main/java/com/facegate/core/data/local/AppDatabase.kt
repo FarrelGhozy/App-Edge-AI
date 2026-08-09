@@ -123,6 +123,15 @@ abstract class AppDatabase : RoomDatabase() {
         // plus kolom permit_id/permit_member_id di attendance_logs.
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                // #135: build lama (pra-v6) punya tabel draft `permits` dengan
+                // skema usang (isActiveLocally, startDate TEXT). CREATE TABLE IF
+                // NOT EXISTS tidak akan memperbaiki tabel yang sudah ada → Room
+                // validation gagal. Data izin selalu full-replace dari server,
+                // jadi aman di-DROP dan dibuat ulang dengan skema benar.
+                db.execSQL("DROP TABLE IF EXISTS permits")
+                db.execSQL("DROP TABLE IF EXISTS permit_members")
+                db.execSQL("DROP TABLE IF EXISTS permit_requests")
+                db.execSQL("DROP TABLE IF EXISTS permit_verifications")
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS permits (

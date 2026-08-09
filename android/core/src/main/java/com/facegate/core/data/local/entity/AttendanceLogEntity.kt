@@ -18,7 +18,9 @@ data class AttendanceLogEntity(
     val deviceId: String? = null,
     val photoCapture: String? = null,
     // #135: terkait izin mandiri/kelompok — diisi hanya utk scan verifikasi izin.
+    @ColumnInfo(name = "permit_id")
     val permitId: String? = null,
+    @ColumnInfo(name = "permit_member_id")
     val permitMemberId: String? = null,
     // #119: idempotency key — UUID unik per log offline, dikirim ke server saat
     // batch sync. Retry tidak membuat duplikat (server dedup by clientId).
