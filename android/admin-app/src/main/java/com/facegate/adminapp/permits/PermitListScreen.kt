@@ -75,7 +75,12 @@ fun PermitListScreen(
                 items(state.permits) { permit ->
                     PermitCard(
                         name = permit.studentName,
-                        purpose = permit.type,
+                        purpose = when (permit.type) {
+                            "izin_kelompok" -> "Izin Kelompok"
+                            "izin_mandiri" -> "Izin Mandiri"
+                            "izin_harian" -> "Izin Harian"
+                            else -> "Pengajuan Izin"
+                        },
                         status = permit.status ?: "pending",
                         onClick = { navController.navigate(Screen.PermitDetail.createRoute(permit.id)) }
                     )

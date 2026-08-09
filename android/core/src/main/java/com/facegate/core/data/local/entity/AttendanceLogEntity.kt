@@ -17,6 +17,9 @@ data class AttendanceLogEntity(
     val violationType: String? = null,
     val deviceId: String? = null,
     val photoCapture: String? = null,
+    // #135: terkait izin mandiri/kelompok — diisi hanya utk scan verifikasi izin.
+    val permitId: String? = null,
+    val permitMemberId: String? = null,
     // #119: idempotency key — UUID unik per log offline, dikirim ke server saat
     // batch sync. Retry tidak membuat duplikat (server dedup by clientId).
     // Nama kolom eksplisit `client_id` — HARUS konsisten dengan MIGRATION_2_3

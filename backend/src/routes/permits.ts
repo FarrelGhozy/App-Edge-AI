@@ -1,19 +1,20 @@
 import { Elysia, t } from "elysia";
-import { listPermits, approvePermit, rejectPermit } from "../services/permit";
-import prisma from "../services/prisma";
+import { listPermits, approvePermit, rejectPermit, createGroupPermit } from "../services/permit";import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 import { audit } from "../services/audit";
 
 // #85: Zod schema — body divalidasi, bukan di-cast mentah.
+// #135: memberIds opsional — bila diisi, type otomatis mandiri (1) / kelompok (>1).
 const createPermitSchema = t.Object({
   studentId: t.String(),
-  type: t.Union([t.Literal("izin_harian"), t.Literal("pengajuan_izin")]),
+  type: t.Union([t.Literal("izin_harian"), t.Literal("pengajuan_izin"), t.Literal("izin_mandiri"), t.Literal("izin_kelompok")]),
   startDate: t.String(),
   endDate: t.String(),
   startTime: t.Optional(t.String()),
   endTime: t.Optional(t.String()),
-  reason: t.Optional(t.String())
+  reason: t.Optional(t.String()),
+  memberIds: t.Optional(t.Array(t.String()))
 });
 
 export const permitRoutes = new Elysia()
@@ -29,7 +30,10 @@ export const permitRoutes = new Elysia()
     return await listPermits(params);
   })
   .get("/api/permits/:id", async ({ params: { id } }) => {
-    const permit = await prisma.permit.findUnique({ where: { id } });
+    const permit = await prisma.permit.findUnique({
+      where: { id },
+      include: { members: { include: { student: { select: { id: true, name: true, nim: true } } } } }
+    });
     if (!permit) {
       return new Response(JSON.stringify({ success: false, error: "Permit not found" }), {
         status: 404,
@@ -47,6 +51,7 @@ export const permitRoutes = new Elysia()
       startTime?: string;
       endTime?: string;
       reason?: string;
+      memberIds?: string[];
     };
 
     // #85: cek student ada — 400 (bukan 500 FK error)
@@ -55,6 +60,23 @@ export const permitRoutes = new Elysia()
       return new Response(JSON.stringify({
         success: false, error: "Student tidak ditemukan"
       }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+
+    // #135: izin mandiri/kelompok dari admin — sama dgn flow kiosk, pending.
+    if (data.type === "izin_mandiri" || data.type === "izin_kelompok" || (data.memberIds?.length ?? 0) > 0) {
+      const memberIds = data.memberIds && data.memberIds.length > 0
+        ? data.memberIds
+        : [data.studentId];
+      // gunakan layanan yang sama dgn kiosk supaya konsisten (auto-type)
+      const permit = await createGroupPermit({
+        memberIds,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        reason: data.reason
+      });
+      return { success: true, data: permit };
     }
 
     if (data.type === "izin_harian") {
@@ -155,7 +177,16 @@ export const permitRoutes = new Elysia()
     return { success: true, data: permit };
   }, { body: createPermitSchema })
   .put("/api/permits/:id/status", async ({ params: { id }, body, admin }) => {
-    const { status } = body as { status: string };
+    const data = body as {
+      status: string;
+      note?: string;
+      rejectionReason?: string;
+      startDate?: string;
+      endDate?: string;
+      startTime?: string;
+      endTime?: string;
+    };
+    const { status } = data;
     // #73: approvedById HARUS dari identitas JWT (admin dari guard derive),
     // bukan body. Klien tidak boleh menentukan siapa yang menyetujui.
     if (!admin?.id) {
@@ -167,14 +198,38 @@ export const permitRoutes = new Elysia()
     const adminId = admin.id;
 
     if (status === "approved") {
-      const permit = await approvePermit(id, adminId);
+      // #135: admin boleh mengoreksi waktu izin (startDate/endDate/startTime/
+      // endTime) + menulis pesan (note) utk santri sebelum menyetujui.
+      const permit = await approvePermit(id, adminId, {
+        note: data.note,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        startTime: data.startTime,
+        endTime: data.endTime
+      });
+      await prisma.notification.create({
+        data: {
+          type: "izin_approved",
+          title: "Izin Disetujui",
+          message: `Izin disetujui${data.note ? `: ${data.note}` : ""}`,
+          linkTo: `/permits/${id}`
+        }
+      });
       notifyDevicesChange();
-      await audit(admin, { action: "APPROVE", entityType: "PERMITS", entityId: id, details: `status -> approved` });
+      await audit(admin, { action: "APPROVE", entityType: "PERMITS", entityId: id, details: `status -> approved${data.note ? `, note: ${data.note}` : ""}` });
       return { success: true, data: permit };
     } else if (status === "rejected") {
-      const permit = await rejectPermit(id, adminId);
+      const permit = await rejectPermit(id, adminId, data.rejectionReason);
+      await prisma.notification.create({
+        data: {
+          type: "izin_rejected",
+          title: "Izin Ditolak",
+          message: data.rejectionReason ? `Izin ditolak: ${data.rejectionReason}` : "Pengajuan izin ditolak",
+          linkTo: `/permits/${id}`
+        }
+      });
       notifyDevicesChange();
-      await audit(admin, { action: "REJECT", entityType: "PERMITS", entityId: id, details: `status -> rejected` });
+      await audit(admin, { action: "REJECT", entityType: "PERMITS", entityId: id, details: `status -> rejected${data.rejectionReason ? `, reason: ${data.rejectionReason}` : ""}` });
       return { success: true, data: permit };
     }
     return { success: false, error: "Invalid status" };

@@ -3,12 +3,17 @@ package com.facegate.core.sync
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
+import com.facegate.core.data.local.dao.PermitDao
 import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.AttendanceBatchRequest
+import com.facegate.core.data.remote.dto.PermitVerificationBatchRequest
 import com.facegate.core.data.remote.dto.ScanRequest
 import com.facegate.core.data.remote.dto.SyncCompleteRequest
+import com.facegate.core.data.remote.dto.VerifyPermitScanRequest
+import com.facegate.core.data.local.entity.PermitEntity
+import com.facegate.core.data.local.entity.PermitMemberEntity
 import com.facegate.core.data.local.entity.StudentEntity
 import com.facegate.core.data.remote.dto.toEntity
 import com.facegate.core.face.FaceMatcher
@@ -22,6 +27,7 @@ data class SyncResult(
     val logsUploaded: Int = 0,
     val facesDownloaded: Int = 0,
     val rulesDownloaded: Int = 0,
+    val permitsDownloaded: Int = 0,
     val error: String? = null
 )
 
@@ -32,21 +38,25 @@ class SyncManager @Inject constructor(
     private val faceVectorDao: FaceVectorDao,
     private val studentDao: StudentDao,
     private val campusRuleDao: CampusRuleDao,
+    private val permitDao: PermitDao,
     private val syncMetadata: SyncMetadata,
     private val faceMatcher: FaceMatcher
 ) {
     suspend fun syncAll(deviceId: String): SyncResult = withContext(Dispatchers.IO) {
         try {
             val logsResult = uploadUnsyncedLogs()
+            uploadPermitQueues()
             val facesResult = downloadFaces()
             val rulesResult = downloadRules()
+            val permitsResult = downloadPermits()
             markSyncComplete(deviceId, logsResult, facesResult)
 
             SyncResult(
                 success = true,
                 logsUploaded = logsResult,
                 facesDownloaded = facesResult,
-                rulesDownloaded = rulesResult
+                rulesDownloaded = rulesResult,
+                permitsDownloaded = permitsResult
             )
         } catch (e: Exception) {
             SyncResult(success = false, error = e.message ?: "Sync failed")
@@ -56,6 +66,7 @@ class SyncManager @Inject constructor(
     suspend fun syncLogsOnly(): SyncResult = withContext(Dispatchers.IO) {
         try {
             val count = uploadUnsyncedLogs()
+            uploadPermitQueues()
             SyncResult(success = true, logsUploaded = count)
         } catch (e: Exception) {
             SyncResult(success = false, error = e.message ?: "Sync logs failed")
@@ -78,6 +89,8 @@ class SyncManager @Inject constructor(
             faceVectorDao.deleteAll()
             studentDao.deleteAll()
             campusRuleDao.deleteAll()
+            permitDao.clearMembers()
+            permitDao.clearPermits()
             syncMetadata.clear()
             faceMatcher.clear()
             syncAll(deviceId)
@@ -197,6 +210,193 @@ class SyncManager @Inject constructor(
             return rules.size
         }
         return 0
+    }
+
+    /**
+     * #135: download izin mandiri/kelompok (full-replace pola sama dgn rules)
+     * lalu anggota-anggota. Menyimpan ke Room utk ditampilkan di kiosk.
+     */
+    private suspend fun downloadPermits(): Int {
+        try {
+            val response = apiService.syncPermits()
+            if (response.isSuccessful && response.body() != null) {
+                val permits = response.body()!!.data
+                val entities = permits.map { dto ->
+                    PermitEntity(
+                        id = dto.id,
+                        type = dto.type,
+                        startDate = dto.startDate.toEpochMillisOrNow(),
+                        endDate = dto.endDate.toEpochMillisOrNow(),
+                        startTime = dto.startTime,
+                        endTime = dto.endTime,
+                        status = dto.status,
+                        reason = dto.reason,
+                        note = dto.note,
+                        rejectionReason = dto.rejectionReason,
+                        createdAt = dto.createdAt?.toEpochMillisOrNow() ?: System.currentTimeMillis()
+                    )
+                }
+                val members = permits.flatMap { dto ->
+                    dto.members.map { m ->
+                        PermitMemberEntity(
+                            permitId = dto.id,
+                            studentId = m.studentId,
+                            name = m.student?.name ?: "",
+                            nim = m.student?.nim ?: "",
+                            keluarVerifiedAt = m.keluarVerifiedAt?.toEpochMillisOrNull(),
+                            kembaliVerifiedAt = m.kembaliVerifiedAt?.toEpochMillisOrNull()
+                        )
+                    }
+                }
+                permitDao.clearMembers()
+                permitDao.clearPermits()
+                if (entities.isNotEmpty()) permitDao.insertAllPermits(entities)
+                if (members.isNotEmpty()) permitDao.insertAllMembers(members)
+                return permits.size
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("SyncManager", "downloadPermits failed: ${e.message}")
+        }
+        return 0
+    }
+
+    /**
+     * #135: upload antrean offline — pengajuan izin (PermitRequestEntity) dan
+     * verifikasi scan izin (PermitVerificationEntity). Dipanggil setiap sync
+     * log (ringan) supaya form yang tertunda terkirim saat internet kembali.
+     */
+    suspend fun uploadPermitQueues() {
+        uploadPendingPermitRequests()
+        uploadPendingVerifications()
+    }
+
+    private suspend fun uploadPendingPermitRequests() {
+        val pending = permitDao.getUnsyncedRequests()
+        if (pending.isEmpty()) return
+        val syncedIds = mutableListOf<Long>()
+        for (req in pending) {
+            try {
+                val memberIds = req.memberIds.split(",").filter { it.isNotBlank() }
+                val response = apiService.createKioskPermit(
+                    com.facegate.core.data.remote.dto.CreateKioskPermitRequest(
+                        memberIds = memberIds,
+                        startDate = req.startDate,
+                        endDate = req.endDate,
+                        startTime = req.startTime,
+                        endTime = req.endTime,
+                        reason = req.reason,
+                        clientId = req.clientId
+                    )
+                )
+                if (response.isSuccessful && response.body() != null && response.body()!!.data != null) {
+                    // Sukses → simpan hasil server ke DB lokal supaya langsung
+                    // tampil di "Daftar Izin" tanpa menunggu sync berikutnya.
+                    val dto = response.body()!!.data!!
+                    insertLocalPermit(dto)
+                    syncedIds.add(req.id)
+                }
+            } catch (_: Exception) { }
+        }
+        if (syncedIds.isNotEmpty()) {
+            permitDao.markRequestsSynced(syncedIds)
+            permitDao.deleteRequests(syncedIds)
+            android.util.Log.d("SyncManager", "Permit requests uploaded: ${syncedIds.size}")
+        }
+    }
+
+    /** Simpan hasil create dari server ke tabel lokal (permit + members). */
+    private suspend fun insertLocalPermit(dto: com.facegate.core.data.remote.dto.PermitDto) {
+        try {
+            val entity = PermitEntity(
+                id = dto.id,
+                type = dto.type,
+                startDate = dto.startDate.toEpochMillisOrNow(),
+                endDate = dto.endDate.toEpochMillisOrNow(),
+                startTime = dto.startTime,
+                endTime = dto.endTime,
+                status = dto.status,
+                reason = dto.reason,
+                note = dto.note,
+                rejectionReason = dto.rejectionReason,
+                createdAt = dto.createdAt?.toEpochMillisOrNow() ?: System.currentTimeMillis()
+            )
+            val members = dto.members.map { m ->
+                PermitMemberEntity(
+                    permitId = dto.id,
+                    studentId = m.studentId,
+                    name = m.student?.name ?: "",
+                    nim = m.student?.nim ?: "",
+                    keluarVerifiedAt = m.keluarVerifiedAt?.toEpochMillisOrNull(),
+                    kembaliVerifiedAt = m.kembaliVerifiedAt?.toEpochMillisOrNull()
+                )
+            }
+            permitDao.insertAllPermits(listOf(entity))
+            if (members.isNotEmpty()) permitDao.insertAllMembers(members)
+        } catch (e: Exception) {
+            android.util.Log.w("SyncManager", "insertLocalPermit failed: ${e.message}")
+        }
+    }
+
+    private suspend fun uploadPendingVerifications() {
+        val pending = permitDao.getUnsyncedVerifications()
+        if (pending.isEmpty()) return
+
+        val batch = PermitVerificationBatchRequest(
+            logs = pending.map { v ->
+                VerifyPermitScanRequest(
+                    studentId = v.studentId,
+                    confidenceScore = v.confidenceScore,
+                    deviceId = v.deviceId,
+                    timestamp = v.timestamp,
+                    clientId = v.clientId
+                )
+            }
+        )
+        try {
+            val response = apiService.syncPermitVerifications(batch)
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                val skipped = body.data?.skippedLogs.orEmpty()
+                // ALREADY_VERIFIED = server sudah punya verifikasi lengkap utk
+                // anggota ini — antrean selesai (data tak akan pernah berubah
+                // lagi), tandai synced agar tidak retry selamanya.
+                val doneIds = skipped
+                    .filter { it.reason == "ALREADY_VERIFIED" }
+                    .map { Pair(it.permitId, it.studentId) }
+                    .toSet()
+                val syncedIds = pending
+                    .filter { v ->
+                        Pair(v.permitId, v.studentId) in doneIds ||
+                            skipped.none { it.permitId == v.permitId && it.studentId == v.studentId }
+                    }
+                    .map { it.id }
+                if (syncedIds.isNotEmpty()) {
+                    permitDao.markVerificationsSynced(syncedIds)
+                    permitDao.deleteVerifications(syncedIds)
+                }
+                android.util.Log.d("SyncManager", "Permit verifications uploaded: ${pending.size} (${syncedIds.size} synced, ${skipped.size} skipped)")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("SyncManager", "uploadPendingVerifications failed: ${e.message}")
+        }
+    }
+
+    private fun String.toEpochMillisOrNow(): Long {
+        return toEpochMillisOrNull() ?: System.currentTimeMillis()
+    }
+
+    private fun String.toEpochMillisOrNull(): Long? {
+        return try {
+            java.time.Instant.parse(this).toEpochMilli()
+        } catch (_: Exception) {
+            try {
+                java.time.LocalDateTime.parse(this)
+                    .atZone(java.time.ZoneId.of("Asia/Jakarta"))
+                    .toInstant().toEpochMilli()
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 
     /**

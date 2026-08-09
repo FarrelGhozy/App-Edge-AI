@@ -17,8 +17,17 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.facegate.adminapp.ui.components.*
+import com.facegate.core.data.remote.dto.PermitMemberDto
 import com.facegate.core.util.formatWibDate
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+/**
+ * #135: Detail izin mandiri/kelompok — tampilkan anggota + status verifikasi
+ * scan, dan pada approval admin bisa mengoreksi waktu izin + menulis note,
+ * serta menolak dengan alasan.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PermitDetailScreen(
@@ -74,7 +83,11 @@ fun PermitDetailScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             StatusBadge(
-                                text = if (p.type == "izin_harian") "Izin Harian" else "Pengajuan Izin",
+                                text = when (p.type) {
+                                    "izin_kelompok" -> "Izin Kelompok"
+                                    "izin_mandiri" -> "Izin Mandiri"
+                                    else -> "Izin"
+                                },
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -133,7 +146,11 @@ fun PermitDetailScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = if (p.type == "izin_harian") "Izin Harian" else "Pengajuan Izin",
+                                        text = when (p.type) {
+                                            "izin_kelompok" -> "Izin Kelompok"
+                                            "izin_mandiri" -> "Izin Mandiri"
+                                            else -> "Izin"
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -144,9 +161,15 @@ fun PermitDetailScreen(
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Info rows
                             InfoRow("Status", p.status.uppercase())
-                            InfoRow("Jenis", if (p.type == "izin_harian") "Izin Harian" else "Pengajuan Izin")
+                            InfoRow(
+                                "Jenis",
+                                when (p.type) {
+                                    "izin_kelompok" -> "Izin Kelompok"
+                                    "izin_mandiri" -> "Izin Mandiri"
+                                    else -> "Izin"
+                                }
+                            )
                             InfoRow("Tanggal Mulai", formatWibDate(p.startDate))
                             InfoRow("Tanggal Selesai", formatWibDate(p.endDate))
 
@@ -162,13 +185,58 @@ fun PermitDetailScreen(
                             if (reason != null) {
                                 InfoRow("Alasan", reason)
                             }
+
+                            // #135: note admin + alasan tolak
+                            val note = p.note
+                            if (p.status == "approved" && note != null && note.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                InfoRow("Catatan Admin", note)
+                            }
+                            val rejectionReason = p.rejectionReason
+                            if (p.status == "rejected" && rejectionReason != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                InfoRow("Alasan Ditolak", rejectionReason)
+                            }
+                        }
+                    }
+
+                    // ── Anggota (mandiri: 1, kelompok: banyak) ──
+                    if (p.members.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    "Anggota (${p.members.size})",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                p.members.forEach { member ->
+                                    MemberStatusRow(member)
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                    )
+                                }
+                            }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // ── Action Buttons ──
+                    // ── Action Buttons (pending only) ──
                     if (p.status == "pending") {
+                        var showApproveDialog by remember { mutableStateOf(false) }
+                        var showRejectDialog by remember { mutableStateOf(false) }
+
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -192,7 +260,7 @@ fun PermitDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     OutlinedButton(
-                                        onClick = { viewModel.reject(permitId) },
+                                        onClick = { showRejectDialog = true },
                                         modifier = Modifier.weight(1f),
                                         enabled = !state.isProcessing,
                                         colors = ButtonDefaults.outlinedButtonColors(
@@ -211,7 +279,7 @@ fun PermitDetailScreen(
                                         Text("Tolak")
                                     }
                                     Button(
-                                        onClick = { viewModel.approve(permitId) },
+                                        onClick = { showApproveDialog = true },
                                         modifier = Modifier.weight(1f),
                                         enabled = !state.isProcessing
                                     ) {
@@ -229,6 +297,61 @@ fun PermitDetailScreen(
                                     }
                                 }
                             }
+                        }
+
+                        // #135: dialog approve — koreksi waktu + note.
+                        if (showApproveDialog) {
+                            ApprovePermitDialog(
+                                permit = p,
+                                onDismiss = { showApproveDialog = false },
+                                onConfirm = { d1, d2, t1, t2, noteText ->
+                                    showApproveDialog = false
+                                    viewModel.approve(
+                                        permitId = permitId,
+                                        startDate = d1.ifBlank { null },
+                                        endDate = d2.ifBlank { null },
+                                        startTime = t1.ifBlank { null },
+                                        endTime = t2.ifBlank { null },
+                                        note = noteText.ifBlank { null }
+                                    )
+                                }
+                            )
+                        }
+
+                        // #135: dialog tolak — wajib alasan (dilihat santri di kiosk).
+                        if (showRejectDialog) {
+                            var reasonText by remember { mutableStateOf("") }
+                            AlertDialog(
+                                onDismissRequest = { showRejectDialog = false },
+                                title = { Text("Tolak Izin") },
+                                text = {
+                                    OutlinedTextField(
+                                        value = reasonText,
+                                        onValueChange = { reasonText = it },
+                                        label = { Text("Alasan penolakan (ditampilkan ke santri)") },
+                                        minLines = 2,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                },
+                                confirmButton = {
+                                    TextButton(
+                                        onClick = {
+                                            showRejectDialog = false
+                                            viewModel.reject(permitId, reasonText.ifBlank { null })
+                                        },
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error
+                                        )
+                                    ) {
+                                        Text("Tolak")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showRejectDialog = false }) {
+                                        Text("Batal")
+                                    }
+                                }
+                            )
                         }
                     }
 
@@ -269,4 +392,143 @@ fun PermitDetailScreen(
             }
         }
     }
+}
+
+/** #135: status verifikasi scan per anggota. */
+@Composable
+private fun MemberStatusRow(member: PermitMemberDto) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            val student = member.student
+            Text(
+                student?.name ?: "Santri ${member.studentId}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            if (student?.nim != null) {
+                Text(
+                    student.nim,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        val keluar = member.keluarVerifiedAt
+        val kembali = member.kembaliVerifiedAt
+        Column(horizontalAlignment = Alignment.End) {
+            if (keluar != null) {
+                Text(
+                    "Keluar ${formatShortTime(keluar)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFF8A65)
+                )
+            } else {
+                Text(
+                    "Belum keluar",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (kembali != null) {
+                Text(
+                    "Kembali ${formatShortTime(kembali)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF4CAF50)
+                )
+            }
+        }
+    }
+}
+
+private fun formatShortTime(iso: String): String {
+    return try {
+        val sdfIn = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US)
+        val sdfOut = SimpleDateFormat("dd MMM HH:mm", Locale.getDefault())
+        sdfOut.format(sdfIn.parse(iso) ?: Date())
+    } catch (_: Exception) {
+        iso
+    }
+}
+
+/** #135: dialog setujui dengan koreksi waktu (opsional) + note admin. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ApprovePermitDialog(
+    permit: com.facegate.core.data.remote.dto.PermitDto,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String, String, String, String) -> Unit
+) {
+    // #135: isi default dari tanggal izin (10 karakter pertama ISO = YYYY-MM-DD)
+    val defaultDate = permit.startDate.take(10)
+    var dateStart by remember { mutableStateOf(defaultDate) }
+    var dateEnd by remember { mutableStateOf(defaultDate) }
+    var timeStart by remember { mutableStateOf(permit.startTime ?: "") }
+    var timeEnd by remember { mutableStateOf(permit.endTime ?: "") }
+    var noteText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Setujui Izin") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Koreksi waktu jika diperlukan (kosongkan untuk memakai ajuan santri).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = dateStart,
+                        onValueChange = { dateStart = it },
+                        label = { Text("Mulai (YYYY-MM-DD)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = dateEnd,
+                        onValueChange = { dateEnd = it },
+                        label = { Text("Sampai (YYYY-MM-DD)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = timeStart,
+                        onValueChange = { timeStart = it },
+                        label = { Text("Jam mulai (HH:MM)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = timeEnd,
+                        onValueChange = { timeEnd = it },
+                        label = { Text("Jam selesai (HH:MM)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                OutlinedTextField(
+                    value = noteText,
+                    onValueChange = { noteText = it },
+                    label = { Text("Note/pesan ke santri (opsional)") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onConfirm(dateStart, dateEnd, timeStart, timeEnd, noteText)
+            }) {
+                Text("Setujui")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Batal")
+            }
+        }
+    )
 }

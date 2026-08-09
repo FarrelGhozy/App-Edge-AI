@@ -6,6 +6,7 @@ import com.facegate.core.data.local.SessionManager
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
+import com.facegate.core.data.local.dao.PermitDao
 import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiClient
@@ -116,6 +117,7 @@ abstract class KioskModule {
             faceVectorDao: FaceVectorDao,
             studentDao: StudentDao,
             campusRuleDao: CampusRuleDao,
+            permitDao: PermitDao,
             syncMetadata: SyncMetadata,
             @javax.inject.Named("video") faceMatcher: FaceMatcher
         ): SyncManager {
@@ -125,6 +127,7 @@ abstract class KioskModule {
                 faceVectorDao = faceVectorDao,
                 studentDao = studentDao,
                 campusRuleDao = campusRuleDao,
+                permitDao = permitDao,
                 syncMetadata = syncMetadata,
                 faceMatcher = faceMatcher
             )

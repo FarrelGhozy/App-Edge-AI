@@ -20,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,12 +45,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.facegate.kioskscanner.permit.PermitMemberPhase
+import com.facegate.kioskscanner.permit.VerifyTarget
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScannerScreen(
+    verifyTarget: VerifyTarget? = null,
+    onVerifyDone: () -> Unit = {},
     viewModel: ScannerViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -62,13 +67,23 @@ fun ScannerScreen(
     val isProcessing by viewModel.isProcessing.collectAsState()
     val imageSize by viewModel.imageSize.collectAsState()
 
+    val verificationMode = verifyTarget != null
+
+    // #135: aktivasi/stop mode verifikasi sesuai target yang diteruskan navigator.
+    LaunchedEffect(verifyTarget) {
+        if (verifyTarget != null) viewModel.startVerification(verifyTarget)
+        else viewModel.stopVerification()
+    }
+
     // Auto-dismiss after success/error so the kiosk returns to scan mode
     // without manual intervention (issue #69). 3s for success, 4s for error.
+    // #135: verifikasi sukses → kembali ke daftar izin via onVerifyDone.
     LaunchedEffect(state) {
         when (state) {
             is ScannerViewModel.UIState.Success -> {
                 delay(3000)
                 viewModel.resetState()
+                if (verificationMode) onVerifyDone()
             }
             is ScannerViewModel.UIState.Error -> {
                 delay(4000)
@@ -162,6 +177,60 @@ fun ScannerScreen(
                 }
             }
         } else {
+            // ─── CameraX Preview ───
+            // #135: banner verifikasi — siapa yang diverifikasi + tombol batal.
+            if (verificationMode && verifyTarget != null) {
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 60.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xCC1A1C23))
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Verifikasi ${when (verifyTarget.phase) {
+                                    PermitMemberPhase.KELUAR -> "KELUAR"
+                                    PermitMemberPhase.KEMBALI -> "KEMBALI"
+                                    PermitMemberPhase.SELESAI -> ""
+                                }} Izin",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                verifyTarget.studentName,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (verifyTarget.permitNote != null && verifyTarget.permitNote.isNotBlank()) {
+                                Text(
+                                    "Catatan: ${verifyTarget.permitNote}",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        TextButton(onClick = onVerifyDone) {
+                            Icon(
+                                imageVector = Icons.Filled.ArrowBack,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Batal", color = Color.White)
+                        }
+                    }
+                }
+            }
+
             // ─── CameraX Preview ───
             // #130: key(cameraRetry) memaksa AndroidView di-*recycle* saat
             // viewModel.retryCamera() dipanggil → factory jalan ulang & CameraX
@@ -374,11 +443,18 @@ fun ScannerScreen(
                             Spacer(Modifier.height(24.dp))
                             // Manual reset for gate operators (issue #69) — the
                             // overlay also auto-dismisses after 3s.
+                            // #135: verifikasi → langsung kembali ke daftar izin.
                             Button(
-                                onClick = { viewModel.resetState() },
+                                onClick = {
+                                    viewModel.resetState()
+                                    if (verificationMode) onVerifyDone()
+                                },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color.White)
                             ) {
-                                Text("Scan Berikutnya", color = Color(0xFF2E7D32))
+                                Text(
+                                    if (verificationMode) "Selesai" else "Scan Berikutnya",
+                                    color = Color(0xFF2E7D32)
+                                )
                             }
                         }
                     }

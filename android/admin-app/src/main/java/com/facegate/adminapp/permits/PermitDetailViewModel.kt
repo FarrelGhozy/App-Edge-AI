@@ -44,22 +44,41 @@ class PermitDetailViewModel @Inject constructor(
         }
     }
 
-    fun approve(permitId: String) {
+    /**
+     * #135: setujui izin — admin bisa mengoreksi tanggal/jam serta menulis
+     * note/pesan yang akan dilihat kiosk (field opsional, null = biarkan asli).
+     */
+    fun approve(
+        permitId: String,
+        startDate: String? = null,
+        endDate: String? = null,
+        startTime: String? = null,
+        endTime: String? = null,
+        note: String? = null
+    ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true)
             try {
-                val request = UpdatePermitStatusRequest(status = "approved")
+                val request = UpdatePermitStatusRequest(
+                    status = "approved",
+                    note = note,
+                    startDate = startDate,
+                    endDate = endDate,
+                    startTime = startTime,
+                    endTime = endTime
+                )
                 val response = apiService.updatePermitStatus(permitId, request)
                 if (response.isSuccessful) {
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
                         actionMessage = "Izin disetujui",
-                        permit = _uiState.value.permit?.copy(status = "approved")
+                        permit = _uiState.value.permit?.copy(status = "approved", note = note)
                     )
                 } else {
+                    val serverError = response.body()?.error
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
-                        error = "Gagal menyetujui"
+                        error = serverError ?: "Gagal menyetujui"
                     )
                 }
             } catch (e: Exception) {
@@ -71,22 +90,29 @@ class PermitDetailViewModel @Inject constructor(
         }
     }
 
-    fun reject(permitId: String) {
+    /** #135: tolak izin dengan alasan (rejectionReason ditampilkan di kiosk). */
+    fun reject(permitId: String, reason: String? = null) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isProcessing = true)
             try {
-                val request = UpdatePermitStatusRequest(status = "rejected")
+                val request = UpdatePermitStatusRequest(
+                    status = "rejected",
+                    rejectionReason = reason
+                )
                 val response = apiService.updatePermitStatus(permitId, request)
                 if (response.isSuccessful) {
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
                         actionMessage = "Izin ditolak",
-                        permit = _uiState.value.permit?.copy(status = "rejected")
+                        permit = _uiState.value.permit?.copy(
+                            status = "rejected",
+                            rejectionReason = reason
+                        )
                     )
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isProcessing = false,
-                        error = "Gagal menolak"
+                        error = response.body()?.error ?: "Gagal menolak"
                     )
                 }
             } catch (e: Exception) {

@@ -11,12 +11,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.dao.AttendanceLogDao
+import com.facegate.core.data.local.dao.PermitDao
 import com.facegate.core.data.local.entity.AttendanceLogEntity
+import com.facegate.core.data.local.entity.PermitVerificationEntity
 import com.facegate.core.engine.ToggleAction
 import com.facegate.core.face.*
 import com.facegate.core.sync.SyncManager
 import com.facegate.kioskscanner.matching.MatchEngineResult
 import com.facegate.kioskscanner.matching.VideoMatchEngine
+import com.facegate.kioskscanner.permit.PermitMemberPhase
+import com.facegate.kioskscanner.permit.VerifyTarget
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +55,8 @@ class ScannerViewModel @Inject constructor(
     private val devicePreferences: DevicePreferences,
     private val voiceFeedback: VoiceFeedback,
     private val syncManager: SyncManager,
-    private val faceVectorDao: com.facegate.core.data.local.dao.FaceVectorDao
+    private val faceVectorDao: com.facegate.core.data.local.dao.FaceVectorDao,
+    private val permitDao: PermitDao
 ) : ViewModel() {
 
     companion object {
@@ -93,6 +98,12 @@ class ScannerViewModel @Inject constructor(
     // error (mis. bindToLifecycle gagal) tanpa restart activity.
     private val _cameraRetry = MutableStateFlow(0)
     val cameraRetry: StateFlow<Int> = _cameraRetry.asStateFlow()
+
+    // #135: target verifikasi izin. Non-null = scanner berjalan mode verifikasi
+    // (scan harus cocok dgn orang ini; tanpa toggle/session/attendance log).
+    private val _verifyTarget = MutableStateFlow<VerifyTarget?>(null)
+    val verifyTarget: StateFlow<VerifyTarget?> = _verifyTarget.asStateFlow()
+    val isVerificationMode: Boolean get() = _verifyTarget.value != null
 
     // Face-steady timer: replace EAR blink (gak bisa dengan RetinaFace 5 landmark)
     private var faceSteadyStartTime: Long = 0L
@@ -292,61 +303,76 @@ class ScannerViewModel @Inject constructor(
     private fun processVideoFrames() {
         viewModelScope.launch {
             try {
-                val result = videoMatchEngine.processVideoCollection()
+                val target = _verifyTarget.value
+                val result = videoMatchEngine.processVideoCollection(verifyStudentId = target?.studentId)
 
                 withContext(Dispatchers.Main) {
                     when (result) {
                         is MatchEngineResult.Matched -> {
-                            val action = when (result.action) {
-                                ToggleAction.KELUAR -> "keluar"
-                                ToggleAction.KEMBALI -> "kembali"
-                            }
-                            val deviceId = devicePreferences.getDeviceId()
-                            val log = AttendanceLogEntity(
-                                studentId = result.studentId,
-                                studentName = result.studentName,
-                                action = action,
-                                timestamp = System.currentTimeMillis(),
-                                confidenceScore = result.confidence,
-                                isViolation = result.isViolation,
-                                violationType = if (result.isViolation) result.violationMessage else null,
-                                deviceId = deviceId,
-                                // #119: idempotency key unik per log offline —
-                                // retry sync tidak membuat duplikat di server.
-                                clientId = java.util.UUID.randomUUID().toString()
-                            )
-                            attendanceLogDao.insert(log)
-                            launch { syncManager.syncLogsOnly() }
-                            voiceFeedback.speakSuccess(result.studentName, action)
-                            if (result.isViolation) {
-                                result.violationMessage?.let { voiceFeedback.speakWarning(it) }
-                            }
-                            val label = when (action) {
-                                "keluar" -> "KELUAR ✅"
-                                "kembali" -> "KEMBALI ✅"
-                                else -> action
-                            }
-
-                            // Update overlay with success info
-                            _faceOverlay.value = _faceOverlay.value.copy(
-                                userName = result.studentName,
-                                actionLabel = label,
-                                qualityColor = Color(0xFF4CAF50)
-                            )
-
-                            _state.value = UIState.Success(
-                                studentName = result.studentName,
-                                actionLabel = label,
-                                isViolation = result.isViolation,
-                                message = result.violationMessage,
-                                decisionLabel = when (result.decision) {
-                                    com.facegate.core.face.MatchDecision.CONFIDENT -> "Terverifikasi ✅"
-                                    com.facegate.core.face.MatchDecision.MEDIUM -> "Cocok ⚠️"
-                                    com.facegate.core.face.MatchDecision.WEAK -> "Cocok lemah ❗"
-                                    else -> null
+                            if (target != null) {
+                                // #135: mode verifikasi izin — queue scan keluar/
+                                // kembali utk anggota izin, bukan attendance log.
+                                handleVerificationSuccess(target, result)
+                            } else {
+                                val action = when (result.action) {
+                                    ToggleAction.KELUAR -> "keluar"
+                                    ToggleAction.KEMBALI -> "kembali"
                                 }
+                                val deviceId = devicePreferences.getDeviceId()
+                                val log = AttendanceLogEntity(
+                                    studentId = result.studentId,
+                                    studentName = result.studentName,
+                                    action = action,
+                                    timestamp = System.currentTimeMillis(),
+                                    confidenceScore = result.confidence,
+                                    isViolation = result.isViolation,
+                                    violationType = if (result.isViolation) result.violationMessage else null,
+                                    deviceId = deviceId,
+                                    // #119: idempotency key unik per log offline —
+                                    // retry sync tidak membuat duplikat di server.
+                                    clientId = java.util.UUID.randomUUID().toString()
+                                )
+                                attendanceLogDao.insert(log)
+                                launch { syncManager.syncLogsOnly() }
+                                voiceFeedback.speakSuccess(result.studentName, action)
+                                if (result.isViolation) {
+                                    result.violationMessage?.let { voiceFeedback.speakWarning(it) }
+                                }
+                                val label = when (action) {
+                                    "keluar" -> "KELUAR ✅"
+                                    "kembali" -> "KEMBALI ✅"
+                                    else -> action
+                                }
+
+                                // Update overlay with success info
+                                _faceOverlay.value = _faceOverlay.value.copy(
+                                    userName = result.studentName,
+                                    actionLabel = label,
+                                    qualityColor = Color(0xFF4CAF50)
+                                )
+
+                                _state.value = UIState.Success(
+                                    studentName = result.studentName,
+                                    actionLabel = label,
+                                    isViolation = result.isViolation,
+                                    message = result.violationMessage,
+                                    decisionLabel = when (result.decision) {
+                                        com.facegate.core.face.MatchDecision.CONFIDENT -> "Terverifikasi ✅"
+                                        com.facegate.core.face.MatchDecision.MEDIUM -> "Cocok ⚠️"
+                                        com.facegate.core.face.MatchDecision.WEAK -> "Cocok lemah ❗"
+                                        else -> null
+                                    }
+                                )
+                                _statusMessage.value = ""
+                            }
+                        }
+                        is MatchEngineResult.WrongPerson -> {
+                            // #135: orang cocok BUKAN yang diverifikasi.
+                            voiceFeedback.speakError()
+                            _state.value = UIState.Error("Bukan ${target?.studentName ?: "dia"} — terdeteksi ${result.matchedName}")
+                            _faceOverlay.value = _faceOverlay.value.copy(
+                                qualityColor = Color(0xFFE53935)
                             )
-                            _statusMessage.value = ""
                         }
                         is MatchEngineResult.Unknown -> {
                             voiceFeedback.speakError()
@@ -382,6 +408,69 @@ class ScannerViewModel @Inject constructor(
                 _isProcessing.value = false
             }
         }
+    }
+
+    /**
+     * #135: Verifikasi izin sukses — simpan antrean ke Room (upload via sync)
+     * lalu tampilkan overlay sesuai fasa (KELUAR / KEMBALI).
+     */
+    private fun handleVerificationSuccess(target: VerifyTarget, result: MatchEngineResult.Matched) {
+        val phase = target.phase
+        val label = when (phase) {
+            PermitMemberPhase.KELUAR -> "KELUAR ✅"
+            PermitMemberPhase.KEMBALI -> "KEMBALI ✅"
+            PermitMemberPhase.SELESAI -> "SELESAI ✅"
+        }
+        val verb = when (phase) {
+            PermitMemberPhase.KELUAR -> "keluar"
+            PermitMemberPhase.KEMBALI -> "kembali"
+            PermitMemberPhase.SELESAI -> "selesai"
+        }
+
+        viewModelScope.launch {
+            val deviceId = devicePreferences.getDeviceId()
+            permitDao.insertVerification(
+                PermitVerificationEntity(
+                    permitId = target.permitId,
+                    studentId = target.studentId,
+                    studentName = target.studentName,
+                    confidenceScore = result.confidence,
+                    timestamp = System.currentTimeMillis(),
+                    clientId = java.util.UUID.randomUUID().toString(),
+                    deviceId = deviceId,
+                    isSynced = false
+                )
+            )
+            // Optimistic update — server konfirmasi saat sync upload.
+            val now = System.currentTimeMillis()
+            permitDao.updateVerification(
+                permitId = target.permitId,
+                studentId = target.studentId,
+                keluarAt = if (phase == PermitMemberPhase.KELUAR) now else null,
+                kembaliAt = if (phase == PermitMemberPhase.KEMBALI) now else null
+            )
+        }
+
+        voiceFeedback.speakSuccess(target.studentName, verb)
+
+        _faceOverlay.value = _faceOverlay.value.copy(
+            userName = target.studentName,
+            actionLabel = label,
+            qualityColor = Color(0xFF4CAF50)
+        )
+        _state.value = UIState.Success(
+            studentName = target.studentName,
+            actionLabel = label,
+            decisionLabel = result.decision?.let {
+                when (it) {
+                    com.facegate.core.face.MatchDecision.CONFIDENT -> "Terverifikasi ✅"
+                    com.facegate.core.face.MatchDecision.MEDIUM -> "Cocok ⚠️"
+                    com.facegate.core.face.MatchDecision.WEAK -> "Cocok lemah ❗"
+                    com.facegate.core.face.MatchDecision.NO_MATCH -> null
+                }
+            }
+        )
+        _statusMessage.value = ""
     }
 
     private fun updateOverlay(face: FaceBox, imgW: Int, imgH: Int, qualityOK: Boolean, centered: Boolean, time: Long) {
@@ -514,10 +603,23 @@ class ScannerViewModel @Inject constructor(
         _state.value = UIState.Error("Kamera gagal: $message")
     }
 
-    // #130: retry kamera — increment key re-init supaya AndroidView di
+// #130: retry kamera — increment key re-init supaya AndroidView di
     // ScannerScreen me-rebind CameraX (unbindAll + bindToLifecycle ulang).
     fun retryCamera() {
         _cameraRetry.value++
+        resetState()
+    }
+
+    /** #135: mulai mode verifikasi izin untuk target tertentu. */
+    fun startVerification(target: VerifyTarget) {
+        _verifyTarget.value = target
+        resetState()
+        _statusMessage.value = "Scan wajah ${target.studentName}"
+    }
+
+    /** #135: keluar dari mode verifikasi (kembali ke daftar izin). */
+    fun stopVerification() {
+        _verifyTarget.value = null
         resetState()
     }
 

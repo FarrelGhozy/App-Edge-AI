@@ -11,6 +11,7 @@ import com.facegate.core.data.local.SessionManager
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
+import com.facegate.core.data.local.dao.PermitDao
 import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.data.local.dao.SyncMetadata
 import com.facegate.core.data.remote.ApiClient
@@ -68,7 +69,7 @@ object CoreModule {
             context,
             AppDatabase::class.java,
             "facegate.db"
-        ).addMigrations(MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build()
+        ).addMigrations(MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6).build()
     }
 
     @Provides
@@ -82,6 +83,9 @@ object CoreModule {
 
     @Provides
     fun provideCampusRuleDao(db: AppDatabase): CampusRuleDao = db.campusRuleDao()
+
+    @Provides
+    fun providePermitDao(db: AppDatabase): PermitDao = db.permitDao()
 
     @Provides
     @Singleton

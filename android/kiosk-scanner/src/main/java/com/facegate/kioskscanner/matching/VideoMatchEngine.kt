@@ -179,9 +179,15 @@ class VideoMatchEngine @Inject constructor(
     /**
      * Process collected frames: embed, fuse, and match.
      *
+     * #135: mode verifikasi izin — saat `verifyStudentId` diisi, engine TIDAK
+     * menjalankan toggle/session/violation (tidak boleh mengubah state gerbang
+     * karena ini scan verifikasi izin, bukan scan gerbang). Hasilnya:
+     * - wajah == verifyStudentId → Matched (aksi = fasa verifikasi)
+     * - wajah != verifyStudentId → WrongPerson
+     *
      * Must be called on a background coroutine (Dispatchers.Default).
      */
-    suspend fun processVideoCollection(): MatchEngineResult = withContext(Dispatchers.Default) {
+    suspend fun processVideoCollection(verifyStudentId: String? = null): MatchEngineResult = withContext(Dispatchers.Default) {
         frameBuffer.stop()
         val frames = frameBuffer.getFrames()
         frameBuffer.clear()
@@ -250,6 +256,26 @@ class VideoMatchEngine @Inject constructor(
             val sid = matchResult.studentId
             if (!matchResult.isMatch || sid == null) {
                 return@withContext MatchEngineResult.Unknown(matchResult.confidence)
+            }
+
+            // #135: verifikasi izin → pastikan orang yang cocok == target.
+            if (verifyStudentId != null) {
+                if (sid != verifyStudentId) {
+                    val other = studentDao.getById(sid)
+                    Log.w(TAG, "Verification mismatch: matched ${other?.name ?: sid}, expected $verifyStudentId")
+                    return@withContext MatchEngineResult.WrongPerson(other?.name ?: "santri lain")
+                }
+                val expected = studentDao.getById(verifyStudentId)
+                    ?: return@withContext MatchEngineResult.Unknown(matchResult.confidence)
+                // Aksi placeholder — ScannerViewModel memakai VerifyTarget.phase.
+                Log.d(TAG, "Verification MATCH: ${expected.name} conf=${"%.3f".format(matchResult.confidence)}")
+                return@withContext MatchEngineResult.Matched(
+                    studentId = expected.id,
+                    studentName = expected.name,
+                    action = ToggleAction.KELUAR,
+                    confidence = matchResult.confidence,
+                    decision = matchResult.decision
+                )
             }
 
             // 4. Get student info

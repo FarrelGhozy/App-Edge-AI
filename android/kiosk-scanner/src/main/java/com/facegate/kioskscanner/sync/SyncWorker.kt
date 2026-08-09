@@ -8,13 +8,19 @@ import com.facegate.core.data.local.DevicePreferences
 import com.facegate.core.data.local.dao.AttendanceLogDao
 import com.facegate.core.data.local.dao.CampusRuleDao
 import com.facegate.core.data.local.dao.FaceVectorDao
+import com.facegate.core.data.local.dao.PermitDao
 import com.facegate.core.data.local.dao.StudentDao
 import com.facegate.core.data.local.dao.SyncMetadata
+import com.facegate.core.data.local.entity.PermitEntity
+import com.facegate.core.data.local.entity.PermitMemberEntity
 import com.facegate.core.data.local.entity.StudentEntity
 import com.facegate.core.data.remote.ApiService
 import com.facegate.core.data.remote.dto.AttendanceBatchRequest
+import com.facegate.core.data.remote.dto.CreateKioskPermitRequest
+import com.facegate.core.data.remote.dto.PermitVerificationBatchRequest
 import com.facegate.core.data.remote.dto.ScanRequest
 import com.facegate.core.data.remote.dto.SyncCompleteRequest
+import com.facegate.core.data.remote.dto.VerifyPermitScanRequest
 import com.facegate.core.face.FaceMatcher
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -30,6 +36,7 @@ class SyncWorker @AssistedInject constructor(
     private val faceVectorDao: FaceVectorDao,
     private val studentDao: StudentDao,
     private val campusRuleDao: CampusRuleDao,
+    private val permitDao: PermitDao,
     @Named("video") private val faceMatcher: FaceMatcher,
     private val syncMetadata: SyncMetadata,
     private val devicePreferences: DevicePreferences
@@ -95,18 +102,23 @@ class SyncWorker @AssistedInject constructor(
             // 1. Always upload unsynced attendance logs (lightweight)
             syncUnsyncedLogs()
 
+            // 1b. #135: unggah antrean izin offline (pengajuan + verifikasi)
+            syncPermitQueues()
+
             if (isFullSync) {
                 // Midnight full sync — always download regardless of flag
-                Log.d(TAG, "Midnight full sync — downloading faces + rules")
+                Log.d(TAG, "Midnight full sync — downloading faces + rules + permits")
                 syncFaces()
                 syncRules()
+                syncPermits()
             } else {
                 // Polling — check flag first (lightweight: boolean only)
                 val isRequested = checkSyncRequested()
                 if (isRequested) {
-                    Log.d(TAG, "Change detected — downloading faces + rules")
+                    Log.d(TAG, "Change detected — downloading faces + rules + permits")
                     syncFaces()
                     syncRules()
+                    syncPermits()
                     notifySyncComplete()
                 }
             }
@@ -291,6 +303,52 @@ class SyncWorker @AssistedInject constructor(
     }
 
     /**
+     * #135: download izin mandiri/kelompok + anggota (full-replace). Kiosk
+     * menampilkan daftar izin & status verifikasi dari data lokal ini.
+     */
+    private suspend fun syncPermits() {
+        try {
+            val response = apiService.syncPermits()
+            if (response.isSuccessful && response.body() != null) {
+                val permits = response.body()!!.data
+                permitDao.clearMembers()
+                permitDao.clearPermits()
+                val entities = permits.map { dto ->
+                    PermitEntity(
+                        id = dto.id,
+                        type = dto.type,
+                        startDate = dto.startDate.parseIso(),
+                        endDate = dto.endDate.parseIso(),
+                        startTime = dto.startTime,
+                        endTime = dto.endTime,
+                        status = dto.status,
+                        reason = dto.reason,
+                        note = dto.note,
+                        rejectionReason = dto.rejectionReason,
+                        createdAt = dto.createdAt?.parseIso() ?: System.currentTimeMillis()
+                    )
+                }
+                val members = permits.flatMap { dto ->
+                    dto.members.map { m ->
+                        PermitMemberEntity(
+                            permitId = dto.id,
+                            studentId = m.studentId,
+                            name = m.student?.name ?: "",
+                            nim = m.student?.nim ?: "",
+                            keluarVerifiedAt = m.keluarVerifiedAt?.parseIsoOrNull(),
+                            kembaliVerifiedAt = m.kembaliVerifiedAt?.parseIsoOrNull()
+                        )
+                    }
+                }
+                if (entities.isNotEmpty()) permitDao.insertAllPermits(entities)
+                if (members.isNotEmpty()) permitDao.insertAllMembers(members)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncPermits failed", e)
+        }
+    }
+
+    /**
      * #138: bersihkan data lokal (student + face vector) yang tidak ada lagi
      * di server. Delta sync tidak pernah menghapus — student yang dihapus di
      * server nyangkut di kiosk dan jadi "runner-up" dari wajah yang sama
@@ -341,6 +399,142 @@ class SyncWorker @AssistedInject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "Prune stale data failed: ${e.message}")
             return false
+        }
+    }
+
+    /**
+     * #135: upload antrean izin offline — pengajuan (create) & verifikasi scan.
+     * Dipanggil SETIAP doWork (ringan) supaya form tertunda terkirim saat
+     * internet kembali tanpa menunggu flag sync.
+     */
+    private suspend fun syncPermitQueues() {
+        syncPendingPermitRequests()
+        syncPendingVerifications()
+    }
+
+    private suspend fun syncPendingPermitRequests() {
+        val pending = permitDao.getUnsyncedRequests()
+        if (pending.isEmpty()) return
+        val syncedIds = mutableListOf<Long>()
+        for (req in pending) {
+            try {
+                val memberIds = req.memberIds.split(",").filter { it.isNotBlank() }
+                val response = apiService.createKioskPermit(
+                    CreateKioskPermitRequest(
+                        memberIds = memberIds,
+                        startDate = req.startDate,
+                        endDate = req.endDate,
+                        startTime = req.startTime,
+                        endTime = req.endTime,
+                        reason = req.reason,
+                        clientId = req.clientId
+                    )
+                )
+                if (response.isSuccessful && response.body() != null && response.body()!!.data != null) {
+                    // Simpan hasil server ke lokal supaya langsung tampil di
+                    // "Daftar Izin" tanpa menunggu sync berikutnya.
+                    val dto = response.body()!!.data!!
+                    insertLocalPermit(dto)
+                    syncedIds.add(req.id)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "createKioskPermit failed: ${e.message}")
+            }
+        }
+        if (syncedIds.isNotEmpty()) {
+            permitDao.markRequestsSynced(syncedIds)
+            permitDao.deleteRequests(syncedIds)
+        }
+    }
+
+    /** Simpan hasil create dari server ke tabel lokal (permit + members). */
+    private suspend fun insertLocalPermit(dto: com.facegate.core.data.remote.dto.PermitDto) {
+        try {
+            val entity = PermitEntity(
+                id = dto.id,
+                type = dto.type,
+                startDate = dto.startDate.parseIso(),
+                endDate = dto.endDate.parseIso(),
+                startTime = dto.startTime,
+                endTime = dto.endTime,
+                status = dto.status,
+                reason = dto.reason,
+                note = dto.note,
+                rejectionReason = dto.rejectionReason,
+                createdAt = dto.createdAt?.parseIso() ?: System.currentTimeMillis()
+            )
+            val members = dto.members.map { m ->
+                PermitMemberEntity(
+                    permitId = dto.id,
+                    studentId = m.studentId,
+                    name = m.student?.name ?: "",
+                    nim = m.student?.nim ?: "",
+                    keluarVerifiedAt = m.keluarVerifiedAt?.parseIsoOrNull(),
+                    kembaliVerifiedAt = m.kembaliVerifiedAt?.parseIsoOrNull()
+                )
+            }
+            permitDao.insertAllPermits(listOf(entity))
+            if (members.isNotEmpty()) permitDao.insertAllMembers(members)
+        } catch (e: Exception) {
+            Log.w(TAG, "insertLocalPermit failed: ${e.message}")
+        }
+    }
+
+    private suspend fun syncPendingVerifications() {
+        val pending = permitDao.getUnsyncedVerifications()
+        if (pending.isEmpty()) return
+
+        val batch = PermitVerificationBatchRequest(
+            logs = pending.map { v ->
+                VerifyPermitScanRequest(
+                    studentId = v.studentId,
+                    confidenceScore = v.confidenceScore,
+                    deviceId = v.deviceId,
+                    timestamp = v.timestamp,
+                    clientId = v.clientId
+                )
+            }
+        )
+        try {
+            val response = apiService.syncPermitVerifications(batch)
+            if (response.isSuccessful && response.body() != null) {
+                val skipped = response.body()!!.data?.skippedLogs.orEmpty()
+                val doneIds = skipped
+                    .filter { it.reason == "ALREADY_VERIFIED" }
+                    .map { Pair(it.permitId, it.studentId) }
+                    .toSet()
+                val syncedIds = pending
+                    .filter { v ->
+                        Pair(v.permitId, v.studentId) in doneIds ||
+                            skipped.none { it.permitId == v.permitId && it.studentId == v.studentId }
+                    }
+                    .map { it.id }
+                if (syncedIds.isNotEmpty()) {
+                    permitDao.markVerificationsSynced(syncedIds)
+                    permitDao.deleteVerifications(syncedIds)
+                }
+                Log.d(TAG, "Permit verifications uploaded: ${pending.size} (${syncedIds.size} synced, ${skipped.size} skipped)")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncPendingVerifications failed", e)
+        }
+    }
+
+    private fun String.parseIso(): Long {
+        return parseIsoOrNull() ?: System.currentTimeMillis()
+    }
+
+    private fun String.parseIsoOrNull(): Long? {
+        return try {
+            java.time.Instant.parse(this).toEpochMilli()
+        } catch (_: Exception) {
+            try {
+                java.time.LocalDateTime.parse(this)
+                    .atZone(java.time.ZoneId.of("Asia/Jakarta"))
+                    .toInstant().toEpochMilli()
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 

@@ -23,6 +23,7 @@ model Student {
   faceVectors   FaceVector[]
   attendanceLogs AttendanceLog[]
   permits       Permit[]
+  permitMembers PermitMember[]
   violations    Violation[]
   courseSchedules CourseSchedule[]
   permitQuotas  PermitQuota[]
@@ -70,6 +71,8 @@ model AttendanceLog {
   violationType   String?  @map("violation_type")
   deviceId        String?  @map("device_id")
   photoCapture    String?  @map("photo_capture")
+  permitId        String?  @map("permit_id")
+  permitMemberId  String?  @map("permit_member_id")
   clientId        String?  @map("client_id")
   isSynced        Boolean  @default(true) @map("is_synced")
   createdAt       DateTime @default(now()) @map("created_at")
@@ -79,6 +82,7 @@ model AttendanceLog {
   @@index([studentId])
   @@index([timestamp])
   @@index([action])
+  @@index([permitId])
   @@unique([deviceId, clientId])
   @@map("attendance_logs")
 }
@@ -93,6 +97,8 @@ model Permit {
   endTime         String?   @map("end_time")
   status          String    @default("pending")
   reason          String?
+  note            String?
+  rejectionReason String?   @map("rejection_reason")
   attachmentUrl   String?   @map("attachment_url")
   approvedById    String?   @map("approved_by_id")
   approvedAt      DateTime? @map("approved_at")
@@ -101,11 +107,27 @@ model Permit {
 
   student         Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   approvedBy      Admin?    @relation(fields: [approvedById], references: [id])
+  members         PermitMember[]
 
   @@index([studentId])
   @@index([status])
   @@index([type])
   @@map("permits")
+}
+
+model PermitMember {
+  id                String    @id @default(uuid())
+  permitId          String    @map("permit_id")
+  studentId         String    @map("student_id")
+  keluarVerifiedAt  DateTime? @map("keluar_verified_at")
+  kembaliVerifiedAt DateTime? @map("kembali_verified_at")
+
+  permit            Permit    @relation(fields: [permitId], references: [id], onDelete: Cascade)
+  student           Student   @relation(fields: [studentId], references: [id])
+
+  @@unique([permitId, studentId])
+  @@index([studentId])
+  @@map("permit_members")
 }
 
 model PermitQuota {

@@ -84,7 +84,12 @@ fun PendingApprovalScreen(
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            if (permit.type == "izin_harian") "Izin Harian" else "Pengajuan Izin",
+                                            when (permit.type) {
+                                                "izin_kelompok" -> "Izin Kelompok"
+                                                "izin_mandiri" -> "Izin Mandiri"
+                                                "izin_harian" -> "Izin Harian"
+                                                else -> "Pengajuan Izin"
+                                            },
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )

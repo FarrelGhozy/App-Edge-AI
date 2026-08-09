@@ -49,7 +49,10 @@ data class SyncBatchData(
 data class SkippedLog(
     @SerialName("studentId")
     val studentId: String,
-    val reason: String? = null
+    val reason: String? = null,
+    // #135: dipakai response sync permitt-verifications (skip per izin+anggota).
+    @SerialName("permitId")
+    val permitId: String? = null
 )
 
 @Serializable

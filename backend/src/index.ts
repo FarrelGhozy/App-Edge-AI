@@ -9,6 +9,7 @@ import { syncRoutes } from "./routes/sync";
 import { ruleRoutes } from "./routes/rules";
 import { deviceRoutes } from "./routes/devices";
 import { permitRoutes } from "./routes/permits";
+import { kioskRoutes } from "./routes/kiosk";
 import { violationRoutes } from "./routes/violations";
 import { notificationRoutes } from "./routes/notifications";
 import { eventsRoutes } from "./routes/events";
@@ -55,6 +56,7 @@ const app = new Elysia()
   .use(ruleRoutes)
   .use(deviceRoutes)
   .use(permitRoutes)
+  .use(kioskRoutes)
   .use(violationRoutes)
   .use(notificationRoutes)
   .use(eventsRoutes)

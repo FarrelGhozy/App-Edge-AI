@@ -4,6 +4,7 @@ import prisma from "../services/prisma";
 import { authGuard } from "../guards/auth";
 import { notifyDevicesChange } from "../services/events";
 import { computeFacesWatermark } from "../services/syncWatermark";
+import { verifyPermitScan } from "../services/permit";
 
 export const syncRoutes = new Elysia()
   .use(authGuard())
@@ -101,6 +102,52 @@ export const syncRoutes = new Elysia()
   .get("/api/sync/rules", async () => {
     const rules = await prisma.campusRule.findMany();
     return rules;
+  })
+  .get("/api/sync/permits", async () => {
+    // #135: full-replace — kiosk men-download semua izin mandiri/kelompok
+    // (pending/approved/rejected, 7 hari terakhir) + anggota + student info.
+    const permits = await prisma.permit.findMany({
+      where: {
+        type: { in: ["izin_mandiri", "izin_kelompok"] },
+        status: { in: ["pending", "approved", "rejected"] },
+        endDate: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        members: { include: { student: { select: { id: true, name: true, nim: true } } } }
+      }
+    });
+    return { data: permits };
+  })
+  .post("/api/sync/permits-verifications", async ({ body }) => {
+    // #135: batch upload verifikasi izin offline (sama pola dgn sync attendance).
+    const logs = (body as { logs: Array<{
+      permitId: string;
+      studentId: string;
+      confidenceScore?: number;
+      deviceId?: string;
+      timestamp?: number;
+      clientId?: string;
+    }> }).logs;
+    const created = [];
+    const skipped = [];
+    for (const log of logs) {
+      try {
+        const result = await verifyPermitScan(log);
+        created.push({ studentId: log.studentId, permitId: log.permitId, action: result.log.action, idempotent: !!result.idempotent });
+      } catch (e) {
+        skipped.push({
+          permitId: log.permitId,
+          studentId: log.studentId,
+          reason: e instanceof Error ? e.message : "UNKNOWN"
+        });
+      }
+    }
+    return {
+      success: true,
+      data: { synced: created.length, skipped: skipped.length, skippedLogs: skipped }
+    };
   })
   .get("/api/sync/requested", async ({ query }) => {
     const deviceId = query.deviceId as string | undefined;

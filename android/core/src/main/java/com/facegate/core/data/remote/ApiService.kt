@@ -137,6 +137,30 @@ interface ApiService {
         @Query("studentId") studentId: String
     ): Response<ApiResponse<PermitQuotaResponse>>
 
+    // =========== KIOSK PERMITS (#135: izin mandiri & kelompok) ===========
+    @POST("api/kiosk/permits")
+    suspend fun createKioskPermit(@Body request: CreateKioskPermitRequest): Response<ApiResponse<PermitDto>>
+
+    @GET("api/kiosk/permits")
+    suspend fun getKioskPermits(
+        @Query("page") page: Int = 1,
+        @Query("pageSize") pageSize: Int = 50
+    ): Response<KioskPermitListResponse>
+
+    @POST("api/kiosk/permits/{permitId}/verify")
+    suspend fun verifyPermitScan(
+        @Path("permitId") permitId: String,
+        @Body request: VerifyPermitScanRequest
+    ): Response<ApiResponse<PermitVerifiedData>>
+
+    @POST("api/sync/permits-verifications")
+    suspend fun syncPermitVerifications(
+        @Body request: PermitVerificationBatchRequest
+    ): Response<SyncBatchResponse>
+
+    @GET("api/sync/permits")
+    suspend fun syncPermits(): Response<SyncPermitsResponse>
+
     // =========== VIOLATIONS ===========
     @GET("api/violations")
     suspend fun getViolations(

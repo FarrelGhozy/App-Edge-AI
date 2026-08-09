@@ -21,4 +21,10 @@ sealed class MatchEngineResult {
     data object LivenessFailed : MatchEngineResult()
     data object NoFace : MatchEngineResult()
     data class QualityFailed(val reason: String) : MatchEngineResult()
+
+    /**
+     * #135: Mode verifikasi izin — wajah dikenali tapi BUKAN orang yang sedang
+     * diverifikasi. Scanner harus menampilkan pesan yang jelas ("ini bukan X").
+     */
+    data class WrongPerson(val matchedName: String) : MatchEngineResult()
 }
