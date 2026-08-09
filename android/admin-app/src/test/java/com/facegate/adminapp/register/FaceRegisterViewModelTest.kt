@@ -137,4 +137,23 @@ class FaceRegisterViewModelTest {
         assertTrue(state.selectedFrames.isEmpty())
         assertEquals(0f, state.recordingProgress)
     }
+
+    @Test
+    fun `capture mode set resets studentId and clears captured vectors on reset`() {
+        viewModel.setStudentId("test-123")
+        viewModel.setCaptureMode(true)
+        // reset() dalam capture mode harus membersihkan capturedVectors
+        viewModel.reset()
+        val state = viewModel.state.value
+        assertEquals(FaceRegisterStep.DETECTING, state.step)
+        assertNull(viewModel.capturedVectors.value)
+    }
+
+    @Test
+    fun `capture mode should never call uploadFaces api`() {
+        viewModel.setCaptureMode(true)
+        viewModel.reset()
+        coVerify(exactly = 0) { apiService.uploadFaces(any(), any()) }
+        coVerify(exactly = 0) { apiService.uploadFace(any(), any()) }
+    }
 }

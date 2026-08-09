@@ -12,8 +12,11 @@ import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FaceRetouchingNatural
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,6 +34,8 @@ fun StudentFormScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val isEdit = studentId != null
+    val capturedFaces by viewModel.capturedFaces.collectAsState()
+    val capturedCount = capturedFaces?.size ?: 0
 
     LaunchedEffect(studentId) {
         if (studentId != null) viewModel.loadStudent(studentId)
@@ -180,6 +185,77 @@ fun StudentFormScreen(
                 }
             }
 
+            // ── Section: Rekam Muka (opsional, hanya mode Tambah) ──
+            if (!isEdit) {
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (capturedFaces != null) Icons.Default.CheckCircle
+                                else Icons.Default.FaceRetouchingNatural,
+                                null,
+                                tint = if (capturedFaces != null)
+                                    MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Rekam Muka (opsional)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (capturedCount > 0)
+                                "$capturedCount frame wajah terrekam"
+                            else
+                                "Rekam wajah mahasiswa sekarang. Vektor wajah akan diunggah otomatis setelah mahasiswa tersimpan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                navController.navigate(Screen.StudentFaceCapture.route)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = if (capturedFaces != null) {
+                                ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                ButtonDefaults.buttonColors()
+                            }
+                        ) {
+                            Text(
+                                if (capturedFaces != null) "Rekam Ulang" else "Mulai Rekam Muka"
+                            )
+                        }
+                        if (capturedFaces != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(
+                                onClick = { viewModel.clearCapturedFaces() },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("Batalkan Rekaman", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // ── Error ──
@@ -195,6 +271,24 @@ fun StudentFormScreen(
                         text = state.error!!,
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (state.faceUploadWarning != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
+                ) {
+                    Text(
+                        text = state.faceUploadWarning!!,
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -222,7 +316,11 @@ fun StudentFormScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        if (isEdit) "Simpan Perubahan" else "Tambah Mahasiswa",
+                        when {
+                            state.isUploadingFace -> "Mengunggah Wajah..."
+                            isEdit -> "Simpan Perubahan"
+                            else -> "Tambah Mahasiswa"
+                        },
                         style = MaterialTheme.typography.labelLarge
                     )
                 }

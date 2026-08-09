@@ -56,12 +56,13 @@ import java.util.concurrent.Executors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FaceRegisterScreen(
-    studentId: String,
+    studentId: String?,
     navController: NavController,
     viewModel: FaceRegisterViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
+    val captureMode = studentId == null
 
     val cameraPermissionGranted = remember {
         mutableStateOf(
@@ -77,6 +78,7 @@ fun FaceRegisterScreen(
     }
 
     LaunchedEffect(Unit) {
+        if (captureMode) viewModel.setCaptureMode(true)
         if (!cameraPermissionGranted.value) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
@@ -85,15 +87,25 @@ fun FaceRegisterScreen(
     LaunchedEffect(state.isSuccess) {
         if (state.isSuccess) {
             kotlinx.coroutines.delay(2000)
-            navController.previousBackStackEntry?.savedStateHandle?.set("faceRegistered", true)
-            navController.popBackStack()
+            if (captureMode) {
+                navController.previousBackStackEntry?.savedStateHandle?.set(
+                    "capturedFaceVectors",
+                    viewModel.capturedVectors.value
+                )
+                navController.popBackStack()
+            } else {
+                navController.previousBackStackEntry?.savedStateHandle?.set("faceRegistered", true)
+                navController.popBackStack()
+            }
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Registrasi Wajah") },
+                title = {
+                    Text(if (captureMode) "Rekam Muka" else "Registrasi Wajah")
+                },
                 navigationIcon = {
                     IconButton(onClick = {
                         viewModel.reset()
@@ -211,7 +223,7 @@ fun FaceRegisterScreen(
                             )
                         ) {
                             Text(
-                                "Simpan Sebagai Patokan Muka",
+                                "Simpan Muka",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold
                             )

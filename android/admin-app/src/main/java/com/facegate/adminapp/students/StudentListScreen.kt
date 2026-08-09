@@ -55,7 +55,7 @@ fun StudentListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { navController.navigate(Screen.StudentForm.createRoute("new")) },
+                onClick = { navController.navigate(Screen.StudentForm.createRoute()) },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
                 Icon(Icons.Default.Add, "Tambah Santri")

@@ -107,6 +107,14 @@ class FaceRegisterViewModel @Inject constructor(
     private val _previewBitmap = MutableStateFlow<Bitmap?>(null)
     val previewBitmap: StateFlow<Bitmap?> = _previewBitmap.asStateFlow()
 
+    // Capture-only mode (dipakai dari form Tambah Mahasiswa):
+    // rekam wajah TANPA upload — vektor disimpan di capturedVectors, diserahkan
+    // ke pemanggil (StudentFormViewModel) via SavedStateHandle.
+    private var captureMode: Boolean = false
+
+    private val _capturedVectors = MutableStateFlow<List<PoseVectorEntry>?>(null)
+    val capturedVectors: StateFlow<List<PoseVectorEntry>?> = _capturedVectors.asStateFlow()
+
     // Buffer frame selama 10 detik
     private val frameBuffer = mutableListOf<CapturedFrameData>()
     private var isProcessing = false
@@ -122,6 +130,11 @@ class FaceRegisterViewModel @Inject constructor(
 
     fun setStudentId(id: String) {
         studentId = id
+    }
+
+    fun setCaptureMode(enabled: Boolean) {
+        captureMode = enabled
+        studentId = ""
     }
 
     fun onFrameCaptured(imageProxy: ImageProxy, studentIdParam: String?) {
@@ -384,6 +397,19 @@ class FaceRegisterViewModel @Inject constructor(
                     return@launch
                 }
 
+                // Capture-only mode (dari form tambah mahasiswa): vektor disimpan,
+                // upload dilakukan pemanggil setelah student dibuat di server.
+                if (captureMode) {
+                    recycleBuffer()
+                    _capturedVectors.value = vectors
+                    _state.value = _state.value.copy(
+                        step = FaceRegisterStep.SUCCESS,
+                        message = "Rekam wajah berhasil! (${vectors.size} frame)",
+                        isSuccess = true
+                    )
+                    return@launch
+                }
+
                 _state.value = _state.value.copy(
                     step = FaceRegisterStep.UPLOADING,
                     message = "Mengunggah data wajah..."
@@ -436,6 +462,7 @@ class FaceRegisterViewModel @Inject constructor(
         isProcessing = false
         recordingStartTime = 0L
         lastCaptureTime = 0L
+        _capturedVectors.value = null
         _state.value = FaceRegisterState(
             framesRequired = MIN_FRAMES,
             framesMax = MAX_FRAMES
