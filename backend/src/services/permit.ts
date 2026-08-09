@@ -22,7 +22,14 @@ export async function createPermit(data: {
 }
 
 export async function getPermit(id: string) {
-  return prisma.permit.findUnique({ where: { id } });
+  // #135: sertakan anggota + nama/NIM (detail admin butuh status verifikasi member).
+  return prisma.permit.findUnique({
+    where: { id },
+    include: {
+      student: { select: { id: true, name: true, nim: true } },
+      members: { include: { student: { select: { id: true, name: true, nim: true } } } }
+    }
+  });
 }
 
 export async function updatePermitStatus(id: string, status: string) {
@@ -121,8 +128,21 @@ export async function createGroupPermit(data: {
   startTime?: string;
   endTime?: string;
   reason?: string;
+  clientId?: string;
 }) {
   if (!data.memberIds || data.memberIds.length === 0) throw new Error("NO_MEMBERS");
+
+  // #135: idempotency — retry offline (sync worker) dgn clientId yang sama
+  // TIDAK boleh membuat izin duplikat. Kembalikan izin yang sudah dibuat.
+  if (data.clientId) {
+    const existing = await prisma.permit.findUnique({
+      where: { kioskClientId: data.clientId },
+      include: {
+        members: { include: { student: { select: { name: true, nim: true } } } }
+      }
+    });
+    if (existing) return existing;
+  }
 
   const students = await prisma.student.findMany({
     where: { id: { in: data.memberIds }, isActive: true }
@@ -142,12 +162,17 @@ export async function createGroupPermit(data: {
       startTime: data.startTime || null,
       endTime: data.endTime || null,
       reason: data.reason || null,
+      kioskClientId: data.clientId || null,
       status: "pending",
       members: {
         create: students.map((s) => ({ studentId: s.id }))
       }
     },
-    include: { members: true }
+    include: {
+      members: {
+        include: { student: { select: { name: true, nim: true } } }
+      }
+    }
   });
 
   await prisma.notification.create({

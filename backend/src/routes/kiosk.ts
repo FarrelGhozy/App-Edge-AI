@@ -15,7 +15,8 @@ const kioskCreatePermitSchema = t.Object({
   endDate: t.String(),
   startTime: t.Optional(t.String()),
   endTime: t.Optional(t.String()),
-  reason: t.Optional(t.String())
+  reason: t.Optional(t.String()),
+  clientId: t.Optional(t.String())
 });
 
 const verifySchema = t.Object({
@@ -36,6 +37,7 @@ export const kioskRoutes = new Elysia()
       startTime?: string;
       endTime?: string;
       reason?: string;
+      clientId?: string;
     };
     try {
       const permit = await createGroupPermit(data);

@@ -102,6 +102,7 @@ model Permit {
   attachmentUrl   String?   @map("attachment_url")
   approvedById    String?   @map("approved_by_id")
   approvedAt      DateTime? @map("approved_at")
+  kioskClientId   String?   @unique @map("kiosk_client_id")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
